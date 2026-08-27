@@ -3,7 +3,8 @@ import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft, Play, Download, Bookmark, BookmarkCheck,
-  ChevronDown, ChevronUp, Film, X, Loader2, Check, Sparkles, Zap
+  ChevronDown, ChevronUp, Film, Check, Clock,
+  Calendar, Layers, Tag, Tv, Globe, Sparkles
 } from 'lucide-react';
 import { getDetails, getServers, resolveStream } from '@/services/animeService';
 import { addFavorite, removeFavorite, isFavorite as checkFavorite } from '@/services/storageService';
@@ -23,6 +24,7 @@ export function DetailsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isFavorite, setIsFavorite] = useState(false);
   const [showAllEps, setShowAllEps] = useState(false);
+  const [epSearch, setEpSearch] = useState('');
   const [loadingEpisode, setLoadingEpisode] = useState<number | null>(null);
 
   // Modal de selección de servidor para descarga
@@ -37,6 +39,7 @@ export function DetailsPage() {
 
   useEffect(() => {
     const load = async () => {
+      setIsLoading(true);
       try {
         const [det, fav] = await Promise.all([
           getDetails(decodedUrl, source),
@@ -143,16 +146,26 @@ export function DetailsPage() {
     }
   };
 
+  const handleGenreClick = (genreName: string) => {
+    navigate(`/search?genre=${encodeURIComponent(genreName.toLowerCase())}&source=${source}`);
+  };
+
+  // Filtrado de episodios
+  const allEps = details?.episodes ?? [];
+  const filteredEps = epSearch.trim()
+    ? allEps.filter(ep => ep.number.toString().includes(epSearch.trim()) || (ep.title && ep.title.toLowerCase().includes(epSearch.toLowerCase())))
+    : allEps;
+
   const visibleEps = showAllEps
-    ? details?.episodes ?? []
-    : (details?.episodes ?? []).slice(-24).reverse();
+    ? filteredEps
+    : filteredEps.slice(0, 36);
 
   if (isLoading) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '80vh' }}>
         <div style={{
-          width: 40, height: 40, borderRadius: '50%',
-          border: '3px solid var(--border-moderate)',
+          width: 48, height: 48, borderRadius: '50%',
+          border: '3px solid var(--border-subtle)',
           borderTopColor: 'var(--accent-primary)',
           animation: 'spin-slow 0.8s linear infinite',
         }} />
@@ -163,13 +176,23 @@ export function DetailsPage() {
   if (!details) {
     return (
       <div style={{ textAlign: 'center', padding: 48 }}>
-        <p style={{ color: 'var(--text-muted)' }}>No se pudo cargar el anime.</p>
+        <p style={{ color: 'var(--text-muted)', fontSize: 16 }}>No se pudo cargar la información de este anime.</p>
+        <button
+          onClick={() => navigate(-1)}
+          style={{
+            marginTop: 16, padding: '8px 18px', background: 'var(--bg-surface)',
+            border: '1px solid var(--border-moderate)', borderRadius: 'var(--radius-md)',
+            color: 'var(--text-primary)', cursor: 'pointer',
+          }}
+        >
+          Volver atrás
+        </button>
       </div>
     );
   }
 
   return (
-    <div style={{ paddingBottom: 40 }}>
+    <div style={{ paddingBottom: 60, minHeight: '100%' }}>
       {/* Toast de descarga iniciada */}
       <AnimatePresence>
         {downloadSuccessToast && (
@@ -190,215 +213,454 @@ export function DetailsPage() {
         )}
       </AnimatePresence>
 
-      {/* Hero Banner */}
-      <div style={{ position: 'relative', height: 320, overflow: 'hidden' }}>
+      {/* Hero Banner con Blur */}
+      <div style={{ position: 'relative', height: 340, overflow: 'hidden' }}>
         {details.thumbnailUrl && (
           <img
             src={details.thumbnailUrl}
             alt={details.title}
-            style={{ width: '100%', height: '100%', objectFit: 'cover', filter: 'blur(20px) brightness(0.4)', transform: 'scale(1.1)' }}
+            style={{ width: '100%', height: '100%', objectFit: 'cover', filter: 'blur(28px) brightness(0.35)', transform: 'scale(1.15)' }}
           />
         )}
         <div style={{
           position: 'absolute', inset: 0,
-          background: 'linear-gradient(to bottom, transparent 30%, var(--bg-base) 100%)',
+          background: 'linear-gradient(to bottom, transparent 20%, var(--bg-base) 100%)',
         }} />
 
         {/* Back button */}
         <button
           onClick={() => navigate(-1)}
           style={{
-            position: 'absolute', top: 16, left: 16,
-            background: 'rgba(10,11,15,0.7)', border: '1px solid var(--border-subtle)',
+            position: 'absolute', top: 20, left: 24,
+            background: 'rgba(10,11,15,0.75)', border: '1px solid var(--border-subtle)',
             borderRadius: 'var(--radius-full)', padding: '8px 16px',
             color: 'var(--text-primary)', cursor: 'pointer',
-            display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 500,
-            backdropFilter: 'blur(12px)',
+            display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 600,
+            backdropFilter: 'blur(12px)', zIndex: 10,
           }}
         >
           <ArrowLeft size={16} /> Volver
         </button>
 
-        {/* Poster + Info superpuesto */}
+        {/* Poster + Título y Badges */}
         <div style={{
-          position: 'absolute', bottom: -40, left: 24, right: 24,
-          display: 'flex', gap: 20, alignItems: 'flex-end',
+          position: 'absolute', bottom: 10, left: 28, right: 28,
+          display: 'flex', gap: 24, alignItems: 'flex-end',
         }}>
+          {/* Poster */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             style={{
-              width: 120, height: 170, borderRadius: 'var(--radius-md)',
+              width: 140, height: 200, borderRadius: 'var(--radius-lg)',
               overflow: 'hidden', flexShrink: 0,
               border: '2px solid var(--border-moderate)',
-              boxShadow: 'var(--shadow-lg)',
+              boxShadow: '0 12px 32px rgba(0,0,0,0.5)',
+              background: 'var(--bg-elevated)',
             }}
           >
             {details.thumbnailUrl
               ? <img src={details.thumbnailUrl} alt={details.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-              : <div style={{ width: '100%', height: '100%', background: 'var(--bg-elevated)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}><Film size={36} /></div>
+              : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}><Film size={36} /></div>
             }
           </motion.div>
 
+          {/* Info Principal */}
           <motion.div
             initial={{ opacity: 0, x: -10 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: 0.1 }}
-            style={{ flex: 1, minWidth: 0, paddingBottom: 8 }}
+            style={{ flex: 1, minWidth: 0, paddingBottom: 6 }}
           >
-            <h1 style={{ fontSize: 22, fontWeight: 800, letterSpacing: '-0.02em', color: 'white', lineHeight: 1.2, marginBottom: 8 }}>
+            {/* Badges de Tipo y Estado */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8, alignItems: 'center' }}>
+              {details.animeType && (
+                <span style={{
+                  background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))',
+                  color: 'white', fontSize: 11, fontWeight: 700,
+                  padding: '3px 10px', borderRadius: 'var(--radius-full)',
+                }}>
+                  {details.animeType}
+                </span>
+              )}
+              {details.status && (
+                <span style={{
+                  background: details.status.toLowerCase().includes('concluido') || details.status.toLowerCase().includes('finaliz')
+                    ? 'rgba(147, 51, 234, 0.25)'
+                    : 'rgba(16, 185, 129, 0.25)',
+                  color: details.status.toLowerCase().includes('concluido') || details.status.toLowerCase().includes('finaliz')
+                    ? '#c084fc'
+                    : '#34d399',
+                  border: `1px solid ${details.status.toLowerCase().includes('concluido') || details.status.toLowerCase().includes('finaliz') ? 'rgba(147, 51, 234, 0.4)' : 'rgba(16, 185, 129, 0.4)'}`,
+                  fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 'var(--radius-full)',
+                }}>
+                  ● {details.status}
+                </span>
+              )}
+              <span style={{
+                background: 'var(--bg-surface-2)', border: '1px solid var(--border-subtle)',
+                color: 'var(--text-muted)', fontSize: 11, fontWeight: 600,
+                padding: '3px 9px', borderRadius: 'var(--radius-full)',
+              }}>
+                {details.source === 'jkanime' ? 'JKAnime' : 'MundoDonghua'}
+              </span>
+            </div>
+
+            {/* Título */}
+            <h1 style={{
+              fontSize: 26, fontWeight: 800, letterSpacing: '-0.02em',
+              color: 'white', lineHeight: 1.25, marginBottom: 12,
+              textShadow: '0 2px 10px rgba(0,0,0,0.6)',
+            }}>
               {details.title}
             </h1>
+
+            {/* Chips de Géneros Dinámicos (Clickables) */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
               {details.genres.map(g => (
-                <span key={g} style={{
-                  background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
-                  borderRadius: 'var(--radius-full)', padding: '2px 8px',
-                  fontSize: 11, color: 'var(--text-secondary)',
-                }}>
-                  {g}
-                </span>
+                <button
+                  key={g}
+                  onClick={() => handleGenreClick(g)}
+                  title={`Filtrar animes por género: ${g}`}
+                  style={{
+                    background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border-subtle)',
+                    borderRadius: 'var(--radius-full)', padding: '3px 10px',
+                    fontSize: 11, fontWeight: 500, color: 'var(--text-secondary)',
+                    cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
+                    transition: 'all 0.15s ease',
+                  }}
+                  onMouseEnter={e => {
+                    e.currentTarget.style.borderColor = 'var(--accent-primary)';
+                    e.currentTarget.style.color = 'var(--text-primary)';
+                  }}
+                  onMouseLeave={e => {
+                    e.currentTarget.style.borderColor = 'var(--border-subtle)';
+                    e.currentTarget.style.color = 'var(--text-secondary)';
+                  }}
+                >
+                  <Tag size={10} style={{ opacity: 0.7 }} /> {g}
+                </button>
               ))}
             </div>
           </motion.div>
         </div>
       </div>
 
-      {/* Acciones principales */}
-      <div style={{
-        marginTop: 56, padding: '0 24px',
-        display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
-      }}>
-        {details.episodes.length > 0 && (
-          <motion.button
-            whileHover={{ scale: 1.03 }}
-            whileTap={{ scale: 0.97 }}
-            onClick={() => handlePlayEpisode(details.episodes[0])}
-            style={{
-              background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))',
-              border: 'none', borderRadius: 'var(--radius-full)',
-              padding: '12px 24px', color: 'white', fontSize: 14, fontWeight: 700,
-              cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8,
-              boxShadow: 'var(--shadow-glow)',
-            }}
-          >
-            <Play size={16} fill="white" /> Ver Ep. 1
-          </motion.button>
-        )}
-
-        <motion.button
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          onClick={handleToggleFavorite}
-          style={{
-            background: isFavorite ? 'var(--accent-primary-glow)' : 'var(--bg-surface)',
-            border: isFavorite ? '1px solid var(--accent-primary)' : '1px solid var(--border-moderate)',
-            borderRadius: 'var(--radius-full)', padding: '12px 20px',
-            color: isFavorite ? 'var(--accent-primary)' : 'var(--text-secondary)',
-            fontSize: 14, fontWeight: 600, cursor: 'pointer',
-            display: 'flex', alignItems: 'center', gap: 8,
-          }}
-        >
-          {isFavorite ? <BookmarkCheck size={16} /> : <Bookmark size={16} />}
-          {isFavorite ? 'En Favoritos' : 'Favorito'}
-        </motion.button>
-      </div>
-
-      {/* Sinopsis */}
-      {details.synopsis && (
-        <div style={{ margin: '24px 24px 0', background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)', padding: 18, border: '1px solid var(--border-subtle)' }}>
-          <h2 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
-            Sinopsis
-          </h2>
-          <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-            {details.synopsis}
-          </p>
-        </div>
-      )}
-
-      {/* Lista de episodios */}
-      <div style={{ margin: '28px 24px 0' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-          <h2 style={{ fontSize: 16, fontWeight: 800 }}>
-            Episodios ({details.episodes.length})
-          </h2>
-
-          {details.episodes.length > 24 && (
-            <button
-              onClick={() => setShowAllEps(!showAllEps)}
+      {/* Contenido Principal: Metadata Card + Acciones */}
+      <div style={{ padding: '24px 28px 0', display: 'flex', flexDirection: 'column', gap: 24 }}>
+        {/* Barra de Acciones */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center' }}>
+          {details.episodes.length > 0 && (
+            <motion.button
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.97 }}
+              onClick={() => handlePlayEpisode(details.episodes[0])}
               style={{
-                background: 'transparent', border: '1px solid var(--border-moderate)',
-                borderRadius: 'var(--radius-md)', padding: '6px 12px',
-                color: 'var(--text-secondary)', cursor: 'pointer',
-                display: 'flex', alignItems: 'center', gap: 6, fontSize: 12,
+                background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))',
+                color: 'white', border: 'none', borderRadius: 'var(--radius-lg)',
+                padding: '12px 24px', fontSize: 14, fontWeight: 700,
+                cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8,
+                boxShadow: 'var(--shadow-glow)',
               }}
             >
-              {showAllEps ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-              {showAllEps ? 'Mostrar menos' : 'Ver todos'}
-            </button>
+              <Play size={18} fill="white" /> Reproducir Ep. {details.episodes[0].number}
+            </motion.button>
+          )}
+
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.97 }}
+            onClick={handleToggleFavorite}
+            style={{
+              background: isFavorite ? 'rgba(239, 68, 68, 0.15)' : 'var(--bg-surface)',
+              border: `1px solid ${isFavorite ? 'rgba(239, 68, 68, 0.4)' : 'var(--border-moderate)'}`,
+              color: isFavorite ? '#f87171' : 'var(--text-primary)',
+              borderRadius: 'var(--radius-lg)', padding: '12px 20px',
+              fontSize: 14, fontWeight: 600, cursor: 'pointer',
+              display: 'flex', alignItems: 'center', gap: 8,
+            }}
+          >
+            {isFavorite ? <BookmarkCheck size={18} /> : <Bookmark size={18} />}
+            {isFavorite ? 'En Favoritos' : 'Añadir a Favoritos'}
+          </motion.button>
+        </div>
+
+        {/* Ficha Técnica de Información Enriquecida */}
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+          gap: 12,
+        }}>
+          {/* Total Episodios */}
+          <div style={{
+            background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
+            borderRadius: 'var(--radius-lg)', padding: '14px 16px',
+            display: 'flex', alignItems: 'center', gap: 12,
+          }}>
+            <div style={{
+              width: 38, height: 38, borderRadius: 10,
+              background: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+            }}>
+              <Layers size={20} />
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Total Episodios</div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', marginTop: 2 }}>
+                {details.totalEpisodes || details.episodes.length} episodios
+              </div>
+            </div>
+          </div>
+
+          {/* Estudio de Animación */}
+          {details.studio && (
+            <div style={{
+              background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
+              borderRadius: 'var(--radius-lg)', padding: '14px 16px',
+              display: 'flex', alignItems: 'center', gap: 12,
+            }}>
+              <div style={{
+                width: 38, height: 38, borderRadius: 10,
+                background: 'rgba(236, 72, 153, 0.15)', color: '#f472b6',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+              }}>
+                <Tv size={20} />
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Estudio</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', marginTop: 2 }}>
+                  {details.studio}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Duración */}
+          {details.duration && (
+            <div style={{
+              background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
+              borderRadius: 'var(--radius-lg)', padding: '14px 16px',
+              display: 'flex', alignItems: 'center', gap: 12,
+            }}>
+              <div style={{
+                width: 38, height: 38, borderRadius: 10,
+                background: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+              }}>
+                <Clock size={20} />
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Duración</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', marginTop: 2 }}>
+                  {details.duration}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Temporada / Emisión */}
+          {(details.season || details.broadcast) && (
+            <div style={{
+              background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
+              borderRadius: 'var(--radius-lg)', padding: '14px 16px',
+              display: 'flex', alignItems: 'center', gap: 12,
+            }}>
+              <div style={{
+                width: 38, height: 38, borderRadius: 10,
+                background: 'rgba(16, 185, 129, 0.15)', color: '#34d399',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+              }}>
+                <Calendar size={20} />
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>
+                  {details.season ? 'Temporada' : 'Emisión'}
+                </div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', marginTop: 2 }}>
+                  {details.season || details.broadcast}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Idioma */}
+          {details.languages && (
+            <div style={{
+              background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
+              borderRadius: 'var(--radius-lg)', padding: '14px 16px',
+              display: 'flex', alignItems: 'center', gap: 12,
+            }}>
+              <div style={{
+                width: 38, height: 38, borderRadius: 10,
+                background: 'rgba(139, 92, 246, 0.15)', color: '#a78bfa',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+              }}>
+                <Globe size={20} />
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Audio</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', marginTop: 2 }}>
+                  {details.languages}
+                </div>
+              </div>
+            </div>
           )}
         </div>
 
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-          gap: 10,
-        }}>
-          {visibleEps.map((ep) => {
-            const isPlayingThis = loadingEpisode === ep.number;
-            return (
-              <motion.div
-                key={ep.number}
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                style={{
-                  background: 'var(--bg-surface)',
-                  borderRadius: 'var(--radius-md)',
-                  padding: '10px 14px',
-                  border: '1px solid var(--border-subtle)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  cursor: 'pointer',
-                }}
-                onClick={() => handlePlayEpisode(ep)}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <div style={{
-                    width: 32, height: 32, borderRadius: 'var(--radius-sm)',
-                    background: 'var(--bg-elevated)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 12, fontWeight: 700, color: 'var(--text-primary)',
-                  }}>
-                    {isPlayingThis
-                      ? <Loader2 size={14} color="var(--accent-primary)" style={{ animation: 'spin-slow 1s linear infinite' }} />
-                      : ep.number
-                    }
-                  </div>
-                  <div>
-                    <p style={{ fontSize: 13, fontWeight: 600 }}>Episodio {ep.number}</p>
-                  </div>
-                </div>
+        {/* Sinopsis */}
+        {details.synopsis && (
+          <div style={{
+            background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
+            borderRadius: 'var(--radius-lg)', padding: '20px 24px',
+          }}>
+            <h2 style={{
+              fontSize: 13, fontWeight: 700, letterSpacing: '0.06em',
+              textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 10,
+            }}>
+              Sinopsis
+            </h2>
+            <p style={{
+              fontSize: 14, lineHeight: 1.7, color: 'var(--text-secondary)',
+              margin: 0, whiteSpace: 'pre-line',
+            }}>
+              {details.synopsis}
+            </p>
+          </div>
+        )}
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }} onClick={(e) => e.stopPropagation()}>
-                  <button
-                    onClick={() => handleOpenDownloadModal(ep)}
-                    title="Seleccionar servidor y descargar"
+        {/* Lista de Episodios */}
+        <div>
+          <div style={{
+            display: 'flex', flexWrap: 'wrap', alignItems: 'center',
+            justifyContent: 'space-between', gap: 12, marginBottom: 16,
+          }}>
+            <h2 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-primary)', margin: 0 }}>
+              Episodios ({details.episodes.length})
+            </h2>
+
+            {/* Buscador de episodio */}
+            {details.episodes.length > 12 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input
+                  type="text"
+                  placeholder="Buscar cap..."
+                  value={epSearch}
+                  onChange={e => setEpSearch(e.target.value)}
+                  style={{
+                    padding: '6px 12px', background: 'var(--bg-surface)',
+                    border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-md)',
+                    color: 'var(--text-primary)', fontSize: 12, width: 120, outline: 'none',
+                  }}
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Grid de Episodios */}
+          {visibleEps.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text-muted)' }}>
+              No se encontraron episodios.
+            </div>
+          ) : (
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))',
+              gap: 10,
+            }}>
+              {visibleEps.map((ep) => {
+                const isLoadingThis = loadingEpisode === ep.number;
+                return (
+                  <motion.div
+                    key={ep.number}
+                    whileHover={{ y: -2 }}
+                    whileTap={{ scale: 0.96 }}
                     style={{
-                      background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
-                      borderRadius: 'var(--radius-sm)', width: 30, height: 30,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      color: 'var(--text-secondary)', cursor: 'pointer',
+                      background: 'var(--bg-surface)',
+                      border: '1px solid var(--border-subtle)',
+                      borderRadius: 'var(--radius-md)',
+                      padding: '12px 10px',
+                      display: 'flex', flexDirection: 'column',
+                      alignItems: 'center', justifyContent: 'center',
+                      gap: 8, cursor: 'pointer', position: 'relative',
                     }}
+                    onClick={() => handlePlayEpisode(ep)}
                   >
-                    <Download size={13} />
-                  </button>
-                </div>
-              </motion.div>
-            );
-          })}
+                    <div style={{
+                      fontSize: 14, fontWeight: 700, color: 'var(--text-primary)',
+                      textAlign: 'center',
+                    }}>
+                      Ep. {ep.number}
+                    </div>
+
+                    {/* Botones de acción rápida */}
+                    <div style={{ display: 'flex', gap: 6 }} onClick={e => e.stopPropagation()}>
+                      <button
+                        onClick={() => handlePlayEpisode(ep)}
+                        title="Reproducir episodio"
+                        style={{
+                          width: 28, height: 28, borderRadius: 6,
+                          background: 'rgba(59, 130, 246, 0.15)',
+                          border: 'none', color: 'var(--accent-primary)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {isLoadingThis ? (
+                          <div style={{
+                            width: 12, height: 12, borderRadius: '50%',
+                            border: '2px solid var(--accent-primary)',
+                            borderTopColor: 'transparent',
+                            animation: 'spin-slow 0.6s linear infinite',
+                          }} />
+                        ) : (
+                          <Play size={13} fill="currentColor" />
+                        )}
+                      </button>
+
+                      <button
+                        onClick={() => handleOpenDownloadModal(ep)}
+                        title="Descargar episodio"
+                        style={{
+                          width: 28, height: 28, borderRadius: 6,
+                          background: 'rgba(255,255,255,0.06)',
+                          border: 'none', color: 'var(--text-secondary)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <Download size={13} />
+                      </button>
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Ver más episodios */}
+          {filteredEps.length > 36 && (
+            <div style={{ textAlign: 'center', marginTop: 20 }}>
+              <button
+                onClick={() => setShowAllEps(!showAllEps)}
+                style={{
+                  background: 'var(--bg-surface)', border: '1px solid var(--border-moderate)',
+                  borderRadius: 'var(--radius-full)', padding: '10px 24px',
+                  color: 'var(--text-primary)', cursor: 'pointer',
+                  display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 600,
+                }}
+              >
+                {showAllEps ? (
+                  <>Mostrar menos <ChevronUp size={16} /></>
+                ) : (
+                  <>Ver todos los {filteredEps.length} episodios <ChevronDown size={16} /></>
+                )}
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* ─── Modal de Selección de Servidor para Descargas ─── */}
+      {/* Modal de Selección de Servidor para Descarga */}
       <AnimatePresence>
         {downloadModalEp && (
           <motion.div
@@ -406,35 +668,28 @@ export function DetailsPage() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             style={{
-              position: 'fixed', inset: 0, zIndex: 1000,
-              background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(12px)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+              position: 'fixed', inset: 0, zIndex: 110,
+              background: 'rgba(0, 0, 0, 0.75)', backdropFilter: 'blur(10px)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              padding: 20,
             }}
             onClick={() => setDownloadModalEp(null)}
           >
             <motion.div
-              initial={{ opacity: 0, scale: 0.9, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-              onClick={(e) => e.stopPropagation()}
+              initial={{ scale: 0.95, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 20 }}
+              onClick={e => e.stopPropagation()}
               style={{
-                width: '100%', maxWidth: 440,
                 background: 'var(--bg-surface)', border: '1px solid var(--border-moderate)',
                 borderRadius: 'var(--radius-xl)', padding: 24,
-                boxShadow: 'var(--shadow-lg)', display: 'flex', flexDirection: 'column', gap: 18,
+                width: '100%', maxWidth: 460, boxShadow: 'var(--shadow-xl)',
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <div style={{ padding: 8, borderRadius: 'var(--radius-md)', background: 'var(--accent-secondary-glow)' }}>
-                    <Download size={18} color="var(--accent-secondary)" />
-                  </div>
-                  <div>
-                    <h3 style={{ fontSize: 16, fontWeight: 800 }}>Descargar Episodio {downloadModalEp.number}</h3>
-                    <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>{details.title}</p>
-                  </div>
-                </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <h3 style={{ fontSize: 18, fontWeight: 800, margin: 0, color: 'var(--text-primary)' }}>
+                  Descargar Episodio {downloadModalEp.number}
+                </h3>
                 <button
                   onClick={() => setDownloadModalEp(null)}
                   style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
@@ -443,56 +698,61 @@ export function DetailsPage() {
                 </button>
               </div>
 
-              <div>
-                <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', display: 'block', marginBottom: 8, textTransform: 'uppercase' }}>
-                  Selecciona el Servidor de Origen
-                </label>
+              <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 16 }}>
+                Selecciona el servidor de descarga con mejor velocidad:
+              </p>
 
-                {isLoadingServers ? (
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 30, gap: 10, color: 'var(--text-muted)' }}>
-                    <Loader2 size={18} style={{ animation: 'spin-slow 1s linear infinite' }} />
-                    <span style={{ fontSize: 13 }}>Buscando servidores de descarga...</span>
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 220, overflowY: 'auto' }}>
-                    {downloadServers.map((s) => {
-                      const isSelected = selectedDownloadServer?.url === s.url;
-                      return (
-                        <button
-                          key={s.url}
-                          onClick={() => setSelectedDownloadServer(s)}
-                          style={{
-                            padding: '10px 14px', borderRadius: 'var(--radius-md)',
-                            background: isSelected ? 'var(--accent-primary-glow)' : 'var(--bg-elevated)',
-                            border: isSelected ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)',
-                            color: 'var(--text-primary)', textAlign: 'left', cursor: 'pointer',
-                            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                          }}
-                        >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                            <Zap size={14} color={s.isDirect ? 'var(--accent-success)' : 'var(--accent-warning)'} />
-                            <div>
-                              <p style={{ fontSize: 13, fontWeight: 600 }}>{s.name}</p>
-                              <p style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                                {s.isDirect ? 'Servidor Directo (Alta Velocidad)' : 'Servidor Estándar'}
-                              </p>
-                            </div>
-                          </div>
-                          {isSelected && <Check size={16} color="var(--accent-primary)" />}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
+              {isLoadingServers ? (
+                <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--text-muted)' }}>
+                  <div style={{
+                    width: 28, height: 28, borderRadius: '50%', margin: '0 auto 8px',
+                    border: '2px solid var(--accent-primary)', borderTopColor: 'transparent',
+                    animation: 'spin-slow 0.6s linear infinite',
+                  }} />
+                  Cargando servidores disponibles...
+                </div>
+              ) : downloadServers.length === 0 ? (
+                <p style={{ color: 'var(--text-muted)', fontSize: 13, textAlign: 'center' }}>No hay servidores disponibles para descargar.</p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 220, overflowY: 'auto', marginBottom: 20 }}>
+                  {downloadServers.map((srv, idx) => {
+                    const isSelected = selectedDownloadServer?.url === srv.url;
+                    return (
+                      <div
+                        key={idx}
+                        onClick={() => setSelectedDownloadServer(srv)}
+                        style={{
+                          padding: '10px 14px', borderRadius: 'var(--radius-md)',
+                          background: isSelected ? 'rgba(59, 130, 246, 0.15)' : 'var(--bg-elevated)',
+                          border: `1px solid ${isSelected ? 'var(--accent-primary)' : 'var(--border-subtle)'}`,
+                          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <span style={{ fontSize: 13, fontWeight: 600, color: isSelected ? 'var(--accent-primary)' : 'var(--text-primary)' }}>
+                          {srv.name}
+                        </span>
+                        {srv.isDirect && (
+                          <span style={{
+                            fontSize: 10, fontWeight: 700, color: '#34d399',
+                            background: 'rgba(16, 185, 129, 0.15)', padding: '2px 6px', borderRadius: 4,
+                          }}>
+                            Directo
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
 
-              <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
                 <button
                   onClick={() => setDownloadModalEp(null)}
                   style={{
-                    flex: 1, background: 'var(--bg-elevated)', border: '1px solid var(--border-moderate)',
-                    borderRadius: 'var(--radius-md)', padding: '10px', color: 'var(--text-secondary)',
-                    cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                    padding: '8px 16px', background: 'var(--bg-elevated)',
+                    border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-md)',
+                    color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 13,
                   }}
                 >
                   Cancelar
@@ -501,16 +761,13 @@ export function DetailsPage() {
                   disabled={!selectedDownloadServer || isStartingDownload}
                   onClick={handleConfirmDownload}
                   style={{
-                    flex: 1,
-                    background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))',
-                    border: 'none', borderRadius: 'var(--radius-md)', padding: '10px',
-                    color: 'white', cursor: selectedDownloadServer ? 'pointer' : 'not-allowed',
-                    fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                    opacity: selectedDownloadServer && !isStartingDownload ? 1 : 0.6,
+                    padding: '8px 20px', background: 'var(--accent-primary)',
+                    border: 'none', borderRadius: 'var(--radius-md)',
+                    color: 'white', fontWeight: 700, cursor: 'pointer', fontSize: 13,
+                    opacity: !selectedDownloadServer || isStartingDownload ? 0.6 : 1,
                   }}
                 >
-                  {isStartingDownload ? <Loader2 size={16} style={{ animation: 'spin-slow 1s linear infinite' }} /> : <Download size={15} />}
-                  {isStartingDownload ? 'Iniciando...' : 'Iniciar Descarga'}
+                  {isStartingDownload ? 'Iniciando...' : 'Descargar'}
                 </button>
               </div>
             </motion.div>
@@ -518,5 +775,14 @@ export function DetailsPage() {
         )}
       </AnimatePresence>
     </div>
+  );
+}
+
+function X({ size, ...props }: { size: number; [key: string]: any }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <line x1="18" y1="6" x2="6" y2="18"></line>
+      <line x1="6" y1="6" x2="18" y2="18"></line>
+    </svg>
   );
 }

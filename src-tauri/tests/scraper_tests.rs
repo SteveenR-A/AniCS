@@ -41,3 +41,16 @@ async fn test_mundodonghua_get_latest() {
     println!("MundoDonghua Latest results count: {}", results.len());
     assert!(!results.is_empty(), "MundoDonghua get_latest returned empty results");
 }
+
+#[tokio::test]
+async fn test_genres_dynamic() {
+    let jk = JKAnimeExtractor::new();
+    let jk_genres = jk.get_genres().await.expect("Failed to get genres from JKAnime");
+    println!("JKAnime dynamic genres count: {}", jk_genres.len());
+    assert!(!jk_genres.is_empty());
+
+    let md = MundoDonghuaExtractor::new();
+    let md_genres = md.get_genres().await.expect("Failed to get genres from MundoDonghua");
+    println!("MundoDonghua dynamic genres count: {}", md_genres.len());
+    assert!(!md_genres.is_empty());
+}

@@ -87,6 +87,17 @@ pub async fn advanced_search(
     extractor.advanced_search(&filters).await.map_err(|e| e.to_string())
 }
 
+/// Obtener lista de géneros disponibles en una fuente
+#[tauri::command]
+pub async fn get_genres(
+    source: String,
+    _state: State<'_, AppState>,
+) -> Result<Vec<GenreItem>, String> {
+    let extractor = create_extractor(&source)
+        .ok_or_else(|| format!("Unknown source: {source}"))?;
+    extractor.get_genres().await.map_err(|e| e.to_string())
+}
+
 /// Obtener lista de extractores disponibles
 #[tauri::command]
 pub fn get_sources() -> Vec<serde_json::Value> {

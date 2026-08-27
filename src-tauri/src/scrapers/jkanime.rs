@@ -62,7 +62,7 @@ impl AnimeExtractor for JKAnimeExtractor {
     fn name(&self) -> &'static str { "JKAnime" }
     fn base_url(&self) -> &str { &self.base_url }
 
-    // Búsqueda
+    // Búsqueda simple
     async fn search(&self, query: &str) -> AppResult<Vec<AnimeResult>> {
         let url = self.url(&format!("/buscar/{}/", urlencoding::encode(query)));
         let html = fetch_html(&url, Some(&self.base_url)).await
@@ -176,7 +176,7 @@ impl AnimeExtractor for JKAnimeExtractor {
         Ok(results)
     }
 
-    // Detalles de serie
+    // Detalles enriquecidos de la serie
     async fn get_details(&self, url: &str) -> AppResult<AnimeDetails> {
         let clean_url = normalize_series_url(url);
         let html = fetch_html(&clean_url, Some(&self.base_url)).await
@@ -185,9 +185,10 @@ impl AnimeExtractor for JKAnimeExtractor {
             return Err(AppError::NotFound(format!("No content at {clean_url}")));
         }
 
-        let (title, thumbnail, synopsis, genres, anime_id, csrf_token, total_ep_hint) = {
+        let (title, thumbnail, synopsis, genres, status, anime_type, studio, duration, total_ep_str, season, broadcast, languages, anime_id, csrf_token, total_ep_hint) = {
             let doc = Html::parse_document(&html);
 
+            // 1. Título
             let title_sel = Selector::parse("div.anime_info h3, h2.anime__details__title h3, h1").unwrap();
             let title = doc.select(&title_sel).next()
                 .map(|n| inner_text(&n))
@@ -199,6 +200,7 @@ impl AnimeExtractor for JKAnimeExtractor {
                         .unwrap_or_default()
                 });
 
+            // 2. Thumbnail
             let pic_sel = Selector::parse("div.anime_pic img, div.movpic img, div.anime__details__pic, img").unwrap();
             let thumbnail = doc.select(&pic_sel).next()
                 .map(|n| {
@@ -207,16 +209,68 @@ impl AnimeExtractor for JKAnimeExtractor {
                 })
                 .unwrap_or_default();
 
+            // 3. Sinopsis
             let syn_sel = Selector::parse("div.anime_info p, p.scroll, div.anime__details__text p, p#sinopsis").unwrap();
             let synopsis = doc.select(&syn_sel).next()
                 .map(|n| inner_text(&n))
                 .unwrap_or_default();
 
-            let genre_sel = Selector::parse("div.anime_data li a[href*='/genero/'], a[href*='/genero/']").unwrap();
-            let genres: Vec<String> = doc.select(&genre_sel)
-                .map(|a| inner_text(&a))
-                .take(10)
-                .collect();
+            // 4. Extracción de metadatos detallados (estudio, tipo, estado, duración, etc.)
+            let mut genres = vec![];
+            let mut anime_type = None;
+            let mut studio = None;
+            let mut duration = None;
+            let mut season = None;
+            let mut broadcast = None;
+            let mut languages = None;
+            let mut status = None;
+            let mut total_ep_str = None;
+
+            let li_sel = Selector::parse("div.anime_data li, div.anime__details__widget li").unwrap();
+            for li in doc.select(&li_sel) {
+                let full_text = inner_text(&li);
+                let lower = full_text.to_lowercase();
+
+                if lower.contains("genero") || lower.contains("género") {
+                    let a_sel = Selector::parse("a").unwrap();
+                    for a in li.select(&a_sel) {
+                        let g = inner_text(&a);
+                        if !g.is_empty() && !genres.contains(&g) {
+                            genres.push(g);
+                        }
+                    }
+                } else if lower.contains("tipo") {
+                    let val = clean_field_value(&full_text, &["Tipo:", "Tipo"]);
+                    if !val.is_empty() { anime_type = Some(val); }
+                } else if lower.contains("studio") || lower.contains("estudio") {
+                    let a_sel = Selector::parse("a").unwrap();
+                    let val = li.select(&a_sel).next()
+                        .map(|a| inner_text(&a))
+                        .unwrap_or_else(|| clean_field_value(&full_text, &["Studios:", "Estudios:", "Estudio:"]));
+                    if !val.is_empty() { studio = Some(val); }
+                } else if lower.contains("duracion") || lower.contains("duración") {
+                    let val = clean_field_value(&full_text, &["Duracion:", "Duración:"]);
+                    if !val.is_empty() { duration = Some(val); }
+                } else if lower.contains("temporada") {
+                    let a_sel = Selector::parse("a").unwrap();
+                    let val = li.select(&a_sel).next()
+                        .map(|a| inner_text(&a))
+                        .unwrap_or_else(|| clean_field_value(&full_text, &["Temporada:"]));
+                    if !val.is_empty() { season = Some(val); }
+                } else if lower.contains("emitido") || lower.contains("emisión") {
+                    let val = clean_field_value(&full_text, &["Emitido:", "Emisión:"]);
+                    if !val.is_empty() { broadcast = Some(val); }
+                } else if lower.contains("idioma") {
+                    let val = clean_field_value(&full_text, &["Idiomas:", "Idioma:"]);
+                    if !val.is_empty() { languages = Some(val); }
+                } else if lower.contains("episodio") {
+                    let val = clean_field_value(&full_text, &["Episodios:", "Episodio:"]);
+                    if !val.is_empty() { total_ep_str = Some(val); }
+                } else if lower.contains("estado") {
+                    let val = clean_field_value(&full_text, &["Estado:"]);
+                    if !val.is_empty() { status = Some(val); }
+                }
+            }
 
             let anime_id = EPISODE_ID_RE.captures(&html)
                 .and_then(|c| c.get(1))
@@ -228,9 +282,10 @@ impl AnimeExtractor for JKAnimeExtractor {
 
             let total_ep_hint = TOTAL_EP_RE.captures(&html)
                 .and_then(|c| c.get(1))
-                .and_then(|m| m.as_str().parse::<u32>().ok());
+                .and_then(|m| m.as_str().parse::<u32>().ok())
+                .or_else(|| total_ep_str.as_ref().and_then(|s| s.parse::<u32>().ok()));
 
-            (title, thumbnail, synopsis, genres, anime_id, csrf_token, total_ep_hint)
+            (title, thumbnail, synopsis, genres, status, anime_type, studio, duration, total_ep_str, season, broadcast, languages, anime_id, csrf_token, total_ep_hint)
         };
 
         let episodes = if let Some(id) = &anime_id {
@@ -254,9 +309,18 @@ impl AnimeExtractor for JKAnimeExtractor {
             thumbnail_url: thumbnail,
             synopsis,
             genres,
+            status,
+            anime_type,
+            studio,
+            duration,
+            total_episodes: total_ep_str.or_else(|| total_ep_hint.map(|t| t.to_string())),
+            season,
+            broadcast,
+            languages,
+            year: None,
+            rating: None,
             episodes,
             source: self.id().to_string(),
-            ..Default::default()
         })
     }
 
@@ -373,6 +437,121 @@ impl AnimeExtractor for JKAnimeExtractor {
             qualities: vec![],
         })
     }
+
+    // Lista dinámica de géneros
+    async fn get_genres(&self) -> AppResult<Vec<GenreItem>> {
+        let url = self.url("/directorio");
+        if let Ok(html) = fetch_html(&url, Some(&self.base_url)).await {
+            if !html.is_empty() {
+                let doc = Html::parse_document(&html);
+                let opt_sel = Selector::parse("select[name='genero'] option").unwrap();
+                let mut genres = vec![];
+
+                for opt in doc.select(&opt_sel) {
+                    let slug = attr(&opt, "value");
+                    let name = inner_text(&opt);
+                    if !slug.is_empty() && !name.is_empty() && slug != "" {
+                        genres.push(GenreItem { name, slug });
+                    }
+                }
+
+                if !genres.is_empty() {
+                    return Ok(genres);
+                }
+            }
+        }
+
+        // Fallback de géneros estándar si no se pudo conectar
+        Ok(default_jkanime_genres())
+    }
+
+    // Búsqueda avanzada con filtros dinámicos
+    async fn advanced_search(&self, filters: &SearchFilters) -> AppResult<SearchResultPage> {
+        let mut query_params = vec![];
+
+        if let Some(g) = &filters.genre {
+            if !g.is_empty() { query_params.push(format!("genero={}", urlencoding::encode(g))); }
+        }
+        if let Some(t) = &filters.anime_type {
+            if !t.is_empty() { query_params.push(format!("tipo={}", urlencoding::encode(t))); }
+        }
+        if let Some(s) = &filters.status {
+            if !s.is_empty() { query_params.push(format!("estado={}", urlencoding::encode(s))); }
+        }
+        if let Some(o) = &filters.order_by {
+            if !o.is_empty() { query_params.push(format!("orden={}", urlencoding::encode(o))); }
+        }
+        if filters.page > 1 {
+            query_params.push(format!("p={}", filters.page));
+        }
+
+        // Si hay una consulta de texto y no hay filtros, usar búsqueda estándar
+        if query_params.is_empty() {
+            if let Some(q) = &filters.query {
+                let results = self.search(q).await?;
+                return Ok(SearchResultPage {
+                    results,
+                    current_page: filters.page,
+                    total_pages: Some(1),
+                    has_next: false,
+                });
+            }
+        }
+
+        let dir_url = if query_params.is_empty() {
+            self.url("/directorio")
+        } else {
+            self.url(&format!("/directorio?{}", query_params.join("&")))
+        };
+
+        let html = fetch_html(&dir_url, Some(&self.base_url)).await
+            .map_err(AppError::Network)?;
+        if html.is_empty() {
+            return Ok(SearchResultPage {
+                results: vec![],
+                current_page: filters.page,
+                total_pages: None,
+                has_next: false,
+            });
+        }
+
+        let doc = Html::parse_document(&html);
+        let mut results = vec![];
+
+        let item_sel = Selector::parse("div.anime__item, div.custom_item").unwrap();
+        let title_sel = Selector::parse("div.anime__item__text h5 a, h5 a, h5").unwrap();
+        let pic_sel = Selector::parse("div.anime__item__pic, div[class*='anime__item__pic'], img").unwrap();
+        let a_sel = Selector::parse("a").unwrap();
+
+        for item in doc.select(&item_sel) {
+            let href = item.select(&a_sel).next().map(|a| attr(&a, "href")).unwrap_or_default();
+            let title = item.select(&title_sel).next().map(|h| inner_text(&h)).unwrap_or_default();
+
+            if href.is_empty() || title.is_empty() { continue; }
+
+            let thumbnail = item.select(&pic_sel).next().map(|p| {
+                let bg = attr(&p, "data-setbg");
+                if !bg.is_empty() { bg } else { attr(&p, "src") }
+            }).unwrap_or_default();
+
+            results.push(AnimeResult {
+                title,
+                url: normalize_url(&href, &self.base_url),
+                thumbnail_url: thumbnail,
+                source: self.id().to_string(),
+                ..Default::default()
+            });
+        }
+
+        let has_next = doc.select(&Selector::parse("a.next, a.page-link[rel='next']").unwrap()).next().is_some() || results.len() >= 12;
+
+        Ok(SearchResultPage {
+            results,
+            current_page: filters.page,
+            total_pages: None,
+            has_next,
+        })
+    }
 }
 
 impl JKAnimeExtractor {
@@ -429,6 +608,16 @@ impl JKAnimeExtractor {
     }
 }
 
+fn clean_field_value(raw: &str, prefixes: &[&str]) -> String {
+    let mut clean = raw.to_string();
+    for p in prefixes {
+        if let Some(idx) = clean.to_lowercase().find(&p.to_lowercase()) {
+            clean = clean[idx + p.len()..].trim().to_string();
+        }
+    }
+    clean.trim().to_string()
+}
+
 fn extract_slug(url: &str) -> String {
     let clean = url.trim_end_matches('/');
     clean.split('/').last().unwrap_or("").to_string()
@@ -476,4 +665,29 @@ fn detect_media_type(url: &str) -> MediaType {
     } else {
         MediaType::Unknown
     }
+}
+
+fn default_jkanime_genres() -> Vec<GenreItem> {
+    vec![
+        GenreItem { name: "Acción".into(), slug: "accion".into() },
+        GenreItem { name: "Aventura".into(), slug: "aventura".into() },
+        GenreItem { name: "Comedia".into(), slug: "comedia".into() },
+        GenreItem { name: "Drama".into(), slug: "drama".into() },
+        GenreItem { name: "Fantasía".into(), slug: "fantasia".into() },
+        GenreItem { name: "Magia".into(), slug: "magia".into() },
+        GenreItem { name: "Misterio".into(), slug: "misterio".into() },
+        GenreItem { name: "Romance".into(), slug: "romance".into() },
+        GenreItem { name: "Sci-Fi".into(), slug: "sci-fi".into() },
+        GenreItem { name: "Shounen".into(), slug: "shounen".into() },
+        GenreItem { name: "Super Poderes".into(), slug: "super-poderes".into() },
+        GenreItem { name: "Sobrenatural".into(), slug: "sobrenatural".into() },
+        GenreItem { name: "Isekai".into(), slug: "isekai".into() },
+        GenreItem { name: "Terror".into(), slug: "terror".into() },
+        GenreItem { name: "Artes Marciales".into(), slug: "artes-marciales".into() },
+        GenreItem { name: "Mecha".into(), slug: "mecha".into() },
+        GenreItem { name: "Escolar".into(), slug: "colegial".into() },
+        GenreItem { name: "Ecchi".into(), slug: "ecchi".into() },
+        GenreItem { name: "Música".into(), slug: "musica".into() },
+        GenreItem { name: "Histórico".into(), slug: "historico".into() },
+    ]
 }

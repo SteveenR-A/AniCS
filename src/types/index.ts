@@ -14,6 +14,11 @@ export interface AnimeResult {
   source: string;
 }
 
+export interface GenreItem {
+  name: string;
+  slug: string;
+}
+
 export interface AnimeDetails {
   title: string;
   url: string;
@@ -22,6 +27,12 @@ export interface AnimeDetails {
   genres: string[];
   status?: string;
   animeType?: string;
+  studio?: string;
+  duration?: string;
+  totalEpisodes?: string;
+  season?: string;
+  broadcast?: string;
+  languages?: string;
   year?: string;
   rating?: number;
   episodes: Episode[];

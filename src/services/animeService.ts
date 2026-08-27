@@ -7,6 +7,7 @@ import type {
   VideoServer,
   ResolvedMedia,
   Source,
+  GenreItem,
 } from '@/types';
 
 /** Buscar anime (en todos los extractores o en uno específico) */
@@ -40,3 +41,7 @@ export const getServers = (episodeUrl: string, source: string): Promise<VideoSer
 /** Resolver un servidor a URL directa */
 export const resolveStream = (server: VideoServer, source: string): Promise<ResolvedMedia> =>
   invoke('resolve_stream', { server, source });
+
+/** Obtener lista dinámica de géneros para una fuente */
+export const getGenres = (source: string): Promise<GenreItem[]> =>
+  invoke('get_genres', { source });

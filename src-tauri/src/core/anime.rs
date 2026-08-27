@@ -38,6 +38,12 @@ pub struct AnimeDetails {
     pub genres: Vec<String>,
     pub status: Option<String>,
     pub anime_type: Option<String>,
+    pub studio: Option<String>,
+    pub duration: Option<String>,
+    pub total_episodes: Option<String>,
+    pub season: Option<String>,
+    pub broadcast: Option<String>,
+    pub languages: Option<String>,
     pub year: Option<String>,
     pub rating: Option<f32>,
     pub episodes: Vec<Episode>,
@@ -88,6 +94,13 @@ pub struct Quality {
     pub label: String,
     pub url: String,
     pub bandwidth: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GenreItem {
+    pub name: String,
+    pub slug: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -155,24 +168,7 @@ pub enum DownloadStatus {
     Paused,
     Completed,
     Failed,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-#[allow(dead_code)]
-pub struct DownloadTask {
-    pub id: String,
-    pub anime_title: String,
-    pub episode_number: u32,
-    pub stream_url: String,
-    pub referer: Option<String>,
-    pub output_path: String,
-    pub status: DownloadStatus,
-    pub progress: f32,
-    pub speed_kbps: f64,
-    pub downloaded_bytes: u64,
-    pub total_bytes: Option<u64>,
-    pub error: Option<String>,
+    Canceled,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -185,4 +181,23 @@ pub struct DownloadProgress {
     pub total_bytes: Option<u64>,
     pub status: DownloadStatus,
     pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
+pub struct DownloadTask {
+    pub id: String,
+    pub anime_title: String,
+    pub episode_number: u32,
+    pub episode_url: String,
+    pub server_name: String,
+    pub file_path: String,
+    pub total_bytes: Option<u64>,
+    pub downloaded_bytes: u64,
+    pub progress: f32, // 0.0 - 100.0
+    pub speed_bytes_per_sec: u64,
+    pub status: DownloadStatus,
+    pub error_message: Option<String>,
+    pub created_at: String,
 }

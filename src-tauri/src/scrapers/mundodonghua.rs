@@ -137,12 +137,13 @@ impl AnimeExtractor for MundoDonghuaExtractor {
         self.get_latest(1).await
     }
 
-    // Detalles de serie
+    // Detalles de serie enriquecidos
     async fn get_details(&self, url: &str) -> AppResult<AnimeDetails> {
-        let html = fetch_html(url, Some(&self.base_url)).await
+        let clean_url = normalize_donghua_url(url, &self.base_url);
+        let html = fetch_html(&clean_url, Some(&self.base_url)).await
             .map_err(AppError::Network)?;
         if html.is_empty() {
-            return Err(AppError::NotFound(format!("No content at {url}")));
+            return Err(AppError::NotFound(format!("No content at {clean_url}")));
         }
 
         let doc = Html::parse_document(&html);
@@ -165,10 +166,25 @@ impl AnimeExtractor for MundoDonghuaExtractor {
             .map(|n| inner_text(&n))
             .unwrap_or_default();
 
-        let genre_sel = Selector::parse("div.md-donghua-genres a, a[href*='/genero/']").unwrap();
+        let genre_sel = Selector::parse("a.md-genre-tag, a[href*='/genero/']").unwrap();
         let genres: Vec<String> = doc.select(&genre_sel)
             .map(|a| inner_text(&a))
+            .filter(|g| !g.is_empty())
             .collect();
+
+        // Metadatos adicionales (estado, episodios, etc.)
+        let mut status = None;
+        let mut total_ep_str = None;
+
+        let info_sel = Selector::parse("div.md-donghua-info p, p").unwrap();
+        for p in doc.select(&info_sel) {
+            let t = inner_text(&p);
+            if t.to_lowercase().contains("estado:") {
+                status = Some(t.replace("Estado:", "").trim().to_string());
+            } else if t.to_lowercase().contains("episodios:") {
+                total_ep_str = Some(t.replace("Episodios:", "").trim().to_string());
+            }
+        }
 
         // Episodios
         let mut episodes = vec![];
@@ -191,13 +207,22 @@ impl AnimeExtractor for MundoDonghuaExtractor {
 
         Ok(AnimeDetails {
             title,
-            url: url.to_string(),
+            url: clean_url,
             thumbnail_url: normalize_url(&thumbnail, &self.base_url),
             synopsis,
             genres,
+            status,
+            anime_type: Some("Donghua".to_string()),
+            studio: None,
+            duration: Some("20 min".to_string()),
+            total_episodes: total_ep_str.or_else(|| if !episodes.is_empty() { Some(episodes.len().to_string()) } else { None }),
+            season: None,
+            broadcast: None,
+            languages: Some("Chino (Sub Español)".to_string()),
+            year: None,
+            rating: None,
             episodes,
             source: self.id().to_string(),
-            ..Default::default()
         })
     }
 
@@ -290,6 +315,124 @@ impl AnimeExtractor for MundoDonghuaExtractor {
             qualities: vec![],
         })
     }
+
+    // Lista dinámica de géneros para MundoDonghua
+    async fn get_genres(&self) -> AppResult<Vec<GenreItem>> {
+        let url = self.url("/lista-donghuas");
+        if let Ok(html) = fetch_html(&url, Some(&self.base_url)).await {
+            if !html.is_empty() {
+                let doc = Html::parse_document(&html);
+                let genre_sel = Selector::parse("a.md-genre-tag, a[href*='/genero/']").unwrap();
+                let mut genres = vec![];
+
+                for a in doc.select(&genre_sel) {
+                    let name = inner_text(&a);
+                    let href = attr(&a, "href");
+                    let slug = href.trim_start_matches("/genero/").trim_end_matches('/').to_string();
+                    if !name.is_empty() && !slug.is_empty() && !genres.iter().any(|g: &GenreItem| g.slug == slug) {
+                        genres.push(GenreItem { name, slug });
+                    }
+                }
+
+                if !genres.is_empty() {
+                    return Ok(genres);
+                }
+            }
+        }
+
+        Ok(default_donghua_genres())
+    }
+
+    // Búsqueda avanzada
+    async fn advanced_search(&self, filters: &SearchFilters) -> AppResult<SearchResultPage> {
+        let target_url = if let Some(g) = &filters.genre {
+            if !g.is_empty() {
+                self.url(&format!("/genero/{}", urlencoding::encode(g)))
+            } else if let Some(q) = &filters.query {
+                self.url(&format!("/busquedas?donghua={}", urlencoding::encode(q)))
+            } else {
+                self.url("/lista-donghuas")
+            }
+        } else if let Some(q) = &filters.query {
+            self.url(&format!("/busquedas?donghua={}", urlencoding::encode(q)))
+        } else if let Some(s) = &filters.status {
+            if s == "emision" || s == "En emision" {
+                self.url("/lista-donghuas-emision")
+            } else if s == "finalizado" || s == "Finalizadas" {
+                self.url("/lista-donghuas-finalizados")
+            } else {
+                self.url("/lista-donghuas")
+            }
+        } else {
+            self.url("/lista-donghuas")
+        };
+
+        let html = fetch_html(&target_url, Some(&self.base_url)).await
+            .map_err(AppError::Network)?;
+        if html.is_empty() {
+            return Ok(SearchResultPage {
+                results: vec![],
+                current_page: filters.page,
+                total_pages: None,
+                has_next: false,
+            });
+        }
+
+        let doc = Html::parse_document(&html);
+        let mut results = vec![];
+
+        let card_sel = Selector::parse("div.md-card, div[class*='md-card']").unwrap();
+        let link_sel = Selector::parse("a").unwrap();
+        let title_sel = Selector::parse("h3.md-card-title, .md-card-title, h3, h5").unwrap();
+        let img_sel = Selector::parse("img").unwrap();
+
+        for card in doc.select(&card_sel) {
+            if let Some(a) = card.select(&link_sel).next() {
+                let href = attr(&a, "href");
+                if href.is_empty() { continue; }
+
+                let title = card.select(&title_sel).next()
+                    .map(|t| inner_text(&t))
+                    .unwrap_or_else(|| attr(&a, "title"));
+                if title.is_empty() { continue; }
+
+                let thumbnail = card.select(&img_sel).next()
+                    .map(|i| {
+                        let src = attr(&i, "src");
+                        if src.is_empty() { attr(&i, "data-src") } else { src }
+                    }).unwrap_or_default();
+
+                results.push(AnimeResult {
+                    title,
+                    url: normalize_url(&href, &self.base_url),
+                    thumbnail_url: normalize_url(&thumbnail, &self.base_url),
+                    anime_type: Some("Donghua".to_string()),
+                    source: self.id().to_string(),
+                    ..Default::default()
+                });
+            }
+        }
+
+        Ok(SearchResultPage {
+            results,
+            current_page: filters.page,
+            total_pages: None,
+            has_next: false,
+        })
+    }
+}
+
+fn normalize_donghua_url(url: &str, base_url: &str) -> String {
+    if url.contains("/ver/") {
+        let parts: Vec<&str> = url.split("/ver/").collect();
+        if parts.len() > 1 {
+            let segs: Vec<&str> = parts[1].split('/').collect();
+            if !segs.is_empty() {
+                return format!("{}/donghua/{}", base_url.trim_end_matches('/'), segs[0]);
+            }
+        }
+    }
+    url.to_string()
 }
 
 fn attr(element: &scraper::ElementRef, name: &str) -> String {
@@ -317,4 +460,21 @@ fn detect_media_type(url: &str) -> MediaType {
     } else {
         MediaType::Unknown
     }
+}
+
+fn default_donghua_genres() -> Vec<GenreItem> {
+    vec![
+        GenreItem { name: "Acción".into(), slug: "accion".into() },
+        GenreItem { name: "Cultivación".into(), slug: "cultivacion".into() },
+        GenreItem { name: "Artes Marciales".into(), slug: "artes-marciales".into() },
+        GenreItem { name: "Fantasía".into(), slug: "fantasia".into() },
+        GenreItem { name: "Aventura".into(), slug: "aventura".into() },
+        GenreItem { name: "Magia".into(), slug: "magia".into() },
+        GenreItem { name: "Reencarnación".into(), slug: "reencarnacion".into() },
+        GenreItem { name: "Romance".into(), slug: "romance".into() },
+        GenreItem { name: "Ciencia Ficción".into(), slug: "sci-fi".into() },
+        GenreItem { name: "3D".into(), slug: "3d".into() },
+        GenreItem { name: "2D".into(), slug: "2d".into() },
+        GenreItem { name: "Sobrenatural".into(), slug: "sobrenatural".into() },
+    ]
 }

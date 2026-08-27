@@ -51,6 +51,7 @@ pub fn run() {
             commands::get_schedule,
             commands::get_details,
             commands::advanced_search,
+            commands::get_genres,
             commands::get_sources,
             // Streaming
             commands::get_servers,

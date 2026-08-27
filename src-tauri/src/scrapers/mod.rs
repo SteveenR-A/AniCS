@@ -42,6 +42,9 @@ pub trait AnimeExtractor: Send + Sync {
     /// Resuelve un servidor de video a una URL directa (HLS/MP4)
     async fn resolve_stream(&self, server: &VideoServer) -> AppResult<ResolvedMedia>;
 
+    /// Obtiene la lista de géneros disponibles en la fuente
+    async fn get_genres(&self) -> AppResult<Vec<GenreItem>>;
+
     /// Búsqueda avanzada con filtros (géneros, estado, tipo, año, etc.)
     async fn advanced_search(&self, filters: &SearchFilters) -> AppResult<SearchResultPage> {
         // Implementación por defecto: búsqueda simple si no se sobreescribe
