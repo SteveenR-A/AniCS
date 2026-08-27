@@ -6,11 +6,12 @@ import {
   ArrowLeft, Play, Pause, Volume2, VolumeX,
   Maximize, Minimize, Settings, ChevronLeft, ChevronRight,
   Loader2, FastForward, SkipForward, RotateCcw,
-  Sparkles, Check, Sun, ListVideo, Zap, Server, AlertCircle
+  Sparkles, Check, Sun, ListVideo, Zap, Server, AlertCircle, Moon
 } from 'lucide-react';
 import { usePlayerStore } from '@/stores/usePlayerStore';
 import { resolveStream, getServers, getDetails } from '@/services/animeService';
 import { upsertHistory } from '@/services/storageService';
+import { useResponsive } from '@/hooks/useResponsive';
 import type { VideoServer, Episode } from '@/types';
 
 function formatTime(s: number) {
@@ -30,11 +31,22 @@ const ASPECT_OPTIONS = [
 export function PlayerPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const { isMobile } = useResponsive();
+
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const hlsRef = useRef<Hls | null>(null);
   const controlsTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const toastTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  // Touch gesture state refs
+  const touchStartY = useRef<number | null>(null);
+  const touchStartX = useRef<number | null>(null);
+  const touchStartTime = useRef<number>(0);
+  const touchActionSide = useRef<'left' | 'right' | null>(null);
+  const initialBrightness = useRef<number>(1.0);
+  const initialVolume = useRef<number>(1.0);
+  const lastTapTime = useRef<number>(0);
 
   const queryUrl = searchParams.get('url');
   const queryEp = searchParams.get('ep');
@@ -58,7 +70,7 @@ export function PlayerPage() {
   const [autoNext, setAutoNext] = useState(true);
   const [activeDrawer, setActiveDrawer] = useState<'none' | 'servers' | 'settings'>('none');
 
-  // Gesture Feedback Toasts
+  // Gesture Feedback HUD Toasts
   const [hudToast, setHudToast] = useState<{ icon: 'volume' | 'brightness' | 'seek'; text: string; value?: number } | null>(null);
   const [brightness, setBrightness] = useState(1.0);
   const [doubleTapSide, setDoubleTapSide] = useState<'left' | 'right' | null>(null);
@@ -68,6 +80,29 @@ export function PlayerPage() {
     if (toastTimeout.current) clearTimeout(toastTimeout.current);
     toastTimeout.current = setTimeout(() => setHudToast(null), 1500);
   };
+
+  // Orientación automática a horizontal en Android / Móvil al entrar al reproductor
+  useEffect(() => {
+    try {
+      if (typeof window !== 'undefined' && window.screen && 'orientation' in window.screen) {
+        const orient = window.screen.orientation as any;
+        if (orient && orient.lock) {
+          orient.lock('landscape').catch(() => {});
+        }
+      }
+    } catch {}
+
+    return () => {
+      try {
+        if (typeof window !== 'undefined' && window.screen && 'orientation' in window.screen) {
+          const orient = window.screen.orientation as any;
+          if (orient && orient.unlock) {
+            orient.unlock();
+          }
+        }
+      } catch {}
+    };
+  }, []);
 
   // Recuperación automática de estado desde URL si se abre directamente o se refresca
   useEffect(() => {
@@ -107,7 +142,7 @@ export function PlayerPage() {
     initFromParams();
   }, [queryUrl, queryEp, querySource]);
 
-  // Sincronizar volumen y velocidad
+  // Sincronizar volumen y velocidad en el elemento <video>
   useEffect(() => {
     if (videoRef.current) {
       videoRef.current.volume = isMuted ? 0 : volume;
@@ -279,6 +314,121 @@ export function PlayerPage() {
     }
   };
 
+  // GESTOS TÁCTILES COMPLETOS (Android / Móvil y Touchscreens):
+  // - Izquierda: Deslizar verticalmente ajusta Brillo
+  // - Derecha: Deslizar verticalmente ajusta Volumen
+  // - Doble toque izquierda: -10s
+  // - Doble toque derecha: +10s
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length === 1) {
+      const touch = e.touches[0];
+      const screenWidth = window.innerWidth;
+      const x = touch.clientX;
+      const y = touch.clientY;
+
+      touchStartX.current = x;
+      touchStartY.current = y;
+      touchStartTime.current = Date.now();
+      initialBrightness.current = brightness;
+      initialVolume.current = isMuted ? 0 : volume;
+
+      if (x < screenWidth * 0.45) {
+        touchActionSide.current = 'left'; // Brillo
+      } else if (x > screenWidth * 0.55) {
+        touchActionSide.current = 'right'; // Volumen
+      } else {
+        touchActionSide.current = null;
+      }
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (e.touches.length === 1 && touchStartY.current !== null && touchActionSide.current) {
+      const touch = e.touches[0];
+      const deltaY = touchStartY.current - touch.clientY;
+      const screenHeight = window.innerHeight;
+
+      // Sensibilidad del gesto vertical (deslizar ~300px recorre el rango completo)
+      const change = deltaY / (screenHeight * 0.6);
+
+      if (touchActionSide.current === 'left') {
+        // Ajuste de brillo: 0.1 a 1.5
+        const newBri = Math.max(0.1, Math.min(1.5, initialBrightness.current + change));
+        setBrightness(newBri);
+        showToast({
+          icon: 'brightness',
+          text: `Brillo: ${Math.round(newBri * 100)}%`,
+          value: newBri,
+        });
+      } else if (touchActionSide.current === 'right') {
+        // Ajuste de volumen: 0.0 a 1.0
+        const newVol = Math.max(0, Math.min(1.0, initialVolume.current + change));
+        setVolume(newVol);
+        setIsMuted(false);
+        showToast({
+          icon: 'volume',
+          text: `Volumen: ${Math.round(newVol * 100)}%`,
+          value: newVol,
+        });
+      }
+    }
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    const now = Date.now();
+    const timeDiff = now - touchStartTime.current;
+
+    // Detectar doble toque (tap rápido < 280ms sin mucho arrastre)
+    if (timeDiff < 280 && touchStartX.current !== null && touchStartY.current !== null) {
+      const doubleTapDiff = now - lastTapTime.current;
+      const x = touchStartX.current;
+      const screenWidth = window.innerWidth;
+
+      if (doubleTapDiff < 300) {
+        // Doble toque detectado
+        if (x < screenWidth * 0.4) {
+          seekRelative(-10);
+          setDoubleTapSide('left');
+          setTimeout(() => setDoubleTapSide(null), 600);
+        } else if (x > screenWidth * 0.6) {
+          seekRelative(10);
+          setDoubleTapSide('right');
+          setTimeout(() => setDoubleTapSide(null), 600);
+        } else {
+          togglePlay();
+        }
+        lastTapTime.current = 0;
+      } else {
+        lastTapTime.current = now;
+        showControlsTemp();
+      }
+    }
+
+    touchStartY.current = null;
+    touchStartX.current = null;
+    touchActionSide.current = null;
+  };
+
+  // Rueda del ratón para PC / Desktop (ajuste rápido con scroll)
+  const handleWheel = (e: React.WheelEvent) => {
+    const x = e.clientX;
+    const screenWidth = window.innerWidth;
+    const isUp = e.deltaY < 0;
+
+    if (x < screenWidth * 0.5) {
+      // Mitad izquierda: Brillo
+      const newBri = Math.max(0.1, Math.min(1.5, brightness + (isUp ? 0.05 : -0.05)));
+      setBrightness(newBri);
+      showToast({ icon: 'brightness', text: `Brillo: ${Math.round(newBri * 100)}%`, value: newBri });
+    } else {
+      // Mitad derecha: Volumen
+      const newVol = Math.max(0, Math.min(1.0, volume + (isUp ? 0.05 : -0.05)));
+      setVolume(newVol);
+      setIsMuted(false);
+      showToast({ icon: 'volume', text: `Volumen: ${Math.round(newVol * 100)}%`, value: newVol });
+    }
+  };
+
   // Atajos de teclado para Windows / Desktop
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -307,12 +457,12 @@ export function PlayerPage() {
         case 'arrowup':
           e.preventDefault();
           setVolume(Math.min(1, volume + 0.1));
-          showToast({ icon: 'volume', text: `${Math.round(Math.min(1, volume + 0.1) * 100)}%`, value: Math.min(1, volume + 0.1) });
+          showToast({ icon: 'volume', text: `Volumen: ${Math.round(Math.min(1, volume + 0.1) * 100)}%`, value: Math.min(1, volume + 0.1) });
           break;
         case 'arrowdown':
           e.preventDefault();
           setVolume(Math.max(0, volume - 0.1));
-          showToast({ icon: 'volume', text: `${Math.round(Math.max(0, volume - 0.1) * 100)}%`, value: Math.max(0, volume - 0.1) });
+          showToast({ icon: 'volume', text: `Volumen: ${Math.round(Math.max(0, volume - 0.1) * 100)}%`, value: Math.max(0, volume - 0.1) });
           break;
         case 'm':
           setIsMuted(!isMuted);
@@ -394,21 +544,28 @@ export function PlayerPage() {
         width: '100vw', height: '100vh', background: '#000000',
         position: 'relative', overflow: 'hidden', userSelect: 'none',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
+        paddingTop: isMobile ? 'env(safe-area-inset-top, 0px)' : 0,
+        paddingBottom: isMobile ? 'env(safe-area-inset-bottom, 0px)' : 0,
       }}
       onMouseMove={showControlsTemp}
       onClick={showControlsTemp}
+      onWheel={handleWheel}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
     >
-      {/* Video Layer */}
+      {/* ── Capa de Video con Brillo Real ── */}
       <div style={{
         position: 'absolute', inset: 0,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        filter: `brightness(${brightness})`,
+        background: '#000000',
       }}>
         <video
           ref={videoRef}
           style={{
             width: '100%', height: '100%',
             objectFit: aspectRatio,
+            filter: brightness > 1 ? `brightness(${brightness})` : undefined,
           }}
           onPlay={() => setIsPlaying(true)}
           onPause={() => setIsPlaying(false)}
@@ -426,6 +583,20 @@ export function PlayerPage() {
           }}
           onEnded={handleEnded}
         />
+
+        {/* ── Capa de Atenuación de Brillo Física (Dimmer Overlay) ── */}
+        {/* Garantiza atenuación real en hardware decoding tanto en Android como en Windows */}
+        {brightness < 1.0 && (
+          <div
+            style={{
+              position: 'absolute', inset: 0,
+              backgroundColor: '#000000',
+              opacity: Math.max(0, 1.0 - brightness),
+              pointerEvents: 'none',
+              zIndex: 5,
+            }}
+          />
+        )}
       </div>
 
       {/* Double Tap Seek Feedback */}
@@ -439,10 +610,10 @@ export function PlayerPage() {
               position: 'absolute',
               [doubleTapSide]: '15%',
               top: '50%', transform: 'translateY(-50%)',
-              background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(16px)',
+              background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(16px)',
               borderRadius: 'var(--radius-xl)', padding: '16px 24px',
               display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
-              color: 'white', zIndex: 30,
+              color: 'white', zIndex: 30, pointerEvents: 'none',
             }}
           >
             {doubleTapSide === 'left' ? <RotateCcw size={32} /> : <FastForward size={32} />}
@@ -461,12 +632,13 @@ export function PlayerPage() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -20, scale: 0.9 }}
             style={{
-              position: 'absolute', top: 80,
-              background: 'rgba(10, 11, 15, 0.85)', backdropFilter: 'blur(20px)',
+              position: 'absolute', top: isMobile ? 40 : 80,
+              background: 'rgba(10, 11, 15, 0.88)', backdropFilter: 'blur(20px)',
               border: '1px solid var(--border-moderate)',
               borderRadius: 'var(--radius-full)', padding: '8px 20px',
               color: 'white', zIndex: 40, display: 'flex', alignItems: 'center', gap: 10,
               boxShadow: 'var(--shadow-glow)', fontSize: 13, fontWeight: 700,
+              pointerEvents: 'none',
             }}
           >
             {hudToast.icon === 'volume' && <Volume2 size={16} color="var(--accent-primary)" />}
@@ -483,7 +655,7 @@ export function PlayerPage() {
           position: 'absolute', inset: 0,
           background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)',
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-          gap: 14, zIndex: 35,
+          gap: 14, zIndex: 35, pointerEvents: 'none',
         }}>
           <div style={{
             width: 44, height: 44, borderRadius: '50%',
@@ -507,15 +679,16 @@ export function PlayerPage() {
             transition={{ duration: 0.2 }}
             style={{
               position: 'absolute', inset: 0,
-              background: 'linear-gradient(to bottom, rgba(0,0,0,0.8) 0%, transparent 25%, transparent 75%, rgba(0,0,0,0.9) 100%)',
+              background: 'linear-gradient(to bottom, rgba(0,0,0,0.85) 0%, transparent 25%, transparent 75%, rgba(0,0,0,0.92) 100%)',
               display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
-              padding: '24px 28px', zIndex: 20, pointerEvents: 'auto',
+              padding: isMobile ? '16px 20px' : '24px 28px',
+              zIndex: 20, pointerEvents: 'auto',
             }}
             onClick={e => e.stopPropagation()}
           >
             {/* Top Bar: Back, Title & Dynamic Server Selector Chips */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 14, minWidth: 0, flex: 1 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, flex: 1 }}>
                 <button
                   onClick={() => {
                     saveProgress();
@@ -531,10 +704,10 @@ export function PlayerPage() {
                   <ArrowLeft size={18} />
                 </button>
                 <div style={{ minWidth: 0 }}>
-                  <h2 style={{ fontSize: 15, fontWeight: 800, color: 'white', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  <h2 style={{ fontSize: isMobile ? 14 : 16, fontWeight: 800, color: 'white', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {currentAnime.title}
                   </h2>
-                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                     Episodio {currentEpisode.number} {currentEpisode.title ? `· ${currentEpisode.title}` : ''}
                   </span>
                 </div>
@@ -543,13 +716,15 @@ export function PlayerPage() {
               {/* Selector Rápido de Servidores Soportados (Magi, Desu, Mediafire, etc.) */}
               <div style={{
                 display: 'flex', alignItems: 'center', gap: 6,
-                background: 'rgba(10,11,15,0.7)', padding: '4px 8px',
+                background: 'rgba(10,11,15,0.75)', padding: '4px 8px',
                 borderRadius: 'var(--radius-full)', border: '1px solid rgba(255,255,255,0.12)',
-                backdropFilter: 'blur(16px)', overflowX: 'auto', maxWidth: 480,
+                backdropFilter: 'blur(16px)', overflowX: 'auto', maxWidth: isMobile ? 220 : 480,
               }}>
-                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', paddingLeft: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <Server size={12} /> Servidor:
-                </span>
+                {!isMobile && (
+                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', paddingLeft: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <Server size={12} /> Servidor:
+                  </span>
+                )}
                 {servers.map((srv, idx) => {
                   const isSelected = selectedServer?.url === srv.url;
                   return (
@@ -608,17 +783,17 @@ export function PlayerPage() {
             </div>
 
             {/* Center: Play/Pause Big Button & Quick Seek Controls */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 32 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: isMobile ? 24 : 36 }}>
               <button
                 onClick={() => seekRelative(-10)}
                 style={{
                   background: 'rgba(255,255,255,0.08)', border: 'none', borderRadius: '50%',
-                  width: 48, height: 48, color: 'white', cursor: 'pointer',
+                  width: isMobile ? 42 : 50, height: isMobile ? 42 : 50, color: 'white', cursor: 'pointer',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   backdropFilter: 'blur(12px)',
                 }}
               >
-                <RotateCcw size={22} />
+                <RotateCcw size={isMobile ? 20 : 24} />
               </button>
 
               <motion.button
@@ -628,32 +803,32 @@ export function PlayerPage() {
                 style={{
                   background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))',
                   border: 'none', borderRadius: '50%',
-                  width: 68, height: 68, color: 'white', cursor: 'pointer',
+                  width: isMobile ? 60 : 72, height: isMobile ? 60 : 72, color: 'white', cursor: 'pointer',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   boxShadow: 'var(--shadow-glow)',
                 }}
               >
-                {isPlaying ? <Pause size={30} fill="white" /> : <Play size={30} fill="white" style={{ marginLeft: 4 }} />}
+                {isPlaying ? <Pause size={isMobile ? 26 : 32} fill="white" /> : <Play size={isMobile ? 26 : 32} fill="white" style={{ marginLeft: 4 }} />}
               </motion.button>
 
               <button
                 onClick={() => seekRelative(10)}
                 style={{
                   background: 'rgba(255,255,255,0.08)', border: 'none', borderRadius: '50%',
-                  width: 48, height: 48, color: 'white', cursor: 'pointer',
+                  width: isMobile ? 42 : 50, height: isMobile ? 42 : 50, color: 'white', cursor: 'pointer',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   backdropFilter: 'blur(12px)',
                 }}
               >
-                <FastForward size={22} />
+                <FastForward size={isMobile ? 20 : 24} />
               </button>
             </div>
 
             {/* Bottom Bar: Timeline, Volume, Skip Opening, Fullscreen */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {/* Timeline Slider */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <span style={{ fontSize: 12, fontWeight: 700, color: 'white', minWidth: 44, textAlign: 'right' }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: 'white', minWidth: 40, textAlign: 'right' }}>
                   {formatTime(playbackTime)}
                 </span>
                 <input
@@ -671,34 +846,36 @@ export function PlayerPage() {
                     cursor: 'pointer', height: 6,
                   }}
                 />
-                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', minWidth: 44 }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', minWidth: 40 }}>
                   {formatTime(duration)}
                 </span>
               </div>
 
               {/* Actions Row */}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                {/* Volume Controls */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                {/* Volume Controls (Desktop & Mobile) */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <button
                     onClick={() => setIsMuted(!isMuted)}
-                    style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer' }}
+                    style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
                   >
                     {isMuted || volume === 0 ? <VolumeX size={18} /> : <Volume2 size={18} />}
                   </button>
-                  <input
-                    type="range"
-                    min={0}
-                    max={1}
-                    step={0.05}
-                    value={isMuted ? 0 : volume}
-                    onChange={e => {
-                      const v = parseFloat(e.target.value);
-                      setVolume(v);
-                      setIsMuted(false);
-                    }}
-                    style={{ width: 80, accentColor: 'var(--accent-primary)', cursor: 'pointer' }}
-                  />
+                  {!isMobile && (
+                    <input
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      value={isMuted ? 0 : volume}
+                      onChange={e => {
+                        const v = parseFloat(e.target.value);
+                        setVolume(v);
+                        setIsMuted(false);
+                      }}
+                      style={{ width: 80, accentColor: 'var(--accent-primary)', cursor: 'pointer' }}
+                    />
+                  )}
                 </div>
 
                 {/* Center Quick Skip Buttons */}
@@ -707,36 +884,36 @@ export function PlayerPage() {
                     onClick={() => seekRelative(85)}
                     style={{
                       background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.2)',
-                      borderRadius: 'var(--radius-full)', padding: '6px 14px',
-                      color: 'white', fontSize: 12, fontWeight: 700, cursor: 'pointer',
-                      backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', gap: 6,
+                      borderRadius: 'var(--radius-full)', padding: isMobile ? '5px 10px' : '6px 14px',
+                      color: 'white', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                      backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', gap: 4,
                     }}
                   >
-                    <SkipForward size={13} /> Saltar Intro (+85s)
+                    <SkipForward size={12} /> Saltar Intro (+85s)
                   </button>
                   {currentEpisode.number > 1 && (
                     <button
                       onClick={() => handleLoadEpisode(currentEpisode.number - 1)}
                       style={{
                         background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)',
-                        borderRadius: 'var(--radius-full)', padding: '6px 12px',
-                        color: 'white', fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                        display: 'flex', alignItems: 'center', gap: 4,
+                        borderRadius: 'var(--radius-full)', padding: isMobile ? '5px 8px' : '6px 12px',
+                        color: 'white', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                        display: 'flex', alignItems: 'center', gap: 2,
                       }}
                     >
-                      <ChevronLeft size={14} /> Ep. Ant
+                      <ChevronLeft size={13} /> {!isMobile && 'Ep. Ant'}
                     </button>
                   )}
                   <button
                     onClick={() => handleLoadEpisode(currentEpisode.number + 1)}
                     style={{
                       background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)',
-                      borderRadius: 'var(--radius-full)', padding: '6px 12px',
-                      color: 'white', fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                      display: 'flex', alignItems: 'center', gap: 4,
+                      borderRadius: 'var(--radius-full)', padding: isMobile ? '5px 8px' : '6px 12px',
+                      color: 'white', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', gap: 2,
                     }}
                   >
-                    Ep. Sig <ChevronRight size={14} />
+                    {!isMobile && 'Ep. Sig'} <ChevronRight size={13} />
                   </button>
                 </div>
 
@@ -764,14 +941,14 @@ export function PlayerPage() {
             exit={{ x: '100%' }}
             transition={{ type: 'spring', damping: 25 }}
             style={{
-              position: 'absolute', top: 0, right: 0, bottom: 0, width: 340,
-              background: 'rgba(10,11,15,0.92)', backdropFilter: 'blur(20px)',
+              position: 'absolute', top: 0, right: 0, bottom: 0, width: isMobile ? '80vw' : 340,
+              background: 'rgba(10,11,15,0.95)', backdropFilter: 'blur(24px)',
               borderLeft: '1px solid var(--border-moderate)',
-              zIndex: 30, padding: 24, display: 'flex', flexDirection: 'column',
+              zIndex: 30, padding: 20, display: 'flex', flexDirection: 'column',
             }}
             onClick={e => e.stopPropagation()}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <h3 style={{ fontSize: 16, fontWeight: 800, color: 'white', margin: 0 }}>Episodios</h3>
               <button
                 onClick={() => setActiveDrawer('none')}
@@ -781,7 +958,7 @@ export function PlayerPage() {
               </button>
             </div>
 
-            <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
               {currentAnime.episodes.map(ep => {
                 const isCurrent = ep.number === currentEpisode.number;
                 return (
@@ -792,7 +969,7 @@ export function PlayerPage() {
                       setActiveDrawer('none');
                     }}
                     style={{
-                      padding: '12px 14px', borderRadius: 'var(--radius-md)',
+                      padding: '10px 12px', borderRadius: 'var(--radius-md)',
                       background: isCurrent ? 'var(--accent-primary)' : 'var(--bg-elevated)',
                       border: `1px solid ${isCurrent ? 'transparent' : 'var(--border-subtle)'}`,
                       color: isCurrent ? 'white' : 'var(--text-primary)',
@@ -801,7 +978,7 @@ export function PlayerPage() {
                     }}
                   >
                     <span>Episodio {ep.number}</span>
-                    {isCurrent && <span style={{ fontSize: 11, fontWeight: 800 }}>REPRODUCIENDO</span>}
+                    {isCurrent && <span style={{ fontSize: 10, fontWeight: 800 }}>ACTUAL</span>}
                   </button>
                 );
               })}
@@ -819,21 +996,69 @@ export function PlayerPage() {
             exit={{ x: '100%' }}
             transition={{ type: 'spring', damping: 25 }}
             style={{
-              position: 'absolute', top: 0, right: 0, bottom: 0, width: 340,
-              background: 'rgba(10,11,15,0.92)', backdropFilter: 'blur(20px)',
+              position: 'absolute', top: 0, right: 0, bottom: 0, width: isMobile ? '80vw' : 340,
+              background: 'rgba(10,11,15,0.95)', backdropFilter: 'blur(24px)',
               borderLeft: '1px solid var(--border-moderate)',
-              zIndex: 30, padding: 24, display: 'flex', flexDirection: 'column', gap: 24,
+              zIndex: 30, padding: 20, display: 'flex', flexDirection: 'column', gap: 20,
+              overflowY: 'auto',
             }}
             onClick={e => e.stopPropagation()}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h3 style={{ fontSize: 16, fontWeight: 800, color: 'white', margin: 0 }}>Ajustes</h3>
+              <h3 style={{ fontSize: 16, fontWeight: 800, color: 'white', margin: 0 }}>Ajustes de Reproducción</h3>
               <button
                 onClick={() => setActiveDrawer('none')}
                 style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
               >
                 ✕
               </button>
+            </div>
+
+            {/* Brillo */}
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <Sun size={14} color="#fbbf24" /> Brillo de Pantalla
+                </span>
+                <span style={{ fontSize: 12, color: 'white', fontWeight: 700 }}>{Math.round(brightness * 100)}%</span>
+              </div>
+              <input
+                type="range"
+                min={0.1}
+                max={1.5}
+                step={0.05}
+                value={brightness}
+                onChange={e => setBrightness(parseFloat(e.target.value))}
+                style={{ width: '100%', marginTop: 8, accentColor: '#fbbf24', cursor: 'pointer' }}
+              />
+              <span style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
+                Tip: Desliza verticalmente en la mitad izquierda de la pantalla para ajustar.
+              </span>
+            </div>
+
+            {/* Nivel de Ganancia de Audio */}
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <Volume2 size={14} color="var(--accent-primary)" /> Ganancia de Audio
+                </span>
+                <span style={{ fontSize: 12, color: 'white', fontWeight: 700 }}>{isMuted ? 'Muted' : `${Math.round(volume * 100)}%`}</span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={isMuted ? 0 : volume}
+                onChange={e => {
+                  setVolume(parseFloat(e.target.value));
+                  setIsMuted(false);
+                }}
+                style={{ width: '100%', marginTop: 8, accentColor: 'var(--accent-primary)', cursor: 'pointer' }}
+              />
+              <span style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
+                Tip: Desliza verticalmente en la mitad derecha de la pantalla para ajustar.
+              </span>
             </div>
 
             {/* Velocidad */}
@@ -859,7 +1084,7 @@ export function PlayerPage() {
               </div>
             </div>
 
-            {/* Ajuste de Pantalla */}
+            {/* Escalado de Video */}
             <div>
               <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
                 Escalado de Video
@@ -870,10 +1095,10 @@ export function PlayerPage() {
                     key={opt.id}
                     onClick={() => setAspectRatio(opt.id)}
                     style={{
-                      padding: '10px 14px', borderRadius: 'var(--radius-md)',
+                      padding: '8px 12px', borderRadius: 'var(--radius-md)',
                       background: aspectRatio === opt.id ? 'rgba(59,130,246,0.2)' : 'var(--bg-elevated)',
                       border: `1px solid ${aspectRatio === opt.id ? 'var(--accent-primary)' : 'var(--border-subtle)'}`,
-                      color: 'white', fontSize: 13, fontWeight: 600, cursor: 'pointer', textAlign: 'left',
+                      color: 'white', fontSize: 12, fontWeight: 600, cursor: 'pointer', textAlign: 'left',
                     }}
                   >
                     {opt.label}
@@ -882,26 +1107,7 @@ export function PlayerPage() {
               </div>
             </div>
 
-            {/* Brillo */}
-            <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                  Brillo
-                </span>
-                <span style={{ fontSize: 12, color: 'white', fontWeight: 700 }}>{Math.round(brightness * 100)}%</span>
-              </div>
-              <input
-                type="range"
-                min={0.3}
-                max={1.5}
-                step={0.05}
-                value={brightness}
-                onChange={e => setBrightness(parseFloat(e.target.value))}
-                style={{ width: '100%', marginTop: 8, accentColor: '#fbbf24', cursor: 'pointer' }}
-              />
-            </div>
-
-            {/* Auto Next Toggle */}
+            {/* Auto Next */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span style={{ fontSize: 13, color: 'white', fontWeight: 600 }}>Siguiente episodio automático</span>
               <input
