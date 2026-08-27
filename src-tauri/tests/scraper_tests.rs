@@ -54,7 +54,6 @@ async fn test_mundodonghua_get_latest() {
 async fn test_jkanime_schedule_and_top() {
     let top_html = anics_lib::scrapers::fetch_html("https://jkanime.net/top/", Some("https://jkanime.net/")).await.unwrap();
     let doc_top = scraper::Html::parse_document(&top_html);
-    let top_rows_sel = scraper::Selector::parse("div.top-anime, div.card, div[class*='top'], div.semana, div.anime__item, table tr, a[href*='jkanime.net/']").unwrap();
     let sample = scraper::Selector::parse("a[href='https://jkanime.net/one-piece/']").unwrap();
     if let Some(a) = doc_top.select(&sample).next() {
         println!("Parent tag and class: <{}> class='{}'", a.parent().unwrap().value().as_element().unwrap().name(), a.parent().unwrap().value().as_element().unwrap().attr("class").unwrap_or(""));
@@ -74,14 +73,14 @@ async fn test_jkanime_poster_extraction() {
 
 #[tokio::test]
 async fn test_koukaku_kidoutai_details() {
+    let url = "https://jkanime.net/koukaku-kidoutai-tv/";
     let extractor = JKAnimeExtractor::new();
-    let search = extractor.search("Koukaku Kidoutai").await.expect("Search failed");
-    for item in &search {
-        println!("Search item: title='{}', url='{}'", item.title, item.url);
-        let det = extractor.get_details(&item.url).await.expect("Failed details");
-        println!("Details: title='{}', episodes_count={}, status={:?}, season={:?}, studio={:?}",
-            det.title, det.episodes.len(), det.status, det.season, det.studio);
+    let det = extractor.get_details(url).await.expect("Failed to get details");
+    println!("Koukaku Kidoutai Details: title='{}', episodes_count={}", det.title, det.episodes.len());
+    for ep in det.episodes.iter() {
+        println!(" - Ep {}: url='{}'", ep.number, ep.url);
     }
+    assert_eq!(det.episodes.len(), 8, "Expected 8 episodes for Koukaku Kidoutai (TV)");
 }
 
 #[tokio::test]

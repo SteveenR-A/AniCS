@@ -27,6 +27,18 @@ static EPISODE_ID_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r#"(?:ajax/episodes/|data-anime=["'])(\d+)"#).unwrap()
 });
 
+static UEP_EP_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"href=["']https?://jkanime\.net/[^/]+/(\d+)/?["'][^>]*id=["']uep["']|id=["']uep["'][^>]*href=["']https?://jkanime\.net/[^/]+/(\d+)/?["']"#).unwrap()
+});
+
+static ULTIMO_EP_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"Último episodio[^<]*?-\s*(\d+)"#).unwrap()
+});
+
+static EP_RANGE_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"Ep\s*1\s*-\s*(\d+)"#).unwrap()
+});
+
 static TOTAL_EP_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r#"Episodios:</span>\s*(\d+)"#).unwrap()
 });
@@ -556,9 +568,24 @@ impl AnimeExtractor for JKAnimeExtractor {
                 .and_then(|c| c.get(1))
                 .map(|m| m.as_str().to_string());
 
-            let total_ep_hint = TOTAL_EP_RE.captures(&html)
-                .and_then(|c| c.get(1))
+            let total_ep_hint = UEP_EP_RE.captures(&html)
+                .and_then(|c| c.get(1).or_else(|| c.get(2)))
                 .and_then(|m| m.as_str().parse::<u32>().ok())
+                .or_else(|| {
+                    ULTIMO_EP_RE.captures(&html)
+                        .and_then(|c| c.get(1))
+                        .and_then(|m| m.as_str().parse::<u32>().ok())
+                })
+                .or_else(|| {
+                    EP_RANGE_RE.captures(&html)
+                        .and_then(|c| c.get(1))
+                        .and_then(|m| m.as_str().parse::<u32>().ok())
+                })
+                .or_else(|| {
+                    TOTAL_EP_RE.captures(&html)
+                        .and_then(|c| c.get(1))
+                        .and_then(|m| m.as_str().parse::<u32>().ok())
+                })
                 .or_else(|| total_ep_str.as_ref().and_then(|s| s.parse::<u32>().ok()));
 
             (title, thumbnail, synopsis, genres, status, anime_type, studio, duration, total_ep_str, season, broadcast, languages, anime_id, csrf_token, total_ep_hint)
