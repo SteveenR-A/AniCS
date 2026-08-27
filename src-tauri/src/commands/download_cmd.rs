@@ -173,18 +173,68 @@ pub async fn cancel_download(
     Ok(())
 }
 
-/// Obtiene el directorio de descargas predeterminado
+/// Obtiene el directorio de descargas predeterminado, buscando en settings, luego en Videos/AniCS (C#) y Downloads/AniCS
 #[tauri::command]
 pub fn get_default_download_dir(app_handle: AppHandle) -> Result<String, String> {
-    let dir = app_handle
-        .path()
-        .download_dir()
-        .map_err(|e| e.to_string())?
-        .join("AniCS");
-    if !dir.exists() {
-        let _ = fs::create_dir_all(&dir);
+    // 1. Si el usuario ya guardó una carpeta personalizada en ajustes
+    if let Ok(Some(saved_dir)) = storage::get_setting("download_dir") {
+        if !saved_dir.trim().is_empty() && Path::new(&saved_dir).exists() {
+            return Ok(saved_dir);
+        }
     }
-    Ok(dir.to_string_lossy().to_string())
+
+    // 2. Comprobar si existe la carpeta Videos/AniCS (usada por la versión de C#) y contiene animes
+    if let Ok(vid_dir) = app_handle.path().video_dir() {
+        let csharp_videos_dir = vid_dir.join("AniCS");
+        if csharp_videos_dir.exists() {
+            if let Ok(entries) = fs::read_dir(&csharp_videos_dir) {
+                if entries.count() > 0 {
+                    let _ = storage::set_setting("download_dir", &csharp_videos_dir.to_string_lossy());
+                    return Ok(csharp_videos_dir.to_string_lossy().to_string());
+                }
+            }
+        }
+    }
+
+    // 3. Comprobar Downloads/AniCS
+    if let Ok(dl_dir) = app_handle.path().download_dir() {
+        let dl_anics = dl_dir.join("AniCS");
+        if dl_anics.exists() {
+            if let Ok(entries) = fs::read_dir(&dl_anics) {
+                if entries.count() > 0 {
+                    let _ = storage::set_setting("download_dir", &dl_anics.to_string_lossy());
+                    return Ok(dl_anics.to_string_lossy().to_string());
+                }
+            }
+        }
+    }
+
+    // 4. Fallback: Videos/AniCS si existe, o Downloads/AniCS
+    let fallback = if let Ok(vid_dir) = app_handle.path().video_dir() {
+        let csharp_videos_dir = vid_dir.join("AniCS");
+        if csharp_videos_dir.exists() {
+            csharp_videos_dir
+        } else if let Ok(dl_dir) = app_handle.path().download_dir() {
+            dl_dir.join("AniCS")
+        } else {
+            csharp_videos_dir
+        }
+    } else if let Ok(dl_dir) = app_handle.path().download_dir() {
+        dl_dir.join("AniCS")
+    } else {
+        PathBuf::from("Downloads/AniCS")
+    };
+
+    let _ = fs::create_dir_all(&fallback);
+    let _ = storage::set_setting("download_dir", &fallback.to_string_lossy());
+    Ok(fallback.to_string_lossy().to_string())
+}
+
+/// Guarda la carpeta de descargas personalizada en ajustes
+#[tauri::command]
+pub fn set_download_dir(folder_path: String) -> Result<(), String> {
+    storage::set_setting("download_dir", &folder_path)
+        .map_err(|e| e.to_string())
 }
 
 /// Escanea la carpeta de descargas buscando subcarpetas de animes y agrupando sus episodios
@@ -196,11 +246,7 @@ pub async fn scan_local_downloads(
     let base_dir = if let Some(dir) = folder_path {
         PathBuf::from(dir)
     } else {
-        app_handle
-            .path()
-            .download_dir()
-            .map_err(|e| e.to_string())?
-            .join("AniCS")
+        PathBuf::from(get_default_download_dir(app_handle.clone())?)
     };
 
     if !base_dir.exists() {

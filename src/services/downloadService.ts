@@ -36,6 +36,10 @@ export const onDownloadCompleted = (
 export const getDefaultDownloadDir = (): Promise<string> =>
   invoke('get_default_download_dir');
 
+/** Guardar la carpeta de descargas seleccionada */
+export const setDownloadDir = (folderPath: string): Promise<void> =>
+  invoke('set_download_dir', { folderPath });
+
 /** Escanear carpeta de descargas buscando animes y episodios agrupados */
 export const scanLocalDownloads = (folderPath?: string): Promise<import('@/types').LocalAnimeFolder[]> =>
   invoke('scan_local_downloads', { folderPath });

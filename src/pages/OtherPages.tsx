@@ -11,7 +11,7 @@ import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { getHistory, clearHistory, getFavorites, removeFavorite } from '@/services/storageService';
 import {
-  scanLocalDownloads, deleteLocalDownload, deleteLocalAnimeFolder, getDefaultDownloadDir
+  scanLocalDownloads, deleteLocalDownload, deleteLocalAnimeFolder, getDefaultDownloadDir, setDownloadDir
 } from '@/services/downloadService';
 import { useDownloadStore } from '@/stores/useDownloadStore';
 import { usePlayerStore } from '@/stores/usePlayerStore';
@@ -292,6 +292,7 @@ export function DownloadsPage() {
       });
       if (selected && typeof selected === 'string') {
         setDownloadFolder(selected);
+        await setDownloadDir(selected);
         loadLocalFolders(selected);
       }
     } catch (e) {
