@@ -21,6 +21,8 @@ jobs:
   build-windows:
     name: Build Windows (MSI & EXE)
     runs-on: windows-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -45,16 +47,7 @@ jobs:
         run: npm install
 
       - name: Build Tauri Windows application
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tagName: ${{ github.ref_name }}
-          releaseName: 'AniCS ${{ github.ref_name }}'
-          releaseBody: 'Notas de la versión en CHANGELOG.md'
-          releaseDraft: false
-          prerelease: false
-          args: --bundles msi,nsis
+        run: npx @tauri-apps/cli build --bundles msi,nsis
 
       - name: Upload Windows MSI & EXE artifacts
         uses: actions/upload-artifact@v4
@@ -70,6 +63,8 @@ jobs:
   build-android:
     name: Build Android (APK)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -161,9 +156,16 @@ jobs:
     name: Publish Release Assets
     needs: [build-windows, build-android]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
 
       - name: Download Windows artifacts
         uses: actions/download-artifact@v4
