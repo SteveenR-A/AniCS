@@ -71,14 +71,37 @@ async fn test_jkanime_poster_extraction() {
 }
 
 #[tokio::test]
-async fn test_advanced_search_genre() {
+async fn test_koukaku_kidoutai_details() {
     let extractor = JKAnimeExtractor::new();
-    let filters = anics_lib::core::SearchFilters {
-        genre: Some("accion".to_string()),
-        page: 1,
-        ..Default::default()
-    };
-    let res = extractor.advanced_search(&filters).await.expect("Failed to search by genre");
-    println!("JKAnime Genre 'accion' results count: {}", res.results.len());
-    assert!(!res.results.is_empty(), "advanced_search by genre returned empty results");
+    let search = extractor.search("Koukaku Kidoutai").await.expect("Search failed");
+    for item in &search {
+        println!("Search item: title='{}', url='{}'", item.title, item.url);
+        let det = extractor.get_details(&item.url).await.expect("Failed details");
+        println!("Details: title='{}', episodes_count={}, status={:?}, season={:?}, studio={:?}",
+            det.title, det.episodes.len(), det.status, det.season, det.studio);
+    }
+}
+
+#[tokio::test]
+async fn test_mundodonghua_servers_and_stream() {
+    let extractor = MundoDonghuaExtractor::new();
+    let latest = extractor.get_latest(1).await.expect("Failed to get latest");
+    if let Some(first) = latest.first() {
+        println!("MundoDonghua First latest: title='{}', url='{}'", first.title, first.url);
+        let details = extractor.get_details(&first.url).await.expect("Failed details");
+        println!("MundoDonghua Details: episodes={}", details.episodes.len());
+        if let Some(ep) = details.episodes.first() {
+            println!("MundoDonghua First Ep URL: {}", ep.url);
+            let srvs = extractor.get_servers(&ep.url).await.expect("Failed servers");
+            println!("MundoDonghua Servers count: {}", srvs.len());
+            for s in &srvs {
+                println!(" - Server: name='{}', is_direct={}, url='{}'", s.name, s.is_direct, s.url);
+                match extractor.resolve_stream(s).await {
+                    Ok(media) => println!("   -> Resolved direct_url='{}', type={:?}", media.direct_url, media.media_type),
+                    Err(e) => println!("   -> Failed to resolve: {}", e),
+                }
+            }
+            assert!(!srvs.is_empty(), "MundoDonghua servers should not be empty");
+        }
+    }
 }

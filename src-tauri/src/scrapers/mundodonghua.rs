@@ -9,7 +9,7 @@ use crate::scrapers::{fetch_html, AnimeExtractor};
 const DEFAULT_MUNDODONGHUA_URL: &str = "https://www.mundodonghua.com";
 
 static IFRAME_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"<iframe[^>]+src=["']([^"']+)["']"#).unwrap()
+    Regex::new(r#"<iframe[^>]+src=\\?["']([^"'\\]+)\\?["']"#).unwrap()
 });
 
 pub struct MundoDonghuaExtractor {
@@ -306,48 +306,85 @@ impl AnimeExtractor for MundoDonghuaExtractor {
         })
     }
 
-    // Servidores de video
+    // Servidores de video dinámicos con soporte completo de HLS y servidores externos
     async fn get_servers(&self, episode_url: &str) -> AppResult<Vec<VideoServer>> {
         let html = fetch_html(episode_url, Some(&self.base_url)).await
             .map_err(AppError::Network)?;
         if html.is_empty() { return Ok(vec![]); }
 
-        let doc = Html::parse_document(&html);
         let mut servers = vec![];
 
-        let tab_sel = Selector::parse("ul.md-player-tabs li, .server-item").unwrap();
-        let iframe_sel = Selector::parse("div.md-player-container iframe, iframe").unwrap();
+        // 1. Extraer y desempaquetar todos los scripts eval(function(p,a,c,k,e,d)...)
+        for line in html.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("eval(function(p,a,c,k,e,d)") {
+                if let Some(unpacked) = JsUnpacker::unpack(trimmed) {
+                    // A) Servidor HLS Directo (Asura / mdplayer)
+                    if let Some(pos) = unpacked.find("file:") {
+                        let sub = &unpacked[pos..];
+                        if let Some(quote_start) = sub.find('"').or_else(|| sub.find('\'')) {
+                            let rest = &sub[quote_start + 1..];
+                            if let Some(quote_end) = rest.find('"').or_else(|| rest.find('\'')) {
+                                let stream_url = &rest[..quote_end];
+                                if stream_url.starts_with("http") && !servers.iter().any(|s: &VideoServer| s.url == stream_url) {
+                                    servers.push(VideoServer {
+                                        name: "Asura (Directo HLS)".to_string(),
+                                        url: stream_url.to_string(),
+                                        is_direct: true,
+                                        referer: Some(self.base_url.clone()),
+                                    });
+                                }
+                            }
+                        }
+                    }
 
-        for (idx, tab) in doc.select(&tab_sel).enumerate() {
-            let name = inner_text(&tab);
-            let srv_name = if name.is_empty() { format!("Servidor {}", idx + 1) } else { name };
+                    // B) Servidores Iframe embebidos (VOE, Streamwish, Vidhide, Fmoon)
+                    if let Some(iframe_match) = IFRAME_RE.captures(&unpacked).and_then(|c| c.get(1)) {
+                        let iframe_url = iframe_match.as_str().replace(r#"\"#, "").replace('\'', "").replace('"', "");
+                        if iframe_url.starts_with("http") && !servers.iter().any(|s: &VideoServer| s.url == iframe_url) {
+                            let name = if iframe_url.contains("voe.sx") {
+                                "VOE".to_string()
+                            } else if iframe_url.contains("embedwish") || iframe_url.contains("sfastwish") {
+                                "Streamwish".to_string()
+                            } else if iframe_url.contains("vidhide") {
+                                "Vidhide".to_string()
+                            } else if iframe_url.contains("bysekoze") {
+                                "Fmoon".to_string()
+                            } else {
+                                format!("Servidor {}", servers.len() + 1)
+                            };
 
-            if let Some(iframe) = doc.select(&iframe_sel).nth(idx) {
-                let src = attr(&iframe, "src");
-                if !src.is_empty() {
-                    servers.push(VideoServer {
-                        name: srv_name,
-                        url: src,
-                        is_direct: true,
-                        referer: Some(episode_url.to_string()),
-                    });
+                            servers.push(VideoServer {
+                                name,
+                                url: iframe_url,
+                                is_direct: false,
+                                referer: Some(episode_url.to_string()),
+                            });
+                        }
+                    }
                 }
             }
         }
 
+        // 2. Si no se encontraron por JS, fallback a iframes HTML estándar
         if servers.is_empty() {
-            for iframe in doc.select(&iframe_sel) {
+            let doc = Html::parse_document(&html);
+            let iframe_sel = Selector::parse("div.md-player-container iframe, iframe").unwrap();
+            for (idx, iframe) in doc.select(&iframe_sel).enumerate() {
                 let src = attr(&iframe, "src");
-                if !src.is_empty() {
+                if !src.is_empty() && !servers.iter().any(|s: &VideoServer| s.url == src) {
                     servers.push(VideoServer {
-                        name: "Reproductor Principal".to_string(),
+                        name: format!("Servidor {}", idx + 1),
                         url: src,
-                        is_direct: true,
+                        is_direct: false,
                         referer: Some(episode_url.to_string()),
                     });
                 }
             }
         }
+
+        // Priorizar servidores directos HLS al inicio
+        servers.sort_by(|a, b| b.is_direct.cmp(&a.is_direct));
 
         Ok(servers)
     }
@@ -356,6 +393,34 @@ impl AnimeExtractor for MundoDonghuaExtractor {
     async fn resolve_stream(&self, server: &VideoServer) -> AppResult<ResolvedMedia> {
         let url = &server.url;
 
+        // 1. Stream directo HLS de MundoDonghua (redirector.php o .m3u8)
+        if url.contains("redirector.php") || url.contains(".m3u8") {
+            return Ok(ResolvedMedia {
+                direct_url: url.clone(),
+                media_type: MediaType::Hls,
+                referer: Some(self.base_url.clone()),
+                user_agent: None,
+                qualities: vec![],
+            });
+        }
+
+        // 2. Extractor VOE
+        if url.contains("voe.sx") {
+            let html = fetch_html(url, server.referer.as_deref()).await
+                .map_err(AppError::Network)?;
+            if let Some(stream_url) = JsUnpacker::extract_stream_url(&html) {
+                let media_type = detect_media_type(&stream_url);
+                return Ok(ResolvedMedia {
+                    direct_url: stream_url,
+                    media_type,
+                    referer: Some("https://voe.sx/".to_string()),
+                    user_agent: None,
+                    qualities: vec![],
+                });
+            }
+        }
+
+        // 3. Fallback genérico para otros servidores embebidos
         let html = fetch_html(url, server.referer.as_deref()).await
             .map_err(AppError::Network)?;
 
@@ -368,22 +433,6 @@ impl AnimeExtractor for MundoDonghuaExtractor {
                 user_agent: None,
                 qualities: vec![],
             });
-        }
-
-        if let Some(nested) = IFRAME_RE.captures(&html).and_then(|c| c.get(1)) {
-            let nested_url = nested.as_str().replace(r#"\"#, "");
-            let nested_html = fetch_html(&nested_url, Some(url)).await
-                .map_err(AppError::Network)?;
-            if let Some(stream_url) = JsUnpacker::extract_stream_url(&nested_html) {
-                let media_type = detect_media_type(&stream_url);
-                return Ok(ResolvedMedia {
-                    direct_url: stream_url,
-                    media_type,
-                    referer: Some(nested_url),
-                    user_agent: None,
-                    qualities: vec![],
-                });
-            }
         }
 
         let media_type = detect_media_type(url);
