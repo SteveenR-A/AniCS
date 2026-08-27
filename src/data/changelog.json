@@ -1,0 +1,14 @@
+[
+  {
+    "version": "0.1.0",
+    "date": "2026-08-27",
+    "title": "Lanzamiento Inicial AniCS (Tauri v2)",
+    "type": "patch",
+    "highlights": [
+      "Nueva arquitectura ultrarrápida",
+      "Scraping sin navegador",
+      "Descargas HLS paralelas",
+      "Panel de Ajustes con URLs personalizadas"
+    ]
+  }
+]

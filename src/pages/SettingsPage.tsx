@@ -7,6 +7,7 @@ import {
 import { invoke } from '@tauri-apps/api/core';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
+import { ChangelogModal } from '@/components/ChangelogModal';
 
 const DEFAULT_JKANIME = 'https://jkanime.net';
 const DEFAULT_MUNDODONGHUA = 'https://www.mundodonghua.com';
@@ -44,8 +45,9 @@ export function SettingsPage() {
   const [updateInfo, setUpdateInfo] = useState<GitHubRelease | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
 
-  // Estado guardado
+  // Estado guardado y modal
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
+  const [showChangelog, setShowChangelog] = useState(false);
 
   useEffect(() => {
     // Cargar configuraciones guardadas
@@ -528,6 +530,7 @@ export function SettingsPage() {
           background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)',
           border: '1px solid var(--border-subtle)', padding: 20,
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          flexWrap: 'wrap', gap: 16,
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <div style={{
@@ -545,20 +548,37 @@ export function SettingsPage() {
             </div>
           </div>
 
-          <button
-            onClick={() => openUrl('https://github.com/SteveenR-A/ani-cli-dotnet')}
-            style={{
-              background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
-              borderRadius: 'var(--radius-md)', padding: '8px 14px',
-              color: 'var(--text-secondary)', cursor: 'pointer',
-              display: 'flex', alignItems: 'center', gap: 6, fontSize: 13,
-            }}
-          >
-            <Globe size={14} /> Repositorio GitHub
-          </button>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button
+              onClick={() => setShowChangelog(true)}
+              style={{
+                background: 'var(--accent-primary-glow)', border: '1px solid var(--border-accent)',
+                borderRadius: 'var(--radius-md)', padding: '8px 14px',
+                color: 'var(--text-primary)', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600,
+              }}
+            >
+              <Sparkles size={14} color="var(--accent-primary)" /> Notas de Parche
+            </button>
+
+            <button
+              onClick={() => openUrl('https://github.com/SteveenR-A/ani-cli-dotnet')}
+              style={{
+                background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
+                borderRadius: 'var(--radius-md)', padding: '8px 14px',
+                color: 'var(--text-secondary)', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: 6, fontSize: 13,
+              }}
+            >
+              <Globe size={14} /> GitHub
+            </button>
+          </div>
         </div>
 
       </div>
+
+      {/* Modal de Notas de Parche */}
+      <ChangelogModal isOpen={showChangelog} onClose={() => setShowChangelog(false)} />
     </div>
   );
 }
