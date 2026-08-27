@@ -137,6 +137,77 @@ impl AnimeExtractor for MundoDonghuaExtractor {
         self.get_latest(1).await
     }
 
+    // Búsqueda avanzada con filtros dinámicos
+    async fn advanced_search(&self, filters: &SearchFilters) -> AppResult<SearchResultPage> {
+        let page = filters.page;
+        let mut results = vec![];
+
+        let active_genre = filters.genre.as_ref();
+
+        let target_url = if let Some(ref q) = filters.query {
+            let q_trimmed = q.trim();
+            if !q_trimmed.is_empty() {
+                self.url(&format!("/busqueda?q={}&p={}", urlencoding::encode(q_trimmed), page))
+            } else if let Some(g) = active_genre {
+                let g_slug = g.to_lowercase().replace(' ', "-");
+                self.url(&format!("/genero/{}/{}", g_slug, page))
+            } else {
+                self.url(&format!("/donghuas?p={}", page))
+            }
+        } else if let Some(g) = active_genre {
+            let g_slug = g.to_lowercase().replace(' ', "-");
+            self.url(&format!("/genero/{}/{}", g_slug, page))
+        } else {
+            self.url(&format!("/donghuas?p={}", page))
+        };
+
+        let html = fetch_html(&target_url, Some(&self.base_url)).await
+            .map_err(AppError::Network)?;
+        if html.is_empty() {
+            return Ok(SearchResultPage {
+                results: vec![],
+                current_page: page,
+                total_pages: Some(1),
+                has_next: false,
+            });
+        }
+
+        let doc = Html::parse_document(&html);
+        let card_sel = Selector::parse("div.md-card, div.md-donghua-item, .donghua-card").unwrap();
+        let a_sel = Selector::parse("a").unwrap();
+        let title_sel = Selector::parse("h5.md-card-title, h5, .title, a.title").unwrap();
+        let img_sel = Selector::parse("img, .cover, .md-card-img img").unwrap();
+
+        for card in doc.select(&card_sel) {
+            let href = card.select(&a_sel).next().map(|a| attr(&a, "href")).unwrap_or_default();
+            let title = card.select(&title_sel).next().map(|h| inner_text(&h)).unwrap_or_default();
+            if href.is_empty() || title.is_empty() { continue; }
+
+            let thumbnail = card.select(&img_sel).next().map(|i| {
+                let src = attr(&i, "src");
+                if src.is_empty() { attr(&i, "data-src") } else { src }
+            }).unwrap_or_default();
+
+            results.push(AnimeResult {
+                title,
+                url: normalize_donghua_url(&href, &self.base_url),
+                thumbnail_url: normalize_url(&thumbnail, &self.base_url),
+                anime_type: Some("Donghua".to_string()),
+                source: self.id().to_string(),
+                ..Default::default()
+            });
+        }
+
+        let has_next = results.len() >= 20;
+
+        Ok(SearchResultPage {
+            results,
+            current_page: page,
+            total_pages: None,
+            has_next,
+        })
+    }
+
     // Detalles de serie enriquecidos
     async fn get_details(&self, url: &str) -> AppResult<AnimeDetails> {
         let clean_url = normalize_donghua_url(url, &self.base_url);
@@ -350,84 +421,6 @@ impl AnimeExtractor for MundoDonghuaExtractor {
         }
 
         Ok(default_donghua_genres())
-    }
-
-    // Búsqueda avanzada
-    async fn advanced_search(&self, filters: &SearchFilters) -> AppResult<SearchResultPage> {
-        let target_url = if let Some(g) = &filters.genre {
-            if !g.is_empty() {
-                self.url(&format!("/genero/{}", urlencoding::encode(g)))
-            } else if let Some(q) = &filters.query {
-                self.url(&format!("/busquedas?donghua={}", urlencoding::encode(q)))
-            } else {
-                self.url("/lista-donghuas")
-            }
-        } else if let Some(q) = &filters.query {
-            self.url(&format!("/busquedas?donghua={}", urlencoding::encode(q)))
-        } else if let Some(s) = &filters.status {
-            if s == "emision" || s == "En emision" {
-                self.url("/lista-donghuas-emision")
-            } else if s == "finalizado" || s == "Finalizadas" {
-                self.url("/lista-donghuas-finalizados")
-            } else {
-                self.url("/lista-donghuas")
-            }
-        } else {
-            self.url("/lista-donghuas")
-        };
-
-        let html = fetch_html(&target_url, Some(&self.base_url)).await
-            .map_err(AppError::Network)?;
-        if html.is_empty() {
-            return Ok(SearchResultPage {
-                results: vec![],
-                current_page: filters.page,
-                total_pages: None,
-                has_next: false,
-            });
-        }
-
-        let doc = Html::parse_document(&html);
-        let mut results = vec![];
-
-        let card_sel = Selector::parse("div.md-card, div[class*='md-card']").unwrap();
-        let link_sel = Selector::parse("a").unwrap();
-        let title_sel = Selector::parse("h3.md-card-title, .md-card-title, h3, h5").unwrap();
-        let img_sel = Selector::parse("img").unwrap();
-
-        for card in doc.select(&card_sel) {
-            if let Some(a) = card.select(&link_sel).next() {
-                let href = attr(&a, "href");
-                if href.is_empty() { continue; }
-
-                let title = card.select(&title_sel).next()
-                    .map(|t| inner_text(&t))
-                    .unwrap_or_else(|| attr(&a, "title"));
-                if title.is_empty() { continue; }
-
-                let thumbnail = card.select(&img_sel).next()
-                    .map(|i| {
-                        let src = attr(&i, "src");
-                        if src.is_empty() { attr(&i, "data-src") } else { src }
-                    }).unwrap_or_default();
-
-                results.push(AnimeResult {
-                    title,
-                    url: normalize_url(&href, &self.base_url),
-                    thumbnail_url: normalize_url(&thumbnail, &self.base_url),
-                    anime_type: Some("Donghua".to_string()),
-                    source: self.id().to_string(),
-                    ..Default::default()
-                });
-            }
-        }
-
-        Ok(SearchResultPage {
-            results,
-            current_page: filters.page,
-            total_pages: None,
-            has_next: false,
-        })
     }
 }
 

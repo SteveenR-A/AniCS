@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::core::*;
 use crate::downloader::HlsEngine;
+use crate::storage;
 use crate::AppState;
 
 type DownloadMap = Arc<Mutex<HashMap<String, tokio::task::JoinHandle<()>>>>;
@@ -28,14 +29,27 @@ impl DownloadManager {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct LocalVideoFile {
+pub struct LocalEpisodeItem {
     pub file_path: String,
     pub file_name: String,
+    pub episode_number: u32,
     pub file_size: u64,
     pub file_size_formatted: String,
-    pub anime_title: String,
-    pub episode_number: Option<u32>,
     pub modified_at: String,
+    pub watch_progress: f64,
+    pub watch_status: String, // "unseen" | "in_progress" | "completed"
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalAnimeFolder {
+    pub anime_title: String,
+    pub folder_path: String,
+    pub total_episodes: usize,
+    pub total_size: u64,
+    pub total_size_formatted: String,
+    pub cover_image: Option<String>,
+    pub episodes: Vec<LocalEpisodeItem>,
 }
 
 /// Iniciar una descarga HLS
@@ -173,12 +187,12 @@ pub fn get_default_download_dir(app_handle: AppHandle) -> Result<String, String>
     Ok(dir.to_string_lossy().to_string())
 }
 
-/// Escanea la carpeta de descargas buscando archivos de video locales
+/// Escanea la carpeta de descargas buscando subcarpetas de animes y agrupando sus episodios
 #[tauri::command]
 pub async fn scan_local_downloads(
     folder_path: Option<String>,
     app_handle: AppHandle,
-) -> Result<Vec<LocalVideoFile>, String> {
+) -> Result<Vec<LocalAnimeFolder>, String> {
     let base_dir = if let Some(dir) = folder_path {
         PathBuf::from(dir)
     } else {
@@ -194,21 +208,125 @@ pub async fn scan_local_downloads(
         return Ok(vec![]);
     }
 
-    let mut files = vec![];
-    scan_dir_recursive(&base_dir, &mut files, 0);
+    // Mapa: Nombre de Anime -> Lista de Episodios
+    let mut groups: HashMap<String, (PathBuf, Vec<LocalEpisodeItem>)> = HashMap::new();
 
-    // Ordenar de más reciente a más antiguo
-    files.sort_by(|a, b| b.modified_at.cmp(&a.modified_at));
+    // Obtener historial completo para mapear progreso
+    let history_map: HashMap<String, f64> = storage::get_history(500, 0)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|h| (format!("{}-{}", h.anime_title.to_lowercase(), h.episode_number), h.watch_progress))
+        .collect();
 
-    Ok(files)
+    // 1. Escanear subdirectorios (cada subdirectorio representa un Anime)
+    if let Ok(entries) = fs::read_dir(&base_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                let folder_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("Anime").to_string();
+                let clean_title = folder_name.replace('_', " ").trim().to_string();
+
+                let mut episodes = vec![];
+                scan_episodes_in_dir(&path, &clean_title, &mut episodes, &history_map);
+
+                if !episodes.is_empty() {
+                    // Ordenar episodios ascendentemente por número
+                    episodes.sort_by_key(|e| e.episode_number);
+                    groups.insert(clean_title, (path, episodes));
+                }
+            } else if path.is_file() {
+                // Archivo suelto en raíz
+                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                    if ["mp4", "mkv", "ts", "webm", "avi"].contains(&ext.to_lowercase().as_str()) {
+                        let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("video").to_string();
+                        let (anime_title, ep_num) = parse_anime_from_filename(&file_name, None);
+                        let ep_number = ep_num.unwrap_or(1);
+
+                        let file_size = path.metadata().map(|m| m.len()).unwrap_or(0);
+                        let modified_at = path.metadata().ok()
+                            .and_then(|m| m.modified().ok())
+                            .and_then(|m| {
+                                let dt: DateTime<Utc> = m.into();
+                                Some(dt.format("%Y-%m-%d %H:%M").to_string())
+                            })
+                            .unwrap_or_else(|| "Reciente".to_string());
+
+                        let key = format!("{}-{}", anime_title.to_lowercase(), ep_number);
+                        let progress = history_map.get(&key).cloned().unwrap_or(0.0);
+                        let watch_status = if progress >= 0.85 {
+                            "completed"
+                        } else if progress > 0.05 {
+                            "in_progress"
+                        } else {
+                            "unseen"
+                        }.to_string();
+
+                        let item = LocalEpisodeItem {
+                            file_path: path.to_string_lossy().to_string(),
+                            file_name,
+                            episode_number: ep_number,
+                            file_size,
+                            file_size_formatted: format_bytes(file_size),
+                            modified_at,
+                            watch_progress: progress,
+                            watch_status,
+                        };
+
+                        let entry = groups.entry(anime_title.clone()).or_insert_with(|| (base_dir.clone(), vec![]));
+                        entry.1.push(item);
+                    }
+                }
+            }
+        }
+    }
+
+    let mut result = vec![];
+    for (anime_title, (folder_path, mut episodes)) in groups {
+        episodes.sort_by_key(|e| e.episode_number);
+        let total_size: u64 = episodes.iter().map(|e| e.file_size).sum();
+        let total_episodes = episodes.len();
+
+        // Buscar si existe un poster.jpg o cover.png en la carpeta
+        let cover_image = [
+            folder_path.join("poster.jpg"),
+            folder_path.join("cover.jpg"),
+            folder_path.join("poster.png"),
+            folder_path.join("cover.png"),
+        ].iter().find(|p| p.exists()).map(|p| p.to_string_lossy().to_string());
+
+        result.push(LocalAnimeFolder {
+            anime_title,
+            folder_path: folder_path.to_string_lossy().to_string(),
+            total_episodes,
+            total_size,
+            total_size_formatted: format_bytes(total_size),
+            cover_image,
+            episodes,
+        });
+    }
+
+    // Ordenar animes alfabéticamente
+    result.sort_by(|a, b| a.anime_title.cmp(&b.anime_title));
+
+    Ok(result)
 }
 
-/// Elimina un archivo descargado localmente
+/// Elimina un archivo de episodio descargado localmente
 #[tauri::command]
 pub fn delete_local_download(file_path: String) -> Result<(), String> {
     let path = Path::new(&file_path);
     if path.exists() {
         fs::remove_file(path).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Elimina una carpeta completa de anime y todos sus videos
+#[tauri::command]
+pub fn delete_local_anime_folder(folder_path: String) -> Result<(), String> {
+    let path = Path::new(&folder_path);
+    if path.exists() && path.is_dir() {
+        fs::remove_dir_all(path).map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -246,24 +364,24 @@ pub fn clear_image_cache(app_handle: AppHandle) -> Result<serde_json::Value, Str
     }))
 }
 
-fn scan_dir_recursive(dir: &Path, files: &mut Vec<LocalVideoFile>, depth: usize) {
-    if depth > 4 { return; }
+fn scan_episodes_in_dir(
+    dir: &Path,
+    anime_title: &str,
+    episodes: &mut Vec<LocalEpisodeItem>,
+    history_map: &HashMap<String, f64>,
+) {
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_dir() {
-                scan_dir_recursive(&path, files, depth + 1);
-            } else if path.is_file() {
+            if path.is_file() {
                 if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                    let ext_lower = ext.to_lowercase();
-                    if ["mp4", "mkv", "ts", "webm", "avi"].contains(&ext_lower.as_str()) {
+                    if ["mp4", "mkv", "ts", "webm", "avi"].contains(&ext.to_lowercase().as_str()) {
                         if let Ok(meta) = entry.metadata() {
                             let file_size = meta.len();
-                            // Ignorar archivos vacíos menores a 10KB
                             if file_size > 10240 {
                                 let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("video").to_string();
-                                let (anime_title, episode_number) = parse_anime_from_filename(&file_name, path.parent());
-                                
+                                let ep_number = extract_episode_num(&file_name).unwrap_or(1);
+
                                 let modified_at = meta.modified().ok()
                                     .and_then(|m| {
                                         let dt: DateTime<Utc> = m.into();
@@ -271,14 +389,25 @@ fn scan_dir_recursive(dir: &Path, files: &mut Vec<LocalVideoFile>, depth: usize)
                                     })
                                     .unwrap_or_else(|| "Reciente".to_string());
 
-                                files.push(LocalVideoFile {
+                                let key = format!("{}-{}", anime_title.to_lowercase(), ep_number);
+                                let progress = history_map.get(&key).cloned().unwrap_or(0.0);
+                                let watch_status = if progress >= 0.85 {
+                                    "completed"
+                                } else if progress > 0.05 {
+                                    "in_progress"
+                                } else {
+                                    "unseen"
+                                }.to_string();
+
+                                episodes.push(LocalEpisodeItem {
                                     file_path: path.to_string_lossy().to_string(),
                                     file_name,
+                                    episode_number: ep_number,
                                     file_size,
                                     file_size_formatted: format_bytes(file_size),
-                                    anime_title,
-                                    episode_number,
                                     modified_at,
+                                    watch_progress: progress,
+                                    watch_status,
                                 });
                             }
                         }
@@ -290,7 +419,6 @@ fn scan_dir_recursive(dir: &Path, files: &mut Vec<LocalVideoFile>, depth: usize)
 }
 
 fn parse_anime_from_filename(filename: &str, parent_dir: Option<&Path>) -> (String, Option<u32>) {
-    // 1. Si la carpeta contenedora tiene el nombre del anime (ej. "Naruto Shippuden/Ep001.ts")
     if let Some(parent) = parent_dir {
         if let Some(dir_name) = parent.file_name().and_then(|n| n.to_str()) {
             if dir_name != "AniCS" && dir_name != "Downloads" && !dir_name.is_empty() {
@@ -301,17 +429,14 @@ fn parse_anime_from_filename(filename: &str, parent_dir: Option<&Path>) -> (Stri
         }
     }
 
-    // 2. Extraer del nombre de archivo directamente
     let stem = Path::new(filename).file_stem().and_then(|s| s.to_str()).unwrap_or(filename);
     let ep_num = extract_episode_num(stem);
 
-    // Limpieza de etiquetas comunes [1080p], (Sub Español), etc.
     let mut clean = stem.replace('_', " ");
     for tag in &["[1080p]", "[720p]", "[480p]", "(Sub Español)", "(Sub)", "[HD]", ".mp4", ".ts", ".mkv"] {
         clean = clean.replace(tag, "");
     }
     
-    // Si contiene "Ep", "Cap", "Episodio", extraer la parte del título anterior
     if let Some(pos) = clean.to_lowercase().find("ep") {
         clean = clean[..pos].trim_end_matches(&['-', ' ', '_'][..]).to_string();
     } else if let Some(pos) = clean.to_lowercase().find("cap") {

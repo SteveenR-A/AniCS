@@ -4,26 +4,19 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Clock, Trash2, Film, Bookmark, BookmarkX, Download, Inbox, History,
   XCircle, CheckCircle2, AlertCircle, ArrowDownCircle, HardDrive, Play,
-  FolderOpen, Pause, RefreshCw, Sparkles, Search, Folder, FileVideo, ExternalLink
+  FolderOpen, Pause, RefreshCw, Sparkles, Search, Folder, FileVideo,
+  ChevronDown, ChevronUp, Check, Eye, EyeOff
 } from 'lucide-react';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { getHistory, clearHistory, getFavorites, removeFavorite } from '@/services/storageService';
 import {
-  scanLocalDownloads, deleteLocalDownload, getDefaultDownloadDir
+  scanLocalDownloads, deleteLocalDownload, deleteLocalAnimeFolder, getDefaultDownloadDir
 } from '@/services/downloadService';
 import { useDownloadStore } from '@/stores/useDownloadStore';
 import { usePlayerStore } from '@/stores/usePlayerStore';
 import { CachedImage } from '@/components/CachedImage';
-import type { HistoryEntry, AnimeResult, LocalVideoFile } from '@/types';
-
-function formatBytes(bytes: number) {
-  if (bytes <= 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
-}
+import type { HistoryEntry, AnimeResult, LocalAnimeFolder, LocalEpisodeItem } from '@/types';
 
 function formatSpeed(kbps: number) {
   if (kbps <= 0) return '0 KB/s';
@@ -243,7 +236,7 @@ export function FavoritesPage() {
 }
 
 // ──────────────────────────────────────────
-// Página de Descargas y Gestor de Archivos Locales
+// Página de Descargas: Carpetas de Anime y Listas Desplegables
 // ──────────────────────────────────────────
 export function DownloadsPage() {
   const navigate = useNavigate();
@@ -252,17 +245,26 @@ export function DownloadsPage() {
 
   const [activeTab, setActiveTab] = useState<'local' | 'active'>('local');
   const [downloadFolder, setDownloadFolder] = useState<string>('');
-  const [localFiles, setLocalFiles] = useState<LocalVideoFile[]>([]);
+  const [animeFolders, setAnimeFolders] = useState<LocalAnimeFolder[]>([]);
+  const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
   const [isScanning, setIsScanning] = useState(false);
 
-  // Cargar carpeta por defecto y escanear
-  const loadLocalFiles = useCallback(async (customPath?: string) => {
+  // Cargar carpeta por defecto y escanear carpetas de anime
+  const loadLocalFolders = useCallback(async (customPath?: string) => {
     setIsScanning(true);
     try {
       const folder = customPath || downloadFolder || await getDefaultDownloadDir();
       setDownloadFolder(folder);
-      const files = await scanLocalDownloads(folder);
-      setLocalFiles(files);
+      const groups = await scanLocalDownloads(folder);
+      setAnimeFolders(groups);
+      
+      // Auto-expandir la primera carpeta por conveniencia
+      if (groups.length > 0) {
+        setExpandedFolders(prev => ({
+          ...prev,
+          [groups[0].folderPath]: true,
+        }));
+      }
     } catch (e) {
       console.error('Error scanning downloads folder:', e);
     } finally {
@@ -271,8 +273,15 @@ export function DownloadsPage() {
   }, [downloadFolder]);
 
   useEffect(() => {
-    loadLocalFiles();
+    loadLocalFolders();
   }, []);
+
+  const toggleFolder = (folderPath: string) => {
+    setExpandedFolders(prev => ({
+      ...prev,
+      [folderPath]: !prev[folderPath],
+    }));
+  };
 
   const handleSelectFolder = async () => {
     try {
@@ -283,44 +292,64 @@ export function DownloadsPage() {
       });
       if (selected && typeof selected === 'string') {
         setDownloadFolder(selected);
-        loadLocalFiles(selected);
+        loadLocalFolders(selected);
       }
     } catch (e) {
       console.error(e);
     }
   };
 
-  const handleDeleteLocal = async (filePath: string) => {
+  // Eliminar un episodio individual
+  const handleDeleteEpisode = async (filePath: string, animeTitle: string) => {
     try {
       await deleteLocalDownload(filePath);
-      setLocalFiles(localFiles.filter(f => f.filePath !== filePath));
+      setAnimeFolders(prev => prev.map(folder => {
+        if (folder.animeTitle === animeTitle) {
+          const remaining = folder.episodes.filter(e => e.filePath !== filePath);
+          return { ...folder, episodes: remaining, totalEpisodes: remaining.length };
+        }
+        return folder;
+      }).filter(folder => folder.episodes.length > 0));
     } catch (e) {
       console.error(e);
     }
   };
 
-  // Reproducir archivo descargado directamente en el reproductor interno
-  const handlePlayLocalFile = (file: LocalVideoFile) => {
-    const assetUrl = convertFileSrc(file.filePath);
+  // Eliminar una carpeta de anime completa
+  const handleDeleteAnimeFolder = async (folderPath: string) => {
+    if (!window.confirm('¿Seguro que deseas eliminar esta serie y todos sus episodios descargados?')) {
+      return;
+    }
+    try {
+      await deleteLocalAnimeFolder(folderPath);
+      setAnimeFolders(prev => prev.filter(f => f.folderPath !== folderPath));
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  // Reproducir episodio local directamente en el reproductor interno
+  const handlePlayEpisode = (ep: LocalEpisodeItem, anime: LocalAnimeFolder) => {
+    const assetUrl = convertFileSrc(ep.filePath);
     setCurrentAnime({
-      title: file.animeTitle,
-      url: file.filePath,
-      thumbnailUrl: '',
-      synopsis: `Archivo local: ${file.fileName}`,
+      title: anime.animeTitle,
+      url: ep.filePath,
+      thumbnailUrl: anime.coverImage ? convertFileSrc(anime.coverImage) : '',
+      synopsis: `Archivo local en: ${ep.filePath}`,
       genres: ['Descarga local'],
-      episodes: [{
-        number: file.episodeNumber || 1,
-        title: file.fileName,
-        url: file.filePath,
-        watched: false,
-      }],
+      episodes: anime.episodes.map(e => ({
+        number: e.episodeNumber,
+        title: e.fileName,
+        url: e.filePath,
+        watched: e.watchStatus === 'completed',
+      })),
       source: 'local',
     });
     setCurrentEpisode({
-      number: file.episodeNumber || 1,
-      title: file.fileName,
-      url: file.filePath,
-      watched: false,
+      number: ep.episodeNumber,
+      title: ep.fileName,
+      url: ep.filePath,
+      watched: ep.watchStatus === 'completed',
     });
     setResolvedMedia({
       directUrl: assetUrl,
@@ -340,12 +369,12 @@ export function DownloadsPage() {
   const activeTasks = taskList.filter(t => t.status === 'downloading' || t.status === 'queued');
 
   return (
-    <div style={{ padding: 24, maxWidth: 1200, margin: '0 auto' }}>
+    <div style={{ padding: '24px 28px', maxWidth: 1250, margin: '0 auto' }}>
       {/* Header Principal */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <Download size={24} color="var(--accent-primary)" />
-          <h1 style={{ fontSize: 22, fontWeight: 800, margin: 0 }}>Descargas & Videos Locales</h1>
+          <h1 style={{ fontSize: 22, fontWeight: 800, margin: 0 }}>Descargas & Carpetas de Anime</h1>
         </div>
 
         {/* Selector de Pestañas */}
@@ -360,7 +389,7 @@ export function DownloadsPage() {
               display: 'flex', alignItems: 'center', gap: 6,
             }}
           >
-            <Folder size={14} /> Archivos en Disco ({localFiles.length})
+            <Folder size={14} /> Animes en Disco ({animeFolders.length})
           </button>
           <button
             onClick={() => setActiveTab('active')}
@@ -372,12 +401,12 @@ export function DownloadsPage() {
               display: 'flex', alignItems: 'center', gap: 6,
             }}
           >
-            <ArrowDownCircle size={14} /> Cola Activa ({activeTasks.length})
+            <ArrowDownCircle size={14} /> Cola de Descargas ({activeTasks.length})
           </button>
         </div>
       </div>
 
-      {/* ─── TAB 1: Archivos Locales en Carpeta ─── */}
+      {/* ─── TAB 1: Carpetas de Anime en Disco ─── */}
       {activeTab === 'local' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {/* Barra de Ubicación y Botones de Exploración */}
@@ -401,7 +430,7 @@ export function DownloadsPage() {
             <div style={{ display: 'flex', gap: 8 }}>
               <button
                 disabled={isScanning}
-                onClick={() => loadLocalFiles()}
+                onClick={() => loadLocalFolders()}
                 style={{
                   background: 'var(--bg-elevated)', border: '1px solid var(--border-moderate)',
                   borderRadius: 'var(--radius-md)', padding: '8px 14px',
@@ -410,7 +439,7 @@ export function DownloadsPage() {
                 }}
               >
                 <RefreshCw size={13} className={isScanning ? 'animate-spin' : ''} />
-                {isScanning ? 'Escaneando...' : 'Recargar Carpeta'}
+                {isScanning ? 'Escaneando...' : 'Recargar Carpetas'}
               </button>
 
               <button
@@ -427,18 +456,18 @@ export function DownloadsPage() {
             </div>
           </div>
 
-          {/* Lista de Videos Locales */}
-          {localFiles.length === 0 ? (
+          {/* Listado de Carpetas de Anime (Acordeón desplegable de episodios) */}
+          {animeFolders.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '60px 20px', background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border-subtle)' }}>
-              <FileVideo size={48} style={{ color: 'var(--text-muted)', margin: '0 auto 12px', opacity: 0.5 }} />
+              <Folder size={48} style={{ color: 'var(--text-muted)', margin: '0 auto 12px', opacity: 0.5 }} />
               <p style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4 }}>
-                No se encontraron videos en esta carpeta
+                No se encontraron carpetas de anime
               </p>
               <p style={{ fontSize: 13, color: 'var(--text-muted)', maxWidth: 450, margin: '0 auto 16px' }}>
-                Coloca archivos (.mp4, .mkv, .ts) en la carpeta o descarga episodios para reproducirlos sin internet.
+                Cada anime descargado se organiza automáticamente en su propia subcarpeta con sus episodios (.mp4, .mkv, .ts).
               </p>
               <button
-                onClick={() => loadLocalFiles()}
+                onClick={() => loadLocalFolders()}
                 style={{
                   background: 'var(--bg-elevated)', border: '1px solid var(--border-moderate)',
                   borderRadius: 'var(--radius-md)', padding: '8px 16px',
@@ -449,94 +478,217 @@ export function DownloadsPage() {
               </button>
             </div>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
-              {localFiles.map((file) => (
-                <motion.div
-                  key={file.filePath}
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  style={{
-                    background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
-                    borderRadius: 'var(--radius-lg)', padding: '14px 16px',
-                    display: 'flex', flexDirection: 'column', gap: 10,
-                  }}
-                >
-                  <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-                    <div style={{
-                      width: 42, height: 42, borderRadius: 10,
-                      background: 'rgba(59, 130, 246, 0.15)', color: 'var(--accent-primary)',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-                    }}>
-                      <FileVideo size={22} />
-                    </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <h4 style={{
-                        fontSize: 14, fontWeight: 700, margin: 0, color: 'var(--text-primary)',
-                        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                      }}>
-                        {file.animeTitle}
-                      </h4>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
-                        {file.episodeNumber && (
-                          <span style={{
-                            background: 'var(--accent-primary)', color: 'white',
-                            fontSize: 10, fontWeight: 800, padding: '1px 6px', borderRadius: 4,
-                          }}>
-                            Ep. {file.episodeNumber}
-                          </span>
-                        )}
-                        <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>
-                          {file.fileSizeFormatted}
-                        </span>
-                        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>• {file.modifiedAt}</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {animeFolders.map((anime) => {
+                const isExpanded = Boolean(expandedFolders[anime.folderPath]);
+                return (
+                  <div
+                    key={anime.folderPath}
+                    style={{
+                      background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
+                      borderRadius: 'var(--radius-xl)', overflow: 'hidden',
+                      boxShadow: 'var(--shadow-subtle)',
+                    }}
+                  >
+                    {/* Encabezado de la Carpeta de Anime */}
+                    <div
+                      onClick={() => toggleFolder(anime.folderPath)}
+                      style={{
+                        padding: '16px 20px', cursor: 'pointer',
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16,
+                        background: isExpanded ? 'var(--bg-elevated)' : 'transparent',
+                        transition: 'background 0.15s ease',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 14, minWidth: 0, flex: 1 }}>
+                        <div style={{
+                          width: 44, height: 44, borderRadius: 'var(--radius-md)',
+                          background: 'linear-gradient(135deg, rgba(59,130,246,0.2), rgba(147,51,234,0.2))',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          color: 'var(--accent-primary)', flexShrink: 0,
+                        }}>
+                          <Folder size={24} />
+                        </div>
+
+                        <div style={{ minWidth: 0 }}>
+                          <h3 style={{ fontSize: 16, fontWeight: 800, margin: 0, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {anime.animeTitle}
+                          </h3>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
+                            <span style={{
+                              background: 'var(--accent-primary)', color: 'white',
+                              fontSize: 11, fontWeight: 800, padding: '2px 8px', borderRadius: 'var(--radius-full)',
+                            }}>
+                              {anime.totalEpisodes} {anime.totalEpisodes === 1 ? 'episodio' : 'episodios'}
+                            </span>
+                            <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>
+                              {anime.totalSizeFormatted}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Acciones de Serie: Buscar en Línea, Eliminar Carpeta & Chevron */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }} onClick={e => e.stopPropagation()}>
+                        <button
+                          onClick={() => handleSearchOnline(anime.animeTitle)}
+                          title={`Buscar "${anime.animeTitle}" en catálogo para ver sinopsis y temporadas`}
+                          style={{
+                            padding: '6px 12px', borderRadius: 'var(--radius-md)',
+                            background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
+                            color: 'var(--text-secondary)', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                            display: 'flex', alignItems: 'center', gap: 6,
+                          }}
+                        >
+                          <Search size={13} /> Buscar en línea
+                        </button>
+
+                        <button
+                          onClick={() => handleDeleteAnimeFolder(anime.folderPath)}
+                          title="Eliminar carpeta completa del disco"
+                          style={{
+                            padding: '6px 10px', borderRadius: 'var(--radius-md)',
+                            background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.25)',
+                            color: '#f87171', fontSize: 12, cursor: 'pointer',
+                            display: 'flex', alignItems: 'center',
+                          }}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+
+                        <button
+                          onClick={() => toggleFolder(anime.folderPath)}
+                          style={{
+                            background: 'none', border: 'none', color: 'var(--text-muted)',
+                            cursor: 'pointer', padding: 4, display: 'flex', alignItems: 'center',
+                          }}
+                        >
+                          {isExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+                        </button>
                       </div>
                     </div>
+
+                    {/* ─── Lista Desplegable de Episodios con Estado de Visualización ─── */}
+                    <AnimatePresence>
+                      {isExpanded && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: 'auto' }}
+                          exit={{ opacity: 0, height: 0 }}
+                          style={{
+                            overflow: 'hidden', borderTop: '1px solid var(--border-subtle)',
+                            background: 'rgba(10,11,15,0.4)',
+                          }}
+                        >
+                          <div style={{ padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            {anime.episodes.map((ep) => {
+                              const isCompleted = ep.watchStatus === 'completed';
+                              const isInProgress = ep.watchStatus === 'in_progress';
+
+                              return (
+                                <div
+                                  key={ep.filePath}
+                                  style={{
+                                    background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
+                                    borderRadius: 'var(--radius-lg)', padding: '10px 14px',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',
+                                  }}
+                                >
+                                  {/* Info Episodio y Estado del Reproductor */}
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, flex: 1 }}>
+                                    <div style={{
+                                      width: 32, height: 32, borderRadius: 'var(--radius-sm)',
+                                      background: isCompleted ? 'rgba(16,185,129,0.15)' : isInProgress ? 'rgba(59,130,246,0.15)' : 'var(--bg-elevated)',
+                                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                      color: isCompleted ? 'var(--accent-success)' : isInProgress ? 'var(--accent-primary)' : 'var(--text-muted)',
+                                      flexShrink: 0,
+                                    }}>
+                                      <FileVideo size={16} />
+                                    </div>
+
+                                    <div style={{ minWidth: 0 }}>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
+                                          Episodio {ep.episodeNumber}
+                                        </span>
+                                        <span style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                          {ep.fileName}
+                                        </span>
+                                      </div>
+
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 3 }}>
+                                        {/* Badge de Estado Vinculado al Reproductor */}
+                                        {isCompleted ? (
+                                          <span style={{
+                                            fontSize: 10, fontWeight: 800, color: 'var(--accent-success)',
+                                            background: 'rgba(16,185,129,0.15)', padding: '1px 6px', borderRadius: 4,
+                                            display: 'flex', alignItems: 'center', gap: 3,
+                                          }}>
+                                            <Check size={11} /> Visto
+                                          </span>
+                                        ) : isInProgress ? (
+                                          <span style={{
+                                            fontSize: 10, fontWeight: 800, color: 'var(--accent-primary)',
+                                            background: 'rgba(59,130,246,0.15)', padding: '1px 6px', borderRadius: 4,
+                                            display: 'flex', alignItems: 'center', gap: 3,
+                                          }}>
+                                            <Eye size={11} /> En progreso ({Math.round(ep.watchProgress * 100)}%)
+                                          </span>
+                                        ) : (
+                                          <span style={{
+                                            fontSize: 10, fontWeight: 700, color: 'var(--text-muted)',
+                                            background: 'var(--bg-elevated)', padding: '1px 6px', borderRadius: 4,
+                                            display: 'flex', alignItems: 'center', gap: 3,
+                                          }}>
+                                            <EyeOff size={11} /> No visto
+                                          </span>
+                                        )}
+
+                                        <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>
+                                          {ep.fileSizeFormatted}
+                                        </span>
+                                        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>• {ep.modifiedAt}</span>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* Botones de Reproducción y Borrado */}
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                    <button
+                                      onClick={() => handlePlayEpisode(ep, anime)}
+                                      style={{
+                                        padding: '6px 12px', borderRadius: 'var(--radius-md)',
+                                        background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))',
+                                        border: 'none', color: 'white',
+                                        fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                                        display: 'flex', alignItems: 'center', gap: 4,
+                                      }}
+                                    >
+                                      <Play size={12} fill="white" /> Reproducir
+                                    </button>
+
+                                    <button
+                                      onClick={() => handleDeleteEpisode(ep.filePath, anime.animeTitle)}
+                                      title="Eliminar episodio del disco"
+                                      style={{
+                                        padding: '6px 8px', borderRadius: 'var(--radius-md)',
+                                        background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
+                                        color: 'var(--text-muted)', cursor: 'pointer',
+                                      }}
+                                    >
+                                      <Trash2 size={13} />
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
-
-                  {/* Acciones de Reproducción, Búsqueda en Línea y Eliminación */}
-                  <div style={{ display: 'flex', gap: 6, borderTop: '1px solid var(--border-subtle)', paddingTop: 10, marginTop: 'auto' }}>
-                    <button
-                      onClick={() => handlePlayLocalFile(file)}
-                      style={{
-                        flex: 1, padding: '7px 10px',
-                        background: 'rgba(59, 130, 246, 0.15)', border: '1px solid var(--accent-primary)',
-                        borderRadius: 'var(--radius-md)', color: 'var(--accent-primary)',
-                        fontSize: 12, fontWeight: 700, cursor: 'pointer',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
-                      }}
-                    >
-                      <Play size={13} fill="currentColor" /> Reproducir
-                    </button>
-
-                    <button
-                      onClick={() => handleSearchOnline(file.animeTitle)}
-                      title={`Buscar "${file.animeTitle}" en línea para ver sinopsis y catálogo`}
-                      style={{
-                        padding: '7px 10px',
-                        background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
-                        borderRadius: 'var(--radius-md)', color: 'var(--text-secondary)',
-                        fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                        display: 'flex', alignItems: 'center', gap: 4,
-                      }}
-                    >
-                      <Search size={13} /> Buscar
-                    </button>
-
-                    <button
-                      onClick={() => handleDeleteLocal(file.filePath)}
-                      title="Eliminar archivo del disco"
-                      style={{
-                        padding: '7px 10px',
-                        background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.25)',
-                        borderRadius: 'var(--radius-md)', color: '#f87171',
-                        fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center',
-                      }}
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                  </div>
-                </motion.div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

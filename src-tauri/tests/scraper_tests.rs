@@ -69,3 +69,16 @@ async fn test_jkanime_poster_extraction() {
     assert!(!details.thumbnail_url.contains("logo"));
     assert!(details.thumbnail_url.ends_with(".jpg") || details.thumbnail_url.ends_with(".png") || details.thumbnail_url.ends_with(".webp"));
 }
+
+#[tokio::test]
+async fn test_advanced_search_genre() {
+    let extractor = JKAnimeExtractor::new();
+    let filters = anics_lib::core::SearchFilters {
+        genre: Some("accion".to_string()),
+        page: 1,
+        ..Default::default()
+    };
+    let res = extractor.advanced_search(&filters).await.expect("Failed to search by genre");
+    println!("JKAnime Genre 'accion' results count: {}", res.results.len());
+    assert!(!res.results.is_empty(), "advanced_search by genre returned empty results");
+}

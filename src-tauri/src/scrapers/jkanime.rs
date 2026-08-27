@@ -185,6 +185,153 @@ impl AnimeExtractor for JKAnimeExtractor {
         Ok(results)
     }
 
+    // Búsqueda avanzada con filtros dinámicos (géneros, estado, tipo, orden)
+    async fn advanced_search(&self, filters: &SearchFilters) -> AppResult<SearchResultPage> {
+        let page = filters.page;
+        let mut results = vec![];
+        let mut has_next = false;
+        let mut total_pages = None;
+
+        let active_genre = filters.genre.as_ref();
+
+        // Determinar URL de búsqueda o directorio según los filtros
+        let target_url = if let Some(ref q) = filters.query {
+            let q_trimmed = q.trim();
+            if !q_trimmed.is_empty() && active_genre.is_none() && filters.status.is_none() && filters.anime_type.is_none() {
+                self.url(&format!("/buscar/{}/{}/", urlencoding::encode(q_trimmed), page))
+            } else {
+                let mut params = vec![format!("p={}", page)];
+                if !q_trimmed.is_empty() {
+                    params.push(format!("filtro={}", urlencoding::encode(q_trimmed)));
+                }
+                if let Some(g) = active_genre {
+                    let g_slug = g.to_lowercase().replace(' ', "-");
+                    params.push(format!("genero={}", g_slug));
+                }
+                if let Some(ref status) = filters.status {
+                    let st = if status.to_lowercase().contains("emisi") { "en-emision" } else if status.to_lowercase().contains("conclu") || status.to_lowercase().contains("final") { "concluido" } else { status };
+                    params.push(format!("estado={}", st));
+                }
+                if let Some(ref t) = filters.anime_type {
+                    let ty = if t.to_lowercase().contains("serie") { "serie" } else if t.to_lowercase().contains("pel") { "pelicula" } else if t.to_lowercase().contains("ova") { "ova" } else { t };
+                    params.push(format!("tipo={}", ty));
+                }
+                if let Some(ref order) = filters.order_by {
+                    params.push(format!("orden={}", order));
+                }
+                self.url(&format!("/directorio/?{}", params.join("&")))
+            }
+        } else {
+            let mut params = vec![format!("p={}", page)];
+            if let Some(g) = active_genre {
+                let g_slug = g.to_lowercase().replace(' ', "-");
+                params.push(format!("genero={}", g_slug));
+            }
+            if let Some(ref status) = filters.status {
+                let st = if status.to_lowercase().contains("emisi") { "en-emision" } else if status.to_lowercase().contains("conclu") || status.to_lowercase().contains("final") { "concluido" } else { status };
+                params.push(format!("estado={}", st));
+            }
+            if let Some(ref t) = filters.anime_type {
+                let ty = if t.to_lowercase().contains("serie") { "serie" } else if t.to_lowercase().contains("pel") { "pelicula" } else if t.to_lowercase().contains("ova") { "ova" } else { t };
+                params.push(format!("tipo={}", ty));
+            }
+            if let Some(ref order) = filters.order_by {
+                params.push(format!("orden={}", order));
+            }
+            self.url(&format!("/directorio/?{}", params.join("&")))
+        };
+
+        let html = fetch_html(&target_url, Some(&self.base_url)).await
+            .map_err(AppError::Network)?;
+        if html.is_empty() {
+            return Ok(SearchResultPage {
+                results: vec![],
+                current_page: page,
+                total_pages: Some(1),
+                has_next: false,
+            });
+        }
+
+        // 1. Intentar parsear el JSON incrustado var animes = {"data":[...], "last_page": 58}
+        let json_finder = html.find("var animes = ")
+            .map(|pos| pos + 13)
+            .or_else(|| html.find("var anime_man = ").map(|pos| pos + 16));
+
+        if let Some(start_pos) = json_finder {
+            let rest = &html[start_pos..];
+            if let Some(json_end) = rest.find(";\n").or_else(|| rest.find(";</script>")).or_else(|| rest.find(";\r\n")) {
+                let json_str = &rest[..json_end].trim();
+                if let Ok(val) = serde_json::from_str::<serde_json::Value>(json_str) {
+                    if let Some(last_p) = val["last_page"].as_u64() {
+                        total_pages = Some(last_p as u32);
+                        has_next = page < last_p as u32;
+                    }
+                    if let Some(arr) = val["data"].as_array() {
+                        for item in arr {
+                            let title = item["title"].as_str().unwrap_or_default().to_string();
+                            let slug = item["slug"].as_str().unwrap_or_default();
+                            let url = item["url"].as_str()
+                                .map(|u| u.to_string())
+                                .unwrap_or_else(|| format!("{}/{}/", self.base_url, slug));
+                            let thumbnail_url = item["image"].as_str()
+                                .map(|i| i.to_string())
+                                .unwrap_or_else(|| format!("https://cdn.jkdesa.com/assets/images/animes/image/{}.jpg", slug));
+                            let anime_type = item["tipo"].as_str().or_else(|| item["type"].as_str()).map(|s| s.to_string());
+                            let status = item["estado"].as_str().or_else(|| item["status"].as_str()).map(|s| s.to_string());
+
+                            if !title.is_empty() {
+                                results.push(AnimeResult {
+                                    title,
+                                    url,
+                                    thumbnail_url,
+                                    anime_type,
+                                    status,
+                                    source: self.id().to_string(),
+                                    ..Default::default()
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Si no hubo resultados del JSON, parsear elementos HTML del DOM
+        if results.is_empty() {
+            let doc = Html::parse_document(&html);
+            let item_sel = Selector::parse("div.anime__item, div.card, div[class*='anime__item']").unwrap();
+            let title_sel = Selector::parse("div.anime__item__text h5 a, h5.card-title, h5 a, h5").unwrap();
+            let pic_sel = Selector::parse("div.anime__item__pic, img.card-img-top, img").unwrap();
+            let a_sel = Selector::parse("a").unwrap();
+
+            for item in doc.select(&item_sel) {
+                let href = item.select(&a_sel).next().map(|a| attr(&a, "href")).unwrap_or_default();
+                let title = item.select(&title_sel).next().map(|h| inner_text(&h)).unwrap_or_default();
+                if href.is_empty() || title.is_empty() { continue; }
+
+                let thumbnail = item.select(&pic_sel).next().map(|p| {
+                    let bg = attr(&p, "data-setbg");
+                    if !bg.is_empty() { bg } else { attr(&p, "src") }
+                }).unwrap_or_default();
+
+                results.push(AnimeResult {
+                    title,
+                    url: normalize_url(&href, &self.base_url),
+                    thumbnail_url: thumbnail,
+                    source: self.id().to_string(),
+                    ..Default::default()
+                });
+            }
+        }
+
+        Ok(SearchResultPage {
+            results,
+            current_page: page,
+            total_pages,
+            has_next,
+        })
+    }
+
     // Detalles enriquecidos de la serie
     async fn get_details(&self, url: &str) -> AppResult<AnimeDetails> {
         let clean_url = normalize_series_url(url);
@@ -568,93 +715,6 @@ impl AnimeExtractor for JKAnimeExtractor {
 
         // Fallback de géneros estándar si no se pudo conectar
         Ok(default_jkanime_genres())
-    }
-
-    // Búsqueda avanzada con filtros dinámicos
-    async fn advanced_search(&self, filters: &SearchFilters) -> AppResult<SearchResultPage> {
-        let mut query_params = vec![];
-
-        if let Some(g) = &filters.genre {
-            if !g.is_empty() { query_params.push(format!("genero={}", urlencoding::encode(g))); }
-        }
-        if let Some(t) = &filters.anime_type {
-            if !t.is_empty() { query_params.push(format!("tipo={}", urlencoding::encode(t))); }
-        }
-        if let Some(s) = &filters.status {
-            if !s.is_empty() { query_params.push(format!("estado={}", urlencoding::encode(s))); }
-        }
-        if let Some(o) = &filters.order_by {
-            if !o.is_empty() { query_params.push(format!("orden={}", urlencoding::encode(o))); }
-        }
-        if filters.page > 1 {
-            query_params.push(format!("p={}", filters.page));
-        }
-
-        if query_params.is_empty() {
-            if let Some(q) = &filters.query {
-                let results = self.search(q).await?;
-                return Ok(SearchResultPage {
-                    results,
-                    current_page: filters.page,
-                    total_pages: Some(1),
-                    has_next: false,
-                });
-            }
-        }
-
-        let dir_url = if query_params.is_empty() {
-            self.url("/directorio")
-        } else {
-            self.url(&format!("/directorio?{}", query_params.join("&")))
-        };
-
-        let html = fetch_html(&dir_url, Some(&self.base_url)).await
-            .map_err(AppError::Network)?;
-        if html.is_empty() {
-            return Ok(SearchResultPage {
-                results: vec![],
-                current_page: filters.page,
-                total_pages: None,
-                has_next: false,
-            });
-        }
-
-        let doc = Html::parse_document(&html);
-        let mut results = vec![];
-
-        let item_sel = Selector::parse("div.anime__item, div.custom_item").unwrap();
-        let title_sel = Selector::parse("div.anime__item__text h5 a, h5 a, h5").unwrap();
-        let pic_sel = Selector::parse("div.anime__item__pic, div[class*='anime__item__pic'], img").unwrap();
-        let a_sel = Selector::parse("a").unwrap();
-
-        for item in doc.select(&item_sel) {
-            let href = item.select(&a_sel).next().map(|a| attr(&a, "href")).unwrap_or_default();
-            let title = item.select(&title_sel).next().map(|h| inner_text(&h)).unwrap_or_default();
-
-            if href.is_empty() || title.is_empty() { continue; }
-
-            let thumbnail = item.select(&pic_sel).next().map(|p| {
-                let bg = attr(&p, "data-setbg");
-                if !bg.is_empty() { bg } else { attr(&p, "src") }
-            }).unwrap_or_default();
-
-            results.push(AnimeResult {
-                title,
-                url: normalize_url(&href, &self.base_url),
-                thumbnail_url: thumbnail,
-                source: self.id().to_string(),
-                ..Default::default()
-            });
-        }
-
-        let has_next = doc.select(&Selector::parse("a.next, a.page-link[rel='next']").unwrap()).next().is_some() || results.len() >= 12;
-
-        Ok(SearchResultPage {
-            results,
-            current_page: filters.page,
-            total_pages: None,
-            has_next,
-        })
     }
 }
 

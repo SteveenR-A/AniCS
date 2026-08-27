@@ -36,13 +36,17 @@ export const onDownloadCompleted = (
 export const getDefaultDownloadDir = (): Promise<string> =>
   invoke('get_default_download_dir');
 
-/** Escanear carpeta de descargas buscando videos existentes */
-export const scanLocalDownloads = (folderPath?: string): Promise<import('@/types').LocalVideoFile[]> =>
+/** Escanear carpeta de descargas buscando animes y episodios agrupados */
+export const scanLocalDownloads = (folderPath?: string): Promise<import('@/types').LocalAnimeFolder[]> =>
   invoke('scan_local_downloads', { folderPath });
 
-/** Eliminar un archivo descargado localmente */
+/** Eliminar un archivo de episodio descargado */
 export const deleteLocalDownload = (filePath: string): Promise<void> =>
   invoke('delete_local_download', { filePath });
+
+/** Eliminar una carpeta completa de anime descargado */
+export const deleteLocalAnimeFolder = (folderPath: string): Promise<void> =>
+  invoke('delete_local_anime_folder', { folderPath });
 
 /** Obtener o guardar en caché local una imagen */
 export const cacheImage = (url: string): Promise<string> =>

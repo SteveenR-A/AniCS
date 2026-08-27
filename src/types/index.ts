@@ -125,14 +125,25 @@ export interface DownloadProgress {
   error?: string;
 }
 
-export interface LocalVideoFile {
+export interface LocalEpisodeItem {
   filePath: string;
   fileName: string;
+  episodeNumber: number;
   fileSize: number;
   fileSizeFormatted: string;
-  animeTitle: string;
-  episodeNumber?: number;
   modifiedAt: string;
+  watchProgress: number;
+  watchStatus: 'unseen' | 'in_progress' | 'completed';
+}
+
+export interface LocalAnimeFolder {
+  animeTitle: string;
+  folderPath: string;
+  totalEpisodes: number;
+  totalSize: number;
+  totalSizeFormatted: string;
+  coverImage?: string;
+  episodes: LocalEpisodeItem[];
 }
 
 export interface CacheStats {

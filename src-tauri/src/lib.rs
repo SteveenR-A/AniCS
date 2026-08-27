@@ -62,6 +62,7 @@ pub fn run() {
             commands::cancel_download,
             commands::scan_local_downloads,
             commands::delete_local_download,
+            commands::delete_local_anime_folder,
             commands::get_default_download_dir,
             commands::cache_image,
             commands::get_cache_stats,
