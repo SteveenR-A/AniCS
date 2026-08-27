@@ -30,6 +30,11 @@ async fn test_jkanime_details_and_servers() {
     println!("JKAnime Servers count: {}", servers.len());
     for s in servers.iter() {
         println!(" - Server: {} | Direct: {} | URL: {}", s.name, s.is_direct, s.url);
+        let resolved = extractor.resolve_stream(s).await;
+        match resolved {
+            Ok(media) => println!("   -> Resolved: direct_url='{}', type={:?}", media.direct_url, media.media_type),
+            Err(e) => println!("   -> Error resolving: {:?}", e),
+        }
     }
     assert!(!servers.is_empty());
 }

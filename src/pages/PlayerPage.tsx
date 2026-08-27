@@ -1,17 +1,17 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import Hls from 'hls.js';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft, Play, Pause, Volume2, VolumeX,
   Maximize, Minimize, Settings, ChevronLeft, ChevronRight,
   Loader2, FastForward, SkipForward, RotateCcw,
-  Sparkles, Check, Sun, ListVideo
+  Sparkles, Check, Sun, ListVideo, Zap, Server, AlertCircle
 } from 'lucide-react';
 import { usePlayerStore } from '@/stores/usePlayerStore';
 import { resolveStream, getServers, getDetails } from '@/services/animeService';
 import { upsertHistory } from '@/services/storageService';
-import type { VideoServer } from '@/types';
+import type { VideoServer, Episode } from '@/types';
 
 function formatTime(s: number) {
   if (isNaN(s) || s <= 0) return '0:00';
@@ -29,20 +29,27 @@ const ASPECT_OPTIONS = [
 
 export function PlayerPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const hlsRef = useRef<Hls | null>(null);
   const controlsTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const toastTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
+  const queryUrl = searchParams.get('url');
+  const queryEp = searchParams.get('ep');
+  const querySource = searchParams.get('source') ?? 'jkanime';
+
   const {
     currentAnime, currentEpisode, servers, resolvedMedia,
     selectedServer, setSelectedServer, setResolvedMedia, setIsResolving,
     isResolving, volume, isMuted, setVolume, setIsMuted,
     playbackTime, setPlaybackTime, duration, setDuration,
-    setServers, setCurrentEpisode,
+    setServers, setCurrentEpisode, setCurrentAnime
   } = usePlayerStore();
 
+  const [isLoadingInitial, setIsLoadingInitial] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [showControls, setShowControls] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -51,18 +58,54 @@ export function PlayerPage() {
   const [autoNext, setAutoNext] = useState(true);
   const [activeDrawer, setActiveDrawer] = useState<'none' | 'servers' | 'settings'>('none');
 
-  // Gesture Feedback Toasts (Quickshell HUD style)
+  // Gesture Feedback Toasts
   const [hudToast, setHudToast] = useState<{ icon: 'volume' | 'brightness' | 'seek'; text: string; value?: number } | null>(null);
   const [brightness, setBrightness] = useState(1.0);
-
-  // Double tap animation indicators
   const [doubleTapSide, setDoubleTapSide] = useState<'left' | 'right' | null>(null);
 
   const showToast = (toast: { icon: 'volume' | 'brightness' | 'seek'; text: string; value?: number }) => {
     setHudToast(toast);
     if (toastTimeout.current) clearTimeout(toastTimeout.current);
-    toastTimeout.current = setTimeout(() => setHudToast(null), 1400);
+    toastTimeout.current = setTimeout(() => setHudToast(null), 1500);
   };
+
+  // Recuperación automática de estado desde URL si se abre directamente o se refresca
+  useEffect(() => {
+    const initFromParams = async () => {
+      if (!queryUrl) return;
+      const decoded = decodeURIComponent(queryUrl);
+
+      if (currentAnime && currentEpisode && currentAnime.url === decoded) {
+        return;
+      }
+
+      setIsLoadingInitial(true);
+      setLoadError(null);
+      try {
+        const details = await getDetails(decoded, querySource);
+        setCurrentAnime(details);
+
+        const epNum = queryEp ? parseInt(queryEp, 10) : 1;
+        const targetEp = details.episodes.find(e => e.number === epNum) || details.episodes[0] || {
+          number: epNum,
+          title: `Episodio ${epNum}`,
+          url: `${decoded.replace(/\/$/, '')}/${epNum}/`,
+          watched: false,
+        };
+        setCurrentEpisode(targetEp);
+
+        const srvs = await getServers(targetEp.url, querySource);
+        setServers(srvs);
+      } catch (err: any) {
+        console.error('Failed to init player from URL params:', err);
+        setLoadError(err?.message || 'No se pudo cargar el anime');
+      } finally {
+        setIsLoadingInitial(false);
+      }
+    };
+
+    initFromParams();
+  }, [queryUrl, queryEp, querySource]);
 
   // Sincronizar volumen y velocidad
   useEffect(() => {
@@ -72,15 +115,21 @@ export function PlayerPage() {
     }
   }, [volume, isMuted, playbackSpeed]);
 
-  // Resolver primer servidor al cargar
+  // Resolver automáticamente el mejor servidor al recibir lista de servidores
   useEffect(() => {
-    if (servers.length > 0 && !resolvedMedia) {
-      const firstDirect = servers.find(s => s.isDirect) ?? servers[0];
-      if (firstDirect) handleSelectServer(firstDirect);
+    if (servers.length > 0 && !resolvedMedia && !isResolving) {
+      const preferred = servers.find(s => s.name.toLowerCase().includes('magi'))
+        ?? servers.find(s => s.name.toLowerCase().includes('desu'))
+        ?? servers.find(s => s.isDirect)
+        ?? servers[0];
+
+      if (preferred) {
+        handleSelectServer(preferred);
+      }
     }
   }, [servers]);
 
-  // Cargar stream en el video
+  // Cargar stream resuelto en el elemento de video
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !resolvedMedia) return;
@@ -98,7 +147,13 @@ export function PlayerPage() {
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         video.play().catch(() => {});
       });
-    } else if (resolvedMedia.mediaType === 'mp4' || resolvedMedia.mediaType === 'unknown') {
+      hls.on(Hls.Events.ERROR, (_, data) => {
+        if (data.fatal) {
+          console.warn('Fatal HLS error, attempting fallback server...', data);
+          tryFallbackServer();
+        }
+      });
+    } else {
       video.src = resolvedMedia.directUrl;
       video.play().catch(() => {});
     }
@@ -109,17 +164,39 @@ export function PlayerPage() {
     };
   }, [resolvedMedia]);
 
-  const handleSelectServer = async (server: VideoServer) => {
+  // Selección y resolución de servidor dinámico
+  const handleSelectServer = async (server: VideoServer, restoreTime?: number) => {
+    const currentTime = restoreTime !== undefined ? restoreTime : (videoRef.current?.currentTime || 0);
     setSelectedServer(server);
     setIsResolving(true);
     setActiveDrawer('none');
+    showToast({ icon: 'seek', text: `Cargando ${server.name}...` });
+
     try {
-      const media = await resolveStream(server, currentAnime?.source ?? 'jkanime');
+      const media = await resolveStream(server, currentAnime?.source ?? querySource);
       setResolvedMedia(media);
+
+      setTimeout(() => {
+        if (videoRef.current && currentTime > 5) {
+          videoRef.current.currentTime = currentTime;
+        }
+      }, 400);
     } catch (e) {
-      console.error('Failed to resolve stream', e);
+      console.error(`Failed to resolve stream for ${server.name}:`, e);
+      showToast({ icon: 'seek', text: `Servidor ${server.name} falló, buscando alternativa...` });
+      tryFallbackServer(server.url);
     } finally {
       setIsResolving(false);
+    }
+  };
+
+  const tryFallbackServer = (failedUrl?: string) => {
+    const currentUrl = failedUrl || selectedServer?.url;
+    const candidates = servers.filter(s => s.url !== currentUrl);
+    const next = candidates.find(s => s.isDirect) || candidates[0];
+    if (next) {
+      showToast({ icon: 'seek', text: `Cambiando a ${next.name}...` });
+      handleSelectServer(next, videoRef.current?.currentTime || 0);
     }
   };
 
@@ -205,7 +282,6 @@ export function PlayerPage() {
   // Atajos de teclado para Windows / Desktop
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Ignorar si se está escribiendo en un input
       if ((e.target as HTMLElement).tagName === 'INPUT') return;
 
       switch (e.key.toLowerCase()) {
@@ -224,7 +300,7 @@ export function PlayerPage() {
           e.preventDefault();
           seekRelative(10);
           break;
-        case 's': // Skip Intro
+        case 's':
           e.preventDefault();
           seekRelative(85);
           break;
@@ -245,10 +321,10 @@ export function PlayerPage() {
         case 'f':
           toggleFullscreen();
           break;
-        case 'n': // Next episode
+        case 'n':
           if (currentEpisode) handleLoadEpisode(currentEpisode.number + 1);
           break;
-        case 'p': // Previous episode
+        case 'p':
           if (currentEpisode && currentEpisode.number > 1) handleLoadEpisode(currentEpisode.number - 1);
           break;
         case 'escape':
@@ -266,7 +342,6 @@ export function PlayerPage() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isPlaying, volume, isMuted, currentEpisode, activeDrawer]);
 
-  // Manejo de fin de video (Auto-Next)
   const handleEnded = () => {
     saveProgress();
     if (autoNext && currentEpisode) {
@@ -274,15 +349,36 @@ export function PlayerPage() {
     }
   };
 
+  if (isLoadingInitial) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', flexDirection: 'column', gap: 16, background: '#000' }}>
+        <div style={{
+          width: 48, height: 48, borderRadius: '50%',
+          border: '3px solid rgba(255,255,255,0.1)',
+          borderTopColor: 'var(--accent-primary)',
+          animation: 'spin-slow 0.8s linear infinite',
+        }} />
+        <p style={{ color: 'var(--text-secondary)', fontSize: 14 }}>Cargando reproductor y servidores...</p>
+      </div>
+    );
+  }
+
   if (!currentAnime || !currentEpisode) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', flexDirection: 'column', gap: 16, background: '#000' }}>
-        <p style={{ color: 'var(--text-muted)' }}>No hay contenido para reproducir</p>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', flexDirection: 'column', gap: 16, background: '#000', padding: 24, textAlign: 'center' }}>
+        <AlertCircle size={48} style={{ color: '#f87171', opacity: 0.8 }} />
+        <h2 style={{ fontSize: 18, fontWeight: 700, color: 'white', margin: 0 }}>
+          {loadError || 'No hay contenido seleccionado para reproducir'}
+        </h2>
+        <p style={{ color: 'var(--text-muted)', fontSize: 13, maxWidth: 400 }}>
+          Selecciona un episodio desde el catálogo o la página de detalles para comenzar a ver.
+        </p>
         <button
           onClick={() => navigate(-1)}
           style={{
             background: 'var(--accent-primary)', color: 'white',
-            border: 'none', borderRadius: 'var(--radius-md)', padding: '10px 20px', cursor: 'pointer',
+            border: 'none', borderRadius: 'var(--radius-md)', padding: '10px 24px',
+            fontSize: 14, fontWeight: 700, cursor: 'pointer',
           }}
         >
           Volver
@@ -302,7 +398,7 @@ export function PlayerPage() {
       onMouseMove={showControlsTemp}
       onClick={showControlsTemp}
     >
-      {/* ─── Video Layer: Geométricamente centrado en pantalla física ─── */}
+      {/* Video Layer */}
       <div style={{
         position: 'absolute', inset: 0,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -324,11 +420,15 @@ export function PlayerPage() {
             const v = videoRef.current;
             if (v) setDuration(v.duration);
           }}
+          onError={() => {
+            console.warn('Video element error, switching to fallback server...');
+            tryFallbackServer();
+          }}
           onEnded={handleEnded}
         />
       </div>
 
-      {/* ─── Gesture Ripple Indicators (Double-tap seek) ─── */}
+      {/* Double Tap Seek Feedback */}
       <AnimatePresence>
         {doubleTapSide && (
           <motion.div
@@ -353,300 +453,299 @@ export function PlayerPage() {
         )}
       </AnimatePresence>
 
-      {/* ─── HUD Toast (Quickshell Neon Pill) ─── */}
+      {/* HUD Toast (Quickshell Style) */}
       <AnimatePresence>
         {hudToast && (
           <motion.div
             initial={{ opacity: 0, y: -20, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -20, scale: 0.9 }}
-            transition={{ type: 'spring', damping: 20, stiffness: 300 }}
             style={{
-              position: 'absolute', top: '12%', left: '50%', transform: 'translateX(-50%)',
-              background: 'rgba(17, 19, 24, 0.85)', backdropFilter: 'blur(20px)',
-              border: '1px solid var(--border-accent)', borderRadius: 'var(--radius-full)',
-              padding: '8px 20px', display: 'flex', alignItems: 'center', gap: 12,
-              boxShadow: 'var(--shadow-glow)', color: 'white', zIndex: 40,
+              position: 'absolute', top: 80,
+              background: 'rgba(10, 11, 15, 0.85)', backdropFilter: 'blur(20px)',
+              border: '1px solid var(--border-moderate)',
+              borderRadius: 'var(--radius-full)', padding: '8px 20px',
+              color: 'white', zIndex: 40, display: 'flex', alignItems: 'center', gap: 10,
+              boxShadow: 'var(--shadow-glow)', fontSize: 13, fontWeight: 700,
             }}
           >
-            {hudToast.icon === 'volume' && <Volume2 size={18} color="var(--accent-primary)" />}
-            {hudToast.icon === 'brightness' && <Sun size={18} color="var(--accent-warning)" />}
-            {hudToast.icon === 'seek' && <FastForward size={18} color="var(--accent-secondary)" />}
-            <span style={{ fontSize: 13, fontWeight: 700 }}>{hudToast.text}</span>
-            {hudToast.value !== undefined && (
-              <div style={{ width: 60, height: 4, background: 'rgba(255,255,255,0.2)', borderRadius: 2 }}>
-                <div style={{ width: `${hudToast.value * 100}%`, height: '100%', background: 'var(--accent-primary)', borderRadius: 2 }} />
-              </div>
-            )}
+            {hudToast.icon === 'volume' && <Volume2 size={16} color="var(--accent-primary)" />}
+            {hudToast.icon === 'brightness' && <Sun size={16} color="#fbbf24" />}
+            {hudToast.icon === 'seek' && <Zap size={16} color="var(--accent-secondary)" />}
+            <span>{hudToast.text}</span>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* ─── Loading Overlay ─── */}
-      <AnimatePresence>
-        {isResolving && (
-          <motion.div
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            style={{
-              position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.75)',
-              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16,
-              zIndex: 35,
-            }}
-          >
-            <div style={{
-              width: 60, height: 60, borderRadius: '50%',
-              background: 'var(--accent-primary-glow)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>
-              <Loader2 size={32} color="var(--accent-primary)" style={{ animation: 'spin-slow 1s linear infinite' }} />
-            </div>
-            <p style={{ color: 'white', fontSize: 14, fontWeight: 600 }}>Cargando stream de video...</p>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Loading Overlay */}
+      {isResolving && (
+        <div style={{
+          position: 'absolute', inset: 0,
+          background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)',
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          gap: 14, zIndex: 35,
+        }}>
+          <div style={{
+            width: 44, height: 44, borderRadius: '50%',
+            border: '3px solid var(--border-subtle)',
+            borderTopColor: 'var(--accent-primary)',
+            animation: 'spin-slow 0.8s linear infinite',
+          }} />
+          <p style={{ color: 'white', fontSize: 14, fontWeight: 600 }}>
+            Conectando a {selectedServer?.name || 'servidor'}...
+          </p>
+        </div>
+      )}
 
-      {/* ─── Controls Overlay (Safe-Area Centered for Android Cutout / Notch) ─── */}
+      {/* Controls Overlay */}
       <AnimatePresence>
         {showControls && (
           <motion.div
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
             style={{
               position: 'absolute', inset: 0,
+              background: 'linear-gradient(to bottom, rgba(0,0,0,0.8) 0%, transparent 25%, transparent 75%, rgba(0,0,0,0.9) 100%)',
               display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
-              // Padding adaptativo para cámaras tipo notch / punch-hole en Android
-              paddingTop: 'max(16px, env(safe-area-inset-top, 16px))',
-              paddingBottom: 'max(20px, env(safe-area-inset-bottom, 20px))',
-              paddingLeft: 'max(24px, env(safe-area-inset-left, 24px))',
-              paddingRight: 'max(24px, env(safe-area-inset-right, 24px))',
-              zIndex: 25, pointerEvents: 'none',
+              padding: '24px 28px', zIndex: 20, pointerEvents: 'auto',
             }}
+            onClick={e => e.stopPropagation()}
           >
-            {/* 1. Top Bar */}
-            <div style={{
-              background: 'linear-gradient(to bottom, rgba(0,0,0,0.85), transparent)',
-              borderRadius: 'var(--radius-lg)', padding: '12px 18px',
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              pointerEvents: 'auto', backdropFilter: 'blur(8px)',
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                <motion.button
-                  whileHover={{ scale: 1.1 }}
-                  whileTap={{ scale: 0.9 }}
-                  onClick={() => { saveProgress(); navigate(-1); }}
+            {/* Top Bar: Back, Title & Dynamic Server Selector Chips */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14, minWidth: 0, flex: 1 }}>
+                <button
+                  onClick={() => {
+                    saveProgress();
+                    navigate(-1);
+                  }}
                   style={{
-                    background: 'rgba(255,255,255,0.1)', border: 'none',
-                    borderRadius: '50%', width: 36, height: 36,
-                    color: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.15)',
+                    borderRadius: 'var(--radius-full)', width: 38, height: 38,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    color: 'white', cursor: 'pointer', backdropFilter: 'blur(10px)', flexShrink: 0,
                   }}
                 >
                   <ArrowLeft size={18} />
-                </motion.button>
-                <div>
-                  <h1 style={{ color: 'white', fontSize: 15, fontWeight: 800, lineHeight: 1.2 }}>{currentAnime.title}</h1>
-                  <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: 12 }}>
-                    Episodio {currentEpisode.number} · {selectedServer?.name ?? 'Servidor'}
-                  </p>
+                </button>
+                <div style={{ minWidth: 0 }}>
+                  <h2 style={{ fontSize: 15, fontWeight: 800, color: 'white', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {currentAnime.title}
+                  </h2>
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                    Episodio {currentEpisode.number} {currentEpisode.title ? `· ${currentEpisode.title}` : ''}
+                  </span>
                 </div>
               </div>
 
-              {/* Botón Skip Intro (+85s) */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={() => seekRelative(85)}
-                  style={{
-                    background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.2)',
-                    borderRadius: 'var(--radius-full)', padding: '6px 14px',
-                    color: 'white', fontSize: 12, fontWeight: 700, cursor: 'pointer',
-                    display: 'flex', alignItems: 'center', gap: 6, backdropFilter: 'blur(8px)',
-                  }}
-                >
-                  <FastForward size={14} color="var(--accent-secondary)" /> Saltar Intro (+85s)
-                </motion.button>
+              {/* Selector Rápido de Servidores Soportados (Magi, Desu, Mediafire, etc.) */}
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                background: 'rgba(10,11,15,0.7)', padding: '4px 8px',
+                borderRadius: 'var(--radius-full)', border: '1px solid rgba(255,255,255,0.12)',
+                backdropFilter: 'blur(16px)', overflowX: 'auto', maxWidth: 480,
+              }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', paddingLeft: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <Server size={12} /> Servidor:
+                </span>
+                {servers.map((srv, idx) => {
+                  const isSelected = selectedServer?.url === srv.url;
+                  return (
+                    <button
+                      key={idx}
+                      onClick={() => handleSelectServer(srv)}
+                      title={`Cambiar a ${srv.name}`}
+                      style={{
+                        padding: '4px 10px',
+                        borderRadius: 'var(--radius-full)',
+                        background: isSelected
+                          ? 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))'
+                          : 'rgba(255,255,255,0.06)',
+                        border: `1px solid ${isSelected ? 'transparent' : 'rgba(255,255,255,0.1)'}`,
+                        color: isSelected ? 'white' : 'var(--text-secondary)',
+                        fontSize: 11, fontWeight: isSelected ? 800 : 600,
+                        cursor: 'pointer', whiteSpace: 'nowrap',
+                        display: 'flex', alignItems: 'center', gap: 4,
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      {srv.isDirect && <Zap size={10} color={isSelected ? 'white' : '#34d399'} fill="currentColor" />}
+                      {srv.name}
+                    </button>
+                  );
+                })}
+              </div>
 
-                <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
+              {/* Settings & Episodes Buttons */}
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
                   onClick={() => setActiveDrawer(activeDrawer === 'servers' ? 'none' : 'servers')}
+                  title="Lista de episodios"
                   style={{
-                    background: activeDrawer === 'servers' ? 'var(--accent-primary)' : 'rgba(255,255,255,0.12)',
-                    border: 'none', borderRadius: 'var(--radius-full)', padding: '6px 14px',
-                    color: 'white', fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                    display: 'flex', alignItems: 'center', gap: 6, backdropFilter: 'blur(8px)',
+                    background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.15)',
+                    borderRadius: 'var(--radius-full)', width: 38, height: 38,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    color: 'white', cursor: 'pointer', backdropFilter: 'blur(10px)',
                   }}
                 >
-                  <ListVideo size={14} /> Servidores ({servers.length})
-                </motion.button>
-
-                <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
+                  <ListVideo size={18} />
+                </button>
+                <button
                   onClick={() => setActiveDrawer(activeDrawer === 'settings' ? 'none' : 'settings')}
+                  title="Ajustes de reproducción"
                   style={{
-                    background: activeDrawer === 'settings' ? 'var(--accent-primary)' : 'rgba(255,255,255,0.12)',
-                    border: 'none', borderRadius: '50%', width: 36, height: 36,
-                    color: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.15)',
+                    borderRadius: 'var(--radius-full)', width: 38, height: 38,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    color: 'white', cursor: 'pointer', backdropFilter: 'blur(10px)',
                   }}
                 >
                   <Settings size={18} />
-                </motion.button>
+                </button>
               </div>
             </div>
 
-            {/* 2. Center Action Controls (Quickshell Glass Pill) */}
-            <div style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 24,
-              pointerEvents: 'auto',
-            }}>
-              {/* Episodio Anterior */}
-              <motion.button
-                whileHover={{ scale: 1.1 }}
-                whileTap={{ scale: 0.9 }}
-                disabled={currentEpisode.number <= 1}
-                onClick={() => handleLoadEpisode(currentEpisode.number - 1)}
+            {/* Center: Play/Pause Big Button & Quick Seek Controls */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 32 }}>
+              <button
+                onClick={() => seekRelative(-10)}
                 style={{
-                  background: 'rgba(17,19,24,0.7)', border: '1px solid var(--border-subtle)',
-                  borderRadius: '50%', width: 44, height: 44,
+                  background: 'rgba(255,255,255,0.08)', border: 'none', borderRadius: '50%',
+                  width: 48, height: 48, color: 'white', cursor: 'pointer',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  color: currentEpisode.number <= 1 ? 'rgba(255,255,255,0.2)' : 'white',
-                  cursor: currentEpisode.number <= 1 ? 'not-allowed' : 'pointer',
                   backdropFilter: 'blur(12px)',
                 }}
               >
-                <ChevronLeft size={22} />
-              </motion.button>
+                <RotateCcw size={22} />
+              </button>
 
-              {/* Retroceder 10s */}
               <motion.button
                 whileHover={{ scale: 1.1 }}
-                whileTap={{ scale: 0.9 }}
-                onClick={() => seekRelative(-10)}
-                style={{
-                  background: 'rgba(17,19,24,0.7)', border: '1px solid var(--border-subtle)',
-                  borderRadius: '50%', width: 48, height: 48,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  color: 'white', cursor: 'pointer', backdropFilter: 'blur(12px)',
-                }}
-              >
-                <RotateCcw size={20} />
-              </motion.button>
-
-              {/* Play / Pause Principal */}
-              <motion.button
-                whileHover={{ scale: 1.08 }}
                 whileTap={{ scale: 0.92 }}
                 onClick={togglePlay}
                 style={{
                   background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))',
-                  border: 'none', borderRadius: '50%', width: 72, height: 72,
+                  border: 'none', borderRadius: '50%',
+                  width: 68, height: 68, color: 'white', cursor: 'pointer',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  color: 'white', cursor: 'pointer',
-                  boxShadow: '0 0 25px var(--accent-primary-glow)',
+                  boxShadow: 'var(--shadow-glow)',
                 }}
               >
-                {isPlaying ? <Pause size={32} fill="white" /> : <Play size={32} fill="white" style={{ marginLeft: 4 }} />}
+                {isPlaying ? <Pause size={30} fill="white" /> : <Play size={30} fill="white" style={{ marginLeft: 4 }} />}
               </motion.button>
 
-              {/* Avanzar 10s */}
-              <motion.button
-                whileHover={{ scale: 1.1 }}
-                whileTap={{ scale: 0.9 }}
+              <button
                 onClick={() => seekRelative(10)}
                 style={{
-                  background: 'rgba(17,19,24,0.7)', border: '1px solid var(--border-subtle)',
-                  borderRadius: '50%', width: 48, height: 48,
+                  background: 'rgba(255,255,255,0.08)', border: 'none', borderRadius: '50%',
+                  width: 48, height: 48, color: 'white', cursor: 'pointer',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  color: 'white', cursor: 'pointer', backdropFilter: 'blur(12px)',
+                  backdropFilter: 'blur(12px)',
                 }}
               >
-                <FastForward size={20} />
-              </motion.button>
-
-              {/* Siguiente Episodio */}
-              <motion.button
-                whileHover={{ scale: 1.1 }}
-                whileTap={{ scale: 0.9 }}
-                onClick={() => handleLoadEpisode(currentEpisode.number + 1)}
-                style={{
-                  background: 'rgba(17,19,24,0.7)', border: '1px solid var(--border-subtle)',
-                  borderRadius: '50%', width: 44, height: 44,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  color: 'white', cursor: 'pointer', backdropFilter: 'blur(12px)',
-                }}
-              >
-                <SkipForward size={20} />
-              </motion.button>
+                <FastForward size={22} />
+              </button>
             </div>
 
-            {/* 3. Bottom Bar */}
-            <div style={{
-              background: 'linear-gradient(to top, rgba(0,0,0,0.9), transparent)',
-              borderRadius: 'var(--radius-lg)', padding: '14px 20px',
-              display: 'flex', flexDirection: 'column', gap: 10,
-              pointerEvents: 'auto', backdropFilter: 'blur(8px)',
-            }}>
-              {/* Progress Slider */}
-              <div
-                style={{ position: 'relative', height: 6, background: 'rgba(255,255,255,0.2)', borderRadius: 3, cursor: 'pointer' }}
-                onClick={(e) => {
-                  const v = videoRef.current;
-                  if (!v) return;
-                  const rect = e.currentTarget.getBoundingClientRect();
-                  v.currentTime = ((e.clientX - rect.left) / rect.width) * (v.duration || 0);
-                }}
-              >
-                <div style={{
-                  position: 'absolute', left: 0, top: 0, bottom: 0,
-                  width: `${duration > 0 ? (playbackTime / duration) * 100 : 0}%`,
-                  background: 'linear-gradient(90deg, var(--accent-primary), var(--accent-secondary))',
-                  borderRadius: 3,
-                }} />
+            {/* Bottom Bar: Timeline, Volume, Skip Opening, Fullscreen */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {/* Timeline Slider */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: 'white', minWidth: 44, textAlign: 'right' }}>
+                  {formatTime(playbackTime)}
+                </span>
+                <input
+                  type="range"
+                  min={0}
+                  max={duration || 100}
+                  value={playbackTime}
+                  onChange={e => {
+                    const time = parseFloat(e.target.value);
+                    setPlaybackTime(time);
+                    if (videoRef.current) videoRef.current.currentTime = time;
+                  }}
+                  style={{
+                    flex: 1, accentColor: 'var(--accent-primary)',
+                    cursor: 'pointer', height: 6,
+                  }}
+                />
+                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', minWidth: 44 }}>
+                  {formatTime(duration)}
+                </span>
               </div>
 
-              {/* Controles inferiores */}
+              {/* Actions Row */}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                  <button onClick={togglePlay} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer', display: 'flex' }}>
-                    {isPlaying ? <Pause size={20} fill="white" /> : <Play size={20} fill="white" />}
+                {/* Volume Controls */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <button
+                    onClick={() => setIsMuted(!isMuted)}
+                    style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer' }}
+                  >
+                    {isMuted || volume === 0 ? <VolumeX size={18} /> : <Volume2 size={18} />}
                   </button>
-
-                  <button onClick={() => setIsMuted(!isMuted)} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer', display: 'flex' }}>
-                    {isMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}
-                  </button>
-
                   <input
-                    type="range" min="0" max="1" step="0.05"
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.05}
                     value={isMuted ? 0 : volume}
-                    onChange={(e) => { setVolume(parseFloat(e.target.value)); setIsMuted(false); }}
+                    onChange={e => {
+                      const v = parseFloat(e.target.value);
+                      setVolume(v);
+                      setIsMuted(false);
+                    }}
                     style={{ width: 80, accentColor: 'var(--accent-primary)', cursor: 'pointer' }}
                   />
-
-                  <span style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>
-                    {formatTime(playbackTime)} / {formatTime(duration)}
-                  </span>
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  {/* Selector de velocidad rápido */}
+                {/* Center Quick Skip Buttons */}
+                <div style={{ display: 'flex', gap: 8 }}>
                   <button
-                    onClick={() => {
-                      const nextIdx = (SPEED_OPTIONS.indexOf(playbackSpeed) + 1) % SPEED_OPTIONS.length;
-                      const nextSpeed = SPEED_OPTIONS[nextIdx];
-                      setPlaybackSpeed(nextSpeed);
-                      showToast({ icon: 'seek', text: `${nextSpeed}x Velocidad` });
-                    }}
+                    onClick={() => seekRelative(85)}
                     style={{
-                      background: 'rgba(255,255,255,0.12)', border: 'none', borderRadius: 'var(--radius-sm)',
-                      padding: '4px 8px', color: 'white', cursor: 'pointer', fontSize: 12, fontWeight: 700,
+                      background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.2)',
+                      borderRadius: 'var(--radius-full)', padding: '6px 14px',
+                      color: 'white', fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                      backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', gap: 6,
                     }}
                   >
-                    {playbackSpeed}x
+                    <SkipForward size={13} /> Saltar Intro (+85s)
                   </button>
+                  {currentEpisode.number > 1 && (
+                    <button
+                      onClick={() => handleLoadEpisode(currentEpisode.number - 1)}
+                      style={{
+                        background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)',
+                        borderRadius: 'var(--radius-full)', padding: '6px 12px',
+                        color: 'white', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                        display: 'flex', alignItems: 'center', gap: 4,
+                      }}
+                    >
+                      <ChevronLeft size={14} /> Ep. Ant
+                    </button>
+                  )}
+                  <button
+                    onClick={() => handleLoadEpisode(currentEpisode.number + 1)}
+                    style={{
+                      background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)',
+                      borderRadius: 'var(--radius-full)', padding: '6px 12px',
+                      color: 'white', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', gap: 4,
+                    }}
+                  >
+                    Ep. Sig <ChevronRight size={14} />
+                  </button>
+                </div>
 
-                  {/* Pantalla completa */}
-                  <button onClick={toggleFullscreen} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer', display: 'flex' }}>
+                {/* Right: Fullscreen */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <button
+                    onClick={toggleFullscreen}
+                    style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer' }}
+                  >
                     {isFullscreen ? <Minimize size={20} /> : <Maximize size={20} />}
                   </button>
                 </div>
@@ -656,61 +755,54 @@ export function PlayerPage() {
         )}
       </AnimatePresence>
 
-      {/* ─── Drawer 1: Selector de Servidores (Quickshell Glass Sheet) ─── */}
+      {/* Side Drawer: Episodes List */}
       <AnimatePresence>
         {activeDrawer === 'servers' && (
           <motion.div
-            initial={{ opacity: 0, x: 300 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: 300 }}
-            transition={{ type: 'spring', damping: 25, stiffness: 280 }}
+            initial={{ x: '100%' }}
+            animate={{ x: 0 }}
+            exit={{ x: '100%' }}
+            transition={{ type: 'spring', damping: 25 }}
             style={{
-              position: 'absolute', top: 0, right: 0, bottom: 0, width: 300,
-              background: 'rgba(17, 19, 24, 0.95)', backdropFilter: 'blur(30px)',
+              position: 'absolute', top: 0, right: 0, bottom: 0, width: 340,
+              background: 'rgba(10,11,15,0.92)', backdropFilter: 'blur(20px)',
               borderLeft: '1px solid var(--border-moderate)',
-              padding: '24px 20px', zIndex: 50,
-              display: 'flex', flexDirection: 'column', gap: 16,
+              zIndex: 30, padding: 24, display: 'flex', flexDirection: 'column',
             }}
+            onClick={e => e.stopPropagation()}
           >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <ListVideo size={18} color="var(--accent-primary)" />
-                <h3 style={{ fontSize: 16, fontWeight: 800, color: 'white' }}>Servidores</h3>
-              </div>
-              <button onClick={() => setActiveDrawer('none')} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>✕</button>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <h3 style={{ fontSize: 16, fontWeight: 800, color: 'white', margin: 0 }}>Episodios</h3>
+              <button
+                onClick={() => setActiveDrawer('none')}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+              >
+                ✕
+              </button>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, overflowY: 'auto' }}>
-              {servers.map((s) => {
-                const isSelected = selectedServer?.url === s.url;
+            <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {currentAnime.episodes.map(ep => {
+                const isCurrent = ep.number === currentEpisode.number;
                 return (
-                  <motion.button
-                    key={s.url}
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    onClick={() => handleSelectServer(s)}
+                  <button
+                    key={ep.number}
+                    onClick={() => {
+                      handleLoadEpisode(ep.number);
+                      setActiveDrawer('none');
+                    }}
                     style={{
                       padding: '12px 14px', borderRadius: 'var(--radius-md)',
-                      background: isSelected ? 'var(--accent-primary-glow)' : 'var(--bg-elevated)',
-                      border: isSelected ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)',
-                      color: 'white', textAlign: 'left', cursor: 'pointer',
-                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      background: isCurrent ? 'var(--accent-primary)' : 'var(--bg-elevated)',
+                      border: `1px solid ${isCurrent ? 'transparent' : 'var(--border-subtle)'}`,
+                      color: isCurrent ? 'white' : 'var(--text-primary)',
+                      textAlign: 'left', cursor: 'pointer', fontSize: 13, fontWeight: isCurrent ? 700 : 500,
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                     }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <span style={{
-                        width: 8, height: 8, borderRadius: '50%',
-                        background: s.isDirect ? 'var(--accent-success)' : 'var(--accent-warning)',
-                      }} />
-                      <div>
-                        <p style={{ fontSize: 14, fontWeight: 600 }}>{s.name}</p>
-                        <p style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                          {s.isDirect ? 'Directo / Rápido' : 'Servidor Web'}
-                        </p>
-                      </div>
-                    </div>
-                    {isSelected && <Check size={16} color="var(--accent-primary)" />}
-                  </motion.button>
+                    <span>Episodio {ep.number}</span>
+                    {isCurrent && <span style={{ fontSize: 11, fontWeight: 800 }}>REPRODUCIENDO</span>}
+                  </button>
                 );
               })}
             </div>
@@ -718,50 +810,73 @@ export function PlayerPage() {
         )}
       </AnimatePresence>
 
-      {/* ─── Drawer 2: Ajustes de Reproducción ─── */}
+      {/* Side Drawer: Settings & Servers Detailed */}
       <AnimatePresence>
         {activeDrawer === 'settings' && (
           <motion.div
-            initial={{ opacity: 0, x: 300 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: 300 }}
-            transition={{ type: 'spring', damping: 25, stiffness: 280 }}
+            initial={{ x: '100%' }}
+            animate={{ x: 0 }}
+            exit={{ x: '100%' }}
+            transition={{ type: 'spring', damping: 25 }}
             style={{
-              position: 'absolute', top: 0, right: 0, bottom: 0, width: 320,
-              background: 'rgba(17, 19, 24, 0.95)', backdropFilter: 'blur(30px)',
+              position: 'absolute', top: 0, right: 0, bottom: 0, width: 340,
+              background: 'rgba(10,11,15,0.92)', backdropFilter: 'blur(20px)',
               borderLeft: '1px solid var(--border-moderate)',
-              padding: '24px 20px', zIndex: 50,
-              display: 'flex', flexDirection: 'column', gap: 20, overflowY: 'auto',
+              zIndex: 30, padding: 24, display: 'flex', flexDirection: 'column', gap: 24,
             }}
+            onClick={e => e.stopPropagation()}
           >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Settings size={18} color="var(--accent-primary)" />
-                <h3 style={{ fontSize: 16, fontWeight: 800, color: 'white' }}>Ajustes de Video</h3>
-              </div>
-              <button onClick={() => setActiveDrawer('none')} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>✕</button>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ fontSize: 16, fontWeight: 800, color: 'white', margin: 0 }}>Ajustes</h3>
+              <button
+                onClick={() => setActiveDrawer('none')}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+              >
+                ✕
+              </button>
             </div>
 
-            {/* Proporción de aspecto */}
+            {/* Velocidad */}
             <div>
-              <label style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', display: 'block', marginBottom: 8 }}>
-                Proporción de Pantalla
-              </label>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {ASPECT_OPTIONS.map((opt) => (
+              <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                Velocidad de reproducción
+              </span>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginTop: 8 }}>
+                {SPEED_OPTIONS.map(s => (
+                  <button
+                    key={s}
+                    onClick={() => setPlaybackSpeed(s)}
+                    style={{
+                      padding: '8px 0', borderRadius: 'var(--radius-md)',
+                      background: playbackSpeed === s ? 'var(--accent-primary)' : 'var(--bg-elevated)',
+                      border: `1px solid ${playbackSpeed === s ? 'transparent' : 'var(--border-subtle)'}`,
+                      color: 'white', fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                    }}
+                  >
+                    {s}x
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Ajuste de Pantalla */}
+            <div>
+              <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                Escalado de Video
+              </span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
+                {ASPECT_OPTIONS.map(opt => (
                   <button
                     key={opt.id}
                     onClick={() => setAspectRatio(opt.id)}
                     style={{
-                      padding: '10px 12px', borderRadius: 'var(--radius-sm)',
-                      background: aspectRatio === opt.id ? 'var(--accent-primary-glow)' : 'var(--bg-elevated)',
-                      border: aspectRatio === opt.id ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)',
-                      color: 'white', fontSize: 13, cursor: 'pointer', textAlign: 'left',
-                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      padding: '10px 14px', borderRadius: 'var(--radius-md)',
+                      background: aspectRatio === opt.id ? 'rgba(59,130,246,0.2)' : 'var(--bg-elevated)',
+                      border: `1px solid ${aspectRatio === opt.id ? 'var(--accent-primary)' : 'var(--border-subtle)'}`,
+                      color: 'white', fontSize: 13, fontWeight: 600, cursor: 'pointer', textAlign: 'left',
                     }}
                   >
                     {opt.label}
-                    {aspectRatio === opt.id && <Check size={14} color="var(--accent-primary)" />}
                   </button>
                 ))}
               </div>
@@ -769,26 +884,30 @@ export function PlayerPage() {
 
             {/* Brillo */}
             <div>
-              <label style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', display: 'block', marginBottom: 8 }}>
-                Brillo ({Math.round(brightness * 100)}%)
-              </label>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                  Brillo
+                </span>
+                <span style={{ fontSize: 12, color: 'white', fontWeight: 700 }}>{Math.round(brightness * 100)}%</span>
+              </div>
               <input
-                type="range" min="0.4" max="1.6" step="0.05"
+                type="range"
+                min={0.3}
+                max={1.5}
+                step={0.05}
                 value={brightness}
-                onChange={(e) => setBrightness(parseFloat(e.target.value))}
-                style={{ width: '100%', accentColor: 'var(--accent-warning)', cursor: 'pointer' }}
+                onChange={e => setBrightness(parseFloat(e.target.value))}
+                style={{ width: '100%', marginTop: 8, accentColor: '#fbbf24', cursor: 'pointer' }}
               />
             </div>
 
-            {/* Auto siguiente episodio */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div>
-                <p style={{ fontSize: 13, fontWeight: 700, color: 'white' }}>Auto-Siguiente</p>
-                <p style={{ fontSize: 11, color: 'var(--text-muted)' }}>Cargar siguiente episodio al finalizar</p>
-              </div>
+            {/* Auto Next Toggle */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: 13, color: 'white', fontWeight: 600 }}>Siguiente episodio automático</span>
               <input
-                type="checkbox" checked={autoNext}
-                onChange={(e) => setAutoNext(e.target.checked)}
+                type="checkbox"
+                checked={autoNext}
+                onChange={e => setAutoNext(e.target.checked)}
                 style={{ width: 18, height: 18, accentColor: 'var(--accent-primary)', cursor: 'pointer' }}
               />
             </div>

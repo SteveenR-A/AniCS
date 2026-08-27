@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use async_trait::async_trait;
+use base64::prelude::*;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use scraper::{Html, Selector};
@@ -18,8 +19,8 @@ static VIDEO_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r#"video\[(\d+)\]\s*=\s*'<iframe[^>]+src="([^"]+)""#).unwrap()
 });
 
-static NAME_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"names\[(\d+)\]\s*=\s*'([^']+)'"#).unwrap()
+static SERVERS_JSON_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"var\s+servers\s*=\s*(\[\{.*?\}\]);"#).unwrap()
 });
 
 static EPISODE_ID_RE: Lazy<Regex> = Lazy::new(|| {
@@ -32,6 +33,14 @@ static TOTAL_EP_RE: Lazy<Regex> = Lazy::new(|| {
 
 static CSRF_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r#"name="csrf-token"\s+content="([^"]+)""#).unwrap()
+});
+
+static M3U8_DIRECT_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"(https?://[^\s"'\\<>]+\.m3u8[^\s"'\\<>]*)"#).unwrap()
+});
+
+static MEDIAFIRE_DL_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"href=["'](https?://download\d+\.mediafire\.com/[^"']+)["']"#).unwrap()
 });
 
 pub struct JKAnimeExtractor {
@@ -324,32 +333,52 @@ impl AnimeExtractor for JKAnimeExtractor {
         })
     }
 
-    // Servidores de video
+    // Servidores de video dinámicos y ordenados por compatibilidad
     async fn get_servers(&self, episode_url: &str) -> AppResult<Vec<VideoServer>> {
         let html = fetch_html(episode_url, Some(&self.base_url)).await
             .map_err(AppError::Network)?;
         if html.is_empty() { return Ok(vec![]); }
 
         let mut servers = vec![];
+        let mut tab_names: HashMap<String, String> = HashMap::new();
 
-        let mut name_map: HashMap<String, String> = HashMap::new();
-        for cap in NAME_RE.captures_iter(&html) {
-            name_map.insert(cap[1].to_string(), cap[2].trim().to_string());
+        {
+            let doc = Html::parse_document(&html);
+            let btn_sel = Selector::parse("a.servers, a[id*='btn-show-']").unwrap();
+            for a in doc.select(&btn_sel) {
+                let id_attr = attr(&a, "data-id");
+                let name = inner_text(&a);
+                if !id_attr.is_empty() && !name.is_empty() {
+                    tab_names.insert(id_attr, name);
+                }
+            }
         }
 
+        // 1. Extraer reproductores embebidos (Magi, Desu, Desuka, etc.)
         for cap in VIDEO_RE.captures_iter(&html) {
             let idx = &cap[1];
             let raw_url = &cap[2];
-
             let server_url = raw_url.replace(r#"\"#, "");
-            let server_name = name_map.get(idx)
+
+            let server_name = tab_names.get(idx)
                 .cloned()
-                .unwrap_or_else(|| format!("Servidor {}", idx));
+                .unwrap_or_else(|| {
+                    if server_url.contains("/umv") {
+                        "Magi".to_string()
+                    } else if server_url.contains("/um") {
+                        "Desu".to_string()
+                    } else if server_url.contains("/jk") {
+                        "Desuka".to_string()
+                    } else {
+                        format!("Servidor {}", idx)
+                    }
+                });
 
             let is_direct = server_url.contains("desu.php")
                 || server_url.contains("magi")
                 || server_url.contains("/jkplayer")
-                || server_url.contains("mediafire.com");
+                || server_name.eq_ignore_ascii_case("magi")
+                || server_name.eq_ignore_ascii_case("desu");
 
             servers.push(VideoServer {
                 name: server_name,
@@ -359,12 +388,41 @@ impl AnimeExtractor for JKAnimeExtractor {
             });
         }
 
-        // Fallback si no hay scripts con video[]
+        // 2. Extraer servidores de descarga / externos de JSON (Mediafire, Mega, Streamwish, etc.)
+        if let Some(cap) = SERVERS_JSON_RE.captures(&html) {
+            if let Some(json_str) = cap.get(1) {
+                if let Ok(items) = serde_json::from_str::<Vec<serde_json::Value>>(json_str.as_str()) {
+                    for item in items {
+                        let srv_name = item.get("server").and_then(|s| s.as_str()).unwrap_or("").to_string();
+                        let remote_b64 = item.get("remote").and_then(|r| r.as_str()).unwrap_or("");
+
+                        if !remote_b64.is_empty() && !srv_name.is_empty() {
+                            if let Ok(decoded_bytes) = BASE64_STANDARD.decode(remote_b64) {
+                                if let Ok(decoded_url) = String::from_utf8(decoded_bytes) {
+                                    let clean_url = decoded_url.trim().to_string();
+                                    if clean_url.starts_with("http") {
+                                        let is_mediafire = srv_name.eq_ignore_ascii_case("mediafire") || clean_url.contains("mediafire.com");
+                                        servers.push(VideoServer {
+                                            name: srv_name,
+                                            url: clean_url,
+                                            is_direct: is_mediafire,
+                                            referer: Some(episode_url.to_string()),
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Fallback de iframe si no hubo resultados
         if servers.is_empty() {
             if let Some(iframe) = IFRAME_RE.captures(&html).and_then(|c| c.get(1)) {
                 let iframe_url = iframe.as_str().replace(r#"\"#, "");
                 servers.push(VideoServer {
-                    name: "Reproductor Principal".to_string(),
+                    name: "Magi".to_string(),
                     url: iframe_url,
                     is_direct: true,
                     referer: Some(episode_url.to_string()),
@@ -372,13 +430,34 @@ impl AnimeExtractor for JKAnimeExtractor {
             }
         }
 
+        // Ordenar por servidores soportados preferidos (Magi -> Desu -> Mediafire -> otros)
+        servers.sort_by(|a, b| {
+            let score_a = server_priority(&a.name);
+            let score_b = server_priority(&b.name);
+            score_b.cmp(&score_a)
+        });
+
         Ok(servers)
     }
 
-    // Resolver de URL de video
+    // Resolver de URL de video (HLS / MP4 directo)
     async fn resolve_stream(&self, server: &VideoServer) -> AppResult<ResolvedMedia> {
         let url = &server.url;
 
+        // 1. Mediafire Direct Resolver
+        if url.contains("mediafire.com") {
+            if let Some(dl_url) = resolve_mediafire(url).await {
+                return Ok(ResolvedMedia {
+                    direct_url: dl_url,
+                    media_type: MediaType::Mp4,
+                    referer: None,
+                    user_agent: None,
+                    qualities: vec![],
+                });
+            }
+        }
+
+        // 2. JKPlayer Embebed (Magi / Desu / c1 / c2)
         if url.contains("/jkplayer") || url.contains("desu.php") || url.contains("magi")
             || url.contains("c1.php") || url.contains("c2.php") || url.contains("jkanime.net")
         {
@@ -388,6 +467,19 @@ impl AnimeExtractor for JKAnimeExtractor {
                 return Err(AppError::Resolver("Empty player page".to_string()));
             }
 
+            // A) Buscar stream directo .m3u8 en el HTML (Magi / Desu)
+            if let Some(m) = M3U8_DIRECT_RE.find(&html) {
+                let stream_url = m.as_str().replace('\\', "").replace('\'', "").replace('"', "");
+                return Ok(ResolvedMedia {
+                    direct_url: stream_url,
+                    media_type: MediaType::Hls,
+                    referer: Some(self.base_url.clone()),
+                    user_agent: None,
+                    qualities: vec![],
+                });
+            }
+
+            // B) JsUnpacker si estuviera ofuscado
             if let Some(stream_url) = JsUnpacker::extract_stream_url(&html) {
                 let media_type = detect_media_type(&stream_url);
                 return Ok(ResolvedMedia {
@@ -399,10 +491,23 @@ impl AnimeExtractor for JKAnimeExtractor {
                 });
             }
 
+            // C) Iframe anidado
             if let Some(nested) = IFRAME_RE.captures(&html).and_then(|c| c.get(1)) {
                 let nested_url = nested.as_str().replace(r#"\"#, "");
                 let nested_html = fetch_html(&nested_url, Some(url)).await
                     .map_err(AppError::Network)?;
+
+                if let Some(m) = M3U8_DIRECT_RE.find(&nested_html) {
+                    let stream_url = m.as_str().replace('\\', "").replace('\'', "").replace('"', "");
+                    return Ok(ResolvedMedia {
+                        direct_url: stream_url,
+                        media_type: MediaType::Hls,
+                        referer: Some(nested_url),
+                        user_agent: None,
+                        qualities: vec![],
+                    });
+                }
+
                 if let Some(stream_url) = JsUnpacker::extract_stream_url(&nested_html) {
                     let media_type = detect_media_type(&stream_url);
                     return Ok(ResolvedMedia {
@@ -413,18 +518,6 @@ impl AnimeExtractor for JKAnimeExtractor {
                         qualities: vec![],
                     });
                 }
-            }
-        }
-
-        if url.contains("mediafire.com") {
-            if let Some(dl_url) = resolve_mediafire(url).await {
-                return Ok(ResolvedMedia {
-                    direct_url: dl_url,
-                    media_type: MediaType::Mp4,
-                    referer: None,
-                    user_agent: None,
-                    qualities: vec![],
-                });
             }
         }
 
@@ -485,7 +578,6 @@ impl AnimeExtractor for JKAnimeExtractor {
             query_params.push(format!("p={}", filters.page));
         }
 
-        // Si hay una consulta de texto y no hay filtros, usar búsqueda estándar
         if query_params.is_empty() {
             if let Some(q) = &filters.query {
                 let results = self.search(q).await?;
@@ -608,6 +700,25 @@ impl JKAnimeExtractor {
     }
 }
 
+fn server_priority(name: &str) -> i32 {
+    let lower = name.to_lowercase();
+    if lower.contains("magi") {
+        100
+    } else if lower.contains("desu") && !lower.contains("desuka") {
+        90
+    } else if lower.contains("mediafire") {
+        80
+    } else if lower.contains("streamwish") {
+        70
+    } else if lower.contains("desuka") {
+        60
+    } else if lower.contains("voe") {
+        50
+    } else {
+        10
+    }
+}
+
 fn clean_field_value(raw: &str, prefixes: &[&str]) -> String {
     let mut clean = raw.to_string();
     for p in prefixes {
@@ -635,9 +746,12 @@ fn normalize_series_url(url: &str) -> String {
 
 async fn resolve_mediafire(url: &str) -> Option<String> {
     let html = fetch_html(url, None).await.ok()?;
+    if let Some(cap) = MEDIAFIRE_DL_RE.captures(&html) {
+        return cap.get(1).map(|m| m.as_str().to_string());
+    }
     let doc = Html::parse_document(&html);
-    let sel = Selector::parse("a#downloadButton, a.input").ok()?;
-    doc.select(&sel).next().map(|a| attr(&a, "href"))
+    let sel = Selector::parse("a#downloadButton, a[aria-label*='Download file'], a.input").ok()?;
+    doc.select(&sel).next().map(|a| attr(&a, "href")).filter(|h| !h.is_empty() && h.starts_with("http"))
 }
 
 fn attr(element: &scraper::ElementRef, name: &str) -> String {

@@ -47,6 +47,7 @@ async-trait = "0.1"
 parking_lot = "0.12"
 urlencoding = "2"
 url = "2"
+base64 = "0.22"
 
 [profile.release]
 panic = "abort"

@@ -65,9 +65,10 @@ export function DetailsPage() {
       setCurrentEpisode(ep);
       setServers(servers);
       openPlayer();
-      navigate('/player');
+      navigate(`/player?url=${encodeURIComponent(details.url)}&ep=${ep.number}&source=${source}`);
     } catch (e) {
       console.error(e);
+      navigate(`/player?url=${encodeURIComponent(details.url)}&ep=${ep.number}&source=${source}`);
     } finally {
       setLoadingEpisode(null);
     }
