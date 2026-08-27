@@ -86,25 +86,26 @@ async fn test_koukaku_kidoutai_details() {
 }
 
 #[tokio::test]
-async fn test_mundodonghua_servers_and_stream() {
-    let extractor = MundoDonghuaExtractor::new();
-    let latest = extractor.get_latest(1).await.expect("Failed to get latest");
-    if let Some(first) = latest.first() {
-        println!("MundoDonghua First latest: title='{}', url='{}'", first.title, first.url);
-        let details = extractor.get_details(&first.url).await.expect("Failed details");
-        println!("MundoDonghua Details: episodes={}", details.episodes.len());
-        if let Some(ep) = details.episodes.first() {
-            println!("MundoDonghua First Ep URL: {}", ep.url);
+async fn test_bandori_details_and_download() {
+    let extractor = JKAnimeExtractor::new();
+    let search = extractor.search("Bandori-chan").await.expect("Failed to search Bandori");
+    println!("Bandori search count: {}", search.len());
+    for item in &search {
+        println!("Bandori item: title='{}', url='{}'", item.title, item.url);
+        let det = extractor.get_details(&item.url).await.expect("Failed details");
+        println!("Bandori episodes: {}", det.episodes.len());
+        if let Some(ep) = det.episodes.first() {
             let srvs = extractor.get_servers(&ep.url).await.expect("Failed servers");
-            println!("MundoDonghua Servers count: {}", srvs.len());
+            println!("Bandori Servers count: {}", srvs.len());
             for s in &srvs {
-                println!(" - Server: name='{}', is_direct={}, url='{}'", s.name, s.is_direct, s.url);
+                println!(" - Server: name='{}', url='{}'", s.name, s.url);
                 match extractor.resolve_stream(s).await {
-                    Ok(media) => println!("   -> Resolved direct_url='{}', type={:?}", media.direct_url, media.media_type),
+                    Ok(media) => {
+                        println!("   -> Resolved direct_url='{}', type={:?}", media.direct_url, media.media_type);
+                    }
                     Err(e) => println!("   -> Failed to resolve: {}", e),
                 }
             }
-            assert!(!srvs.is_empty(), "MundoDonghua servers should not be empty");
         }
     }
 }

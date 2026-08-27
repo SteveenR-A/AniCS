@@ -495,27 +495,39 @@ export function DownloadsPage() {
                     <div
                       onClick={() => toggleFolder(anime.folderPath)}
                       style={{
-                        padding: '16px 20px', cursor: 'pointer',
+                        padding: '14px 18px', cursor: 'pointer',
                         display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16,
                         background: isExpanded ? 'var(--bg-elevated)' : 'transparent',
                         transition: 'background 0.15s ease',
                       }}
                     >
                       <div style={{ display: 'flex', alignItems: 'center', gap: 14, minWidth: 0, flex: 1 }}>
+                        {/* Portada real del Anime */}
                         <div style={{
-                          width: 44, height: 44, borderRadius: 'var(--radius-md)',
-                          background: 'linear-gradient(135deg, rgba(59,130,246,0.2), rgba(147,51,234,0.2))',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          color: 'var(--accent-primary)', flexShrink: 0,
+                          width: 48, height: 66, borderRadius: 'var(--radius-md)',
+                          overflow: 'hidden', flexShrink: 0, background: 'var(--bg-elevated)',
+                          border: '1px solid var(--border-subtle)', position: 'relative',
+                          boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
                         }}>
-                          <Folder size={24} />
+                          {anime.coverImage ? (
+                            <CachedImage
+                              src={anime.coverImage}
+                              alt={anime.animeTitle}
+                              fallbackIconSize={20}
+                              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                            />
+                          ) : (
+                            <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent-primary)' }}>
+                              <Film size={22} />
+                            </div>
+                          )}
                         </div>
 
                         <div style={{ minWidth: 0 }}>
                           <h3 style={{ fontSize: 16, fontWeight: 800, margin: 0, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                             {anime.animeTitle}
                           </h3>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
                             <span style={{
                               background: 'var(--accent-primary)', color: 'white',
                               fontSize: 11, fontWeight: 800, padding: '2px 8px', borderRadius: 'var(--radius-full)',
@@ -769,16 +781,29 @@ export function DownloadsPage() {
 
                   {isDownloading && (
                     <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 4 }}>
-                        <span>Progreso</span>
-                        <span style={{ color: 'var(--accent-secondary)' }}>{Math.round(task.progress * 100)}%</span>
-                      </div>
-                      <div style={{ height: 6, background: 'var(--bg-elevated)', borderRadius: 3, overflow: 'hidden' }}>
-                        <div style={{
-                          width: `${task.progress * 100}%`, height: '100%',
-                          background: 'linear-gradient(90deg, var(--accent-primary), var(--accent-secondary))',
-                        }} />
-                      </div>
+                      {(() => {
+                        const pct = task.progress > 1 ? Math.min(100, Math.round(task.progress)) : Math.min(100, Math.round(task.progress * 100));
+                        return (
+                          <>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 4 }}>
+                              <span>Progreso</span>
+                              <span style={{ color: 'var(--accent-secondary)' }}>{pct}%</span>
+                            </div>
+                            <div style={{ height: 6, background: 'var(--bg-elevated)', borderRadius: 3, overflow: 'hidden' }}>
+                              <div style={{
+                                width: `${pct}%`, height: '100%',
+                                background: 'linear-gradient(90deg, var(--accent-primary), var(--accent-secondary))',
+                              }} />
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  )}
+
+                  {isError && task.errorMessage && (
+                    <div style={{ fontSize: 12, color: '#f87171', background: 'rgba(239, 68, 68, 0.1)', padding: '6px 10px', borderRadius: 'var(--radius-sm)' }}>
+                      {task.errorMessage}
                     </div>
                   )}
                 </div>
