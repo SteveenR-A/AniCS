@@ -29,6 +29,7 @@ impl MundoDonghuaExtractor {
         Self { base_url: base }
     }
 
+    #[allow(dead_code)]
     pub fn with_base_url(base_url: String) -> Self {
         Self { base_url }
     }

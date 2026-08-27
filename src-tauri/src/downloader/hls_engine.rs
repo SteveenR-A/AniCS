@@ -14,6 +14,7 @@ const WINDOW_SIZE: usize = 8; // Fragmentos HLS concurrentes en vuelo
 
 /// Resultado del análisis de un manifiesto HLS
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct ParsedPlaylist {
     pub segment_urls: Vec<String>,
     pub total_duration_secs: f64,

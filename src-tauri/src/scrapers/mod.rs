@@ -7,7 +7,7 @@ pub mod http_client;
 pub mod jkanime;
 pub mod mundodonghua;
 
-pub use http_client::{fetch_html, next_user_agent, HTTP_CLIENT};
+pub use http_client::{fetch_html, HTTP_CLIENT};
 pub use jkanime::JKAnimeExtractor;
 pub use mundodonghua::MundoDonghuaExtractor;
 

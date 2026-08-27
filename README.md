@@ -6,28 +6,28 @@
 
 ---
 
-## ✨ Características Principales
+## Características Principales
 
-- ⚡ **Arquitectura de Alto Rendimiento:** Construido con **Tauri v2**, **Rust** para el backend y **React 19 + TypeScript** para el frontend.
-- 🌐 **Scraping Multihilo Sin Navegador:** Extracción directa mediante HTTP asíncrono con rotación de `User-Agent` y headers anti-bloqueo para **JKAnime** y **MundoDonghua**.
-- 🔓 **JsUnpacker en Rust:** Desofuscación instantánea del algoritmo Dean Edwards en memoria para obtener enlaces directos de video sin navegadores pesados.
-- 🚀 **Motor de Descarga HLS Paralelo:** Descargas aceleradas con ventana deslizante de **8 fragmentos concurrentes**, soporte de reanudación y emisión de progreso en tiempo real.
-- ⚙️ **Panel de Ajustes Completo:**
-  - **Personalización de dominios/espejos** para JKAnime y MundoDonghua.
-  - **Botón "Restablecer Web Original"** para volver a los dominios oficiales en un clic.
-  - **Selector nativo de carpeta de descargas** y límite de concurrencia.
-  - **Selector de reproductor:** Integrado o externo (MPV / VLC).
-  - **Aviso de resolución de video:** Información transparente sobre la dependencia del servidor de origen.
-  - **Comprobación de actualizaciones en tiempo real** contra GitHub Releases.
-- 📜 **Notas de Parche Integradas:** Visualizador interactivo de notas de versión dentro de la app (en Ajustes).
-- 🎬 **Reproductor Integrado:** Soporte HLS adaptativo (`Hls.js`), selector de servidores, guardado automático de progreso y pantalla completa.
-- 🗄️ **Base de Datos SQLite Embebida (WAL):** Historial, favoritos y ajustes almacenados de forma local y persistente.
-- 🎨 **Diseño Moderno & Sin Emojis:** Interfaz oscura neón con **Lucide React** y los iconos originales del proyecto.
-- 📦 **CI/CD Automatizado:** GitHub Actions compila automáticamente el instalador Windows (**`.msi`**, **`.exe`**) y el APK de Android (**`.apk`**).
+- **Arquitectura de Alto Rendimiento:** Construido con Tauri v2, Rust para el backend y React 19 + TypeScript para el frontend.
+- **Scraping Multihilo Sin Navegador:** Extracción directa mediante HTTP asíncrono con rotación de `User-Agent` y cabeceras anti-bloqueo para JKAnime y MundoDonghua.
+- **JsUnpacker en Rust:** Desofuscación instantánea del algoritmo Dean Edwards en memoria para obtener enlaces directos de video sin dependencias de navegadores externos.
+- **Motor de Descarga HLS Paralelo:** Descargas aceleradas con ventana deslizante de 8 fragmentos concurrentes, soporte de reanudación y emisión de progreso en tiempo real.
+- **Panel de Ajustes Avanzado:**
+  - Selector y personalización de dominios/espejos para JKAnime y MundoDonghua.
+  - Botón para restablecer los dominios oficiales en un clic.
+  - Selector nativo de directorio de descargas y límite de concurrencia.
+  - Selector de reproductor: Integrado o externo (MPV / VLC).
+  - Información transparente sobre la resolución y limitaciones de servidores de origen.
+  - Comprobación de actualizaciones en tiempo real contra GitHub Releases.
+- **Motor Multi-Tema Dinámico:** Selector con paletas visuales (Dark, Catppuccin Mocha, Dracula, Tokyo Night, Cyberpunk 2077, Nord y Claro) con persistencia en SQLite.
+- **Reproductor Adaptativo Integrado:** Soporte HLS (`Hls.js`), compensación para cámaras/notch en Android, salto de intro (+85s), selector de servidores en caliente y atajos de teclado completos.
+- **Base de Datos SQLite Embebida (WAL):** Historial de reproducción, favoritos y configuración almacenados de forma local y persistente.
+- **Diseño Limpio:** Interfaz oscura moderna con iconos vectoriales de Lucide React y los recursos gráficos oficiales.
+- **CI/CD Automatizado:** GitHub Actions compila automáticamente el instalador de Windows (`.msi`, `.exe`) y el paquete de Android (`.apk`).
 
 ---
 
-## 🛠️ Estructura del Proyecto
+## Estructura del Proyecto
 
 ```
 AniCS/
@@ -43,7 +43,7 @@ AniCS/
 │   │   └── changelog.json     # Historial centralizado de versiones
 │   ├── pages/                 # HomePage, SearchPage, DetailsPage, SettingsPage, PlayerPage...
 │   ├── services/              # Invocaciones IPC de Tauri (Anime, Descargas, Storage)
-│   └── stores/                # Estados globales con Zustand
+│   └── stores/                # Estados globales con Zustand (Tema, Descargas, Reproductor)
 ├── src-tauri/                 # Backend nativo (Rust + Tauri v2)
 │   ├── src/
 │   │   ├── commands/          # Handlers IPC expuestos al frontend
@@ -59,24 +59,24 @@ AniCS/
 
 ---
 
-## 📌 Manejo de Versiones y Notas de Parche (SemVer)
+## Manejo de Versiones y Publicación (SemVer)
 
-Este proyecto utiliza **Semantic Versioning** (`MAJOR.MINOR.PATCH`):
-- `0.1.0` ➔ **Versión Inicial:** Con todas las características principales implementadas.
-- `0.1.1` ➔ **Parche:** Para corrección de errores menores.
-- `0.2.0` ➔ **Menor:** Para agregar nuevas funciones o nuevos extractores.
-- `1.0.0` ➔ **Mayor:** Para la primera versión 100% estable.
+Este proyecto utiliza Semantic Versioning (`MAJOR.MINOR.PATCH`):
+- `0.1.0` - Versión inicial con arquitectura completa.
+- `0.1.1` - Parche de corrección de errores o mantenimiento.
+- `0.2.0` - Versión menor con nuevas funciones o extractores.
+- `1.0.0` - Versión estable final.
 
-### 🚀 Cómo Cambiar de Versión y Publicar (1 Solo Comando)
+### Actualizar Versión en 1 Solo Comando
 
-Para actualizar la versión en todo el proyecto (`package.json`, `Cargo.toml`, `tauri.conf.json`, `SettingsPage.tsx` y `changelog.json`):
+Para sincronizar la versión en todos los archivos (`package.json`, `Cargo.toml`, `tauri.conf.json`, `SettingsPage.tsx` y `changelog.json`):
 
 ```bash
 # Formato: npm run bump -- <version> [titulo] [cambios_separados_por_pipe]
-npm run bump -- 0.1.1 "Mejoras de rendimiento" "Arreglo en servidor Desu|Optimización de descargas HLS"
+npm run bump -- 0.1.1 "Mejoras de estabilidad" "Arreglo en selector de servidor|Optimización de descargas HLS"
 ```
 
-Luego publica en GitHub para que el CI/CD cree automáticamente el **MSI** y el **APK**:
+Luego publica en GitHub para que el flujo de CI/CD cree automáticamente el MSI y APK:
 ```bash
 git add .
 git commit -m "chore: release v0.1.1"
@@ -86,12 +86,12 @@ git push origin main --tags
 
 ---
 
-## 💻 Desarrollo Local
+## Desarrollo Local
 
 ### Requisitos Previos
-- **Node.js** >= 20
-- **Rust** (con `cargo` y toolchain MSVC en Windows)
-- **Tauri CLI v2**
+- Node.js >= 20
+- Rust (con toolchain MSVC en Windows)
+- Tauri CLI v2 (`@tauri-apps/cli`)
 
 ### Comandos de Ejecución
 

@@ -159,6 +159,7 @@ pub enum DownloadStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
 pub struct DownloadTask {
     pub id: String,
     pub anime_title: String,

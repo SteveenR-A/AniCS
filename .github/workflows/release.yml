@@ -51,7 +51,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'AniCS ${{ github.ref_name }}'
-          releaseBody: 'Mira los cambios de esta versión en las notas de la release.'
+          releaseBody: 'Notas de la versión en CHANGELOG.md'
           releaseDraft: false
           prerelease: false
           args: --bundles msi,nsis
@@ -83,7 +83,7 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android NDK
+      - name: Install Android NDK & Build Tools
         run: |
           sdkmanager --install "ndk;26.1.10909125" "build-tools;34.0.0" "platforms;android-34"
           echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/26.1.10909125" >> $GITHUB_ENV
@@ -98,7 +98,7 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
@@ -108,50 +108,101 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Initialize & Build Android APK
+      - name: Build Android APK
         run: |
-          npx tauri android init --skip-targets-install || true
-          npx tauri android build --apk
+          npx @tauri-apps/cli android init --skip-targets-install || true
+          npx @tauri-apps/cli android build --apk --target aarch64-linux-android
 
-      - name: Locate and Rename APK
+      - name: Sign APK (Release Keystore)
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           mkdir -p release-apk
-          find src-tauri/gen/android -name "*.apk" -exec cp {} release-apk/AniCS.apk \; || true
+          RAW_APK=$(find src-tauri/gen/android -name "*.apk" | head -n 1)
+          echo "Found APK at: $RAW_APK"
+
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "Signing with GitHub Secrets Keystore..."
+            echo "$KEYSTORE_BASE64" | base64 -d > release.keystore
+            $ANDROID_HOME/build-tools/34.0.0/apksigner sign --ks release.keystore \
+              --ks-key-alias "${KEY_ALIAS:-anics}" \
+              --ks-pass "pass:$KEYSTORE_PASSWORD" \
+              --key-pass "pass:${KEY_PASSWORD:-$KEYSTORE_PASSWORD}" \
+              --out release-apk/AniCS.apk "$RAW_APK"
+          else
+            echo "Creating consistent repository keystore for release..."
+            keytool -genkeypair -v -keystore auto-release.keystore \
+              -alias anics -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=AniCS, OU=App, O=AniCS, L=Online, ST=Global, C=WW" \
+              -storepass "anics_release_pass_2026" -keypass "anics_release_pass_2026"
+            
+            $ANDROID_HOME/build-tools/34.0.0/apksigner sign --ks auto-release.keystore \
+              --ks-key-alias anics \
+              --ks-pass "pass:anics_release_pass_2026" \
+              --key-pass "pass:anics_release_pass_2026" \
+              --out release-apk/AniCS.apk "$RAW_APK"
+          fi
+          
           ls -la release-apk/
 
       - name: Upload Android APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: android-apk
-          path: release-apk/*.apk
+          path: release-apk/AniCS.apk
 
   # ──────────────────────────────────────────────────────────
   # 3. Publish Unified GitHub Release
   # ──────────────────────────────────────────────────────────
   publish-release:
-    name: Publish Unified Release (MSI + APK)
+    name: Publish Release Assets
     needs: [build-windows, build-android]
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
-      - name: Download all artifacts
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Windows artifacts
         uses: actions/download-artifact@v4
         with:
-          path: ./dist-release
+          name: windows-binaries
+          path: windows-release
 
-      - name: Display downloaded files
-        run: |
-          ls -R ./dist-release
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+      - name: Download Android artifacts
+        uses: actions/download-artifact@v4
         with:
-          name: AniCS ${{ github.ref_name || inputs.version }}
-          tag_name: ${{ github.ref_name || inputs.version }}
-          generate_release_notes: true
-          files: |
-            ./dist-release/windows-binaries/**/*.msi
-            ./dist-release/windows-binaries/**/*.exe
-            ./dist-release/android-apk/**/*.apk
+          name: android-apk
+          path: android-release
+
+      - name: Prepare release files
+        run: |
+          mkdir -p final-assets
+          find windows-release -name "*.msi" -exec cp {} final-assets/AniCS.msi \; || true
+          find windows-release -name "*.exe" -exec cp {} final-assets/AniCS-setup.exe \; || true
+          find android-release -name "*.apk" -exec cp {} final-assets/AniCS.apk \; || true
+          ls -la final-assets/
+
+      - name: Create or Update GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: 'AniCS ${{ github.ref_name }}'
+          body: |
+            ## Novedades de AniCS ${{ github.ref_name }}
+            
+            Consulta el archivo `CHANGELOG.md` para ver el detalle de todos los cambios de esta versión.
+            
+            ### Descargas Disponibles:
+            - **Windows (Instalador MSI):** `AniCS.msi`
+            - **Windows (Ejecutable Setup):** `AniCS-setup.exe`
+            - **Android (APK Firmado):** `AniCS.apk`
+          files: |
+            final-assets/*
+          draft: false
+          prerelease: false
