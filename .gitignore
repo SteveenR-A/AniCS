@@ -33,3 +33,10 @@ anics.db*
 *.tmp
 build_output.txt
 build_err.txt
+
+# Android Keystores & Signing Secrets
+*.keystore
+*.jks
+*.p12
+KEYSTORE*.txt
+
