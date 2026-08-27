@@ -266,12 +266,14 @@ export function PlayerPage() {
     if (!currentAnime || !currentEpisode || !duration || duration <= 0) return;
     const prog = playbackTime / duration;
     upsertHistory({
+      id: `${currentAnime.url}-${currentEpisode.number}`,
       animeTitle: currentAnime.title,
       animeUrl: currentAnime.url,
       thumbnailUrl: currentAnime.thumbnailUrl,
       episodeNumber: currentEpisode.number,
       episodeUrl: currentEpisode.url,
       watchProgress: Math.min(1.0, Math.max(0.0, prog)),
+      watchedAt: new Date().toISOString(),
       source: currentAnime.source,
     }).catch(console.error);
   }, [currentAnime, currentEpisode, playbackTime, duration]);

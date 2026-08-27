@@ -801,9 +801,9 @@ export function DownloadsPage() {
                     </div>
                   )}
 
-                  {isError && task.errorMessage && (
+                  {isError && task.error && (
                     <div style={{ fontSize: 12, color: '#f87171', background: 'rgba(239, 68, 68, 0.1)', padding: '6px 10px', borderRadius: 'var(--radius-sm)' }}>
-                      {task.errorMessage}
+                      {task.error}
                     </div>
                   )}
                 </div>

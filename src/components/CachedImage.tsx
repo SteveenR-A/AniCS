@@ -44,9 +44,11 @@ export function CachedImage({
     return MEMORY_CACHE.get(src) || src;
   });
   const [hasError, setHasError] = useState(false);
+  const [isLoaded, setIsLoaded] = useState(false);
 
   useEffect(() => {
     if (!src) return;
+    setIsLoaded(false);
 
     // Si ya está en memoria caché RAM local, usarla de inmediato (0ms)
     if (MEMORY_CACHE.has(src)) {
