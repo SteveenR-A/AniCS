@@ -6,13 +6,11 @@ use reqwest::{
 
 /// Pool de User-Agents modernos para rotación automática en cada petición
 const USER_AGENTS: &[&str] = &[
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36 Edg/127.0.0.0",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Android 14; Mobile; rv:128.0) Gecko/128.0 Firefox/128.0",
-    "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.6613.88 Mobile Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36 Edg/132.0.0.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:135.0) Gecko/20100101 Firefox/135.0",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
 ];
 
 static UA_COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
@@ -24,20 +22,19 @@ pub fn next_user_agent() -> &'static str {
 }
 
 /// Cliente HTTP compartido con configuración de seguridad y rendimiento óptimos.
-/// Creado una sola vez y reutilizado en toda la app (connection pooling interno).
 pub static HTTP_CLIENT: Lazy<Client> = Lazy::new(|| {
     let mut headers = HeaderMap::new();
     headers.insert(
         header::ACCEPT,
-        HeaderValue::from_static("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"),
+        HeaderValue::from_static("text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"),
     );
     headers.insert(
         header::ACCEPT_LANGUAGE,
-        HeaderValue::from_static("es-419,es;q=0.9,en;q=0.8"),
+        HeaderValue::from_static("es-ES,es;q=0.9,en;q=0.8"),
     );
     headers.insert(
-        header::ACCEPT_ENCODING,
-        HeaderValue::from_static("gzip, deflate, br"),
+        header::UPGRADE_INSECURE_REQUESTS,
+        HeaderValue::from_static("1"),
     );
 
     ClientBuilder::new()
@@ -68,17 +65,17 @@ pub async fn fetch_html(url: &str, referer: Option<&str>) -> Result<String, reqw
 
         match req.send().await {
             Ok(resp) => {
-                let status = resp.status().as_u16();
+                let status = resp.status();
 
                 // Reintentar en 429 / 5xx
-                if (status == 429 || status >= 500) && attempt < MAX_ATTEMPTS - 1 {
-                    let delay_ms = (2u64.pow(attempt) * 600)
-                        + (rand_millis() % 400);
+                if (status.as_u16() == 429 || status.is_server_error()) && attempt < MAX_ATTEMPTS - 1 {
+                    let delay_ms = (2u64.pow(attempt) * 600) + (rand_millis() % 400);
                     tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
                     continue;
                 }
 
-                if !resp.status().is_success() {
+                if !status.is_success() {
+                    eprintln!("HTTP warning: status {} for {}", status, url);
                     return Ok(String::new());
                 }
 
@@ -96,7 +93,7 @@ pub async fn fetch_html(url: &str, referer: Option<&str>) -> Result<String, reqw
     Err(last_err.unwrap())
 }
 
-/// Pequeño helper para jitter aleatorio sin dependencia pesada
+/// Helper para jitter aleatorio sin dependencia pesada
 fn rand_millis() -> u64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()

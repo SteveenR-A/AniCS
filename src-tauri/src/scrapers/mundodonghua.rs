@@ -1,20 +1,15 @@
 use async_trait::async_trait;
-use regex::Regex;
-use scraper::Html;
 use once_cell::sync::Lazy;
+use regex::Regex;
+use scraper::{Html, Selector};
 
 use crate::core::*;
-use super::{attr, fetch_html, inner_text, normalize_url, select_nodes, AnimeExtractor};
-use crate::core::unpacker::JsUnpacker;
+use crate::scrapers::{fetch_html, AnimeExtractor};
 
-pub const DEFAULT_MUNDODONGHUA_URL: &str = "https://www.mundodonghua.com";
+const DEFAULT_MUNDODONGHUA_URL: &str = "https://www.mundodonghua.com";
 
-static REDIRECT_MEDIA_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"https?://[^\s"'<>\\]+\.(?:m3u8|mp4)[^\s"'<>\\]*"#).unwrap()
-});
-
-static DIGIT_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"\d+").unwrap()
+static IFRAME_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"<iframe[^>]+src=["']([^"']+)["']"#).unwrap()
 });
 
 pub struct MundoDonghuaExtractor {
@@ -47,7 +42,7 @@ impl AnimeExtractor for MundoDonghuaExtractor {
 
     // Búsqueda
     async fn search(&self, query: &str) -> AppResult<Vec<AnimeResult>> {
-        let url = self.url(&format!("/lista-donghuas?q={}", urlencoding::encode(query)));
+        let url = self.url(&format!("/busquedas?donghua={}", urlencoding::encode(query)));
         let html = fetch_html(&url, Some(&self.base_url)).await
             .map_err(AppError::Network)?;
         if html.is_empty() { return Ok(vec![]); }
@@ -55,28 +50,31 @@ impl AnimeExtractor for MundoDonghuaExtractor {
         let doc = Html::parse_document(&html);
         let mut results = vec![];
 
-        for card in select_nodes(&doc, "div.donghua-item, div.list-item") {
-            let a = card.select(&scraper::Selector::parse("a").unwrap()).next();
-            let img = card.select(&scraper::Selector::parse("img").unwrap()).next();
-            let title_el = card.select(&scraper::Selector::parse("h5, h4, .title").unwrap()).next();
+        let card_sel = Selector::parse("div.md-card, div[class*='md-card']").unwrap();
+        let link_sel = Selector::parse("a").unwrap();
+        let title_sel = Selector::parse("h3.md-card-title, .md-card-title, h3, h5").unwrap();
+        let img_sel = Selector::parse("img").unwrap();
 
-            if let Some(a_node) = a {
-                let href = attr(&a_node, "href");
+        for card in doc.select(&card_sel) {
+            if let Some(a) = card.select(&link_sel).next() {
+                let href = attr(&a, "href");
                 if href.is_empty() { continue; }
 
-                let title = title_el.map(|t| inner_text(&t))
-                    .unwrap_or_else(|| attr(&a_node, "title"));
+                let title = card.select(&title_sel).next()
+                    .map(|t| inner_text(&t))
+                    .unwrap_or_else(|| attr(&a, "title"));
                 if title.is_empty() { continue; }
 
-                let thumbnail = img.map(|i| {
-                    let src = attr(&i, "src");
-                    if src.is_empty() { attr(&i, "data-src") } else { src }
-                }).unwrap_or_default();
+                let thumbnail = card.select(&img_sel).next()
+                    .map(|i| {
+                        let src = attr(&i, "src");
+                        if src.is_empty() { attr(&i, "data-src") } else { src }
+                    }).unwrap_or_default();
 
                 results.push(AnimeResult {
                     title,
                     url: normalize_url(&href, &self.base_url),
-                    thumbnail_url: thumbnail,
+                    thumbnail_url: normalize_url(&thumbnail, &self.base_url),
                     anime_type: Some("Donghua".to_string()),
                     source: self.id().to_string(),
                     ..Default::default()
@@ -95,33 +93,35 @@ impl AnimeExtractor for MundoDonghuaExtractor {
         let doc = Html::parse_document(&html);
         let mut results = vec![];
 
-        for card in select_nodes(&doc, "div.donghua-episode, div.caplist-item, div.col-md-3") {
-            let a = card.select(&scraper::Selector::parse("a").unwrap()).next();
-            let img = card.select(&scraper::Selector::parse("img").unwrap()).next();
-            let ep_el = card.select(&scraper::Selector::parse("span.ep, .episode-num, .cap-num").unwrap()).next();
+        let card_sel = Selector::parse("div.md-card, div[class*='md-card']").unwrap();
+        let link_sel = Selector::parse("a").unwrap();
+        let title_sel = Selector::parse("h3.md-card-title, .md-card-title, h3, h5").unwrap();
+        let img_sel = Selector::parse("img").unwrap();
+        let badge_sel = Selector::parse("span.md-card-badge, .md-card-badge").unwrap();
 
-            if let Some(a_node) = a {
-                let href = attr(&a_node, "href");
+        for card in doc.select(&card_sel) {
+            if let Some(a) = card.select(&link_sel).next() {
+                let href = attr(&a, "href");
                 if href.is_empty() { continue; }
 
-                let title = if !attr(&a_node, "title").is_empty() {
-                    attr(&a_node, "title")
-                } else {
-                    inner_text(&a_node)
-                };
+                let title = card.select(&title_sel).next()
+                    .map(|t| inner_text(&t))
+                    .unwrap_or_else(|| attr(&a, "title"));
                 if title.is_empty() { continue; }
 
-                let thumbnail = img.map(|i| {
-                    let src = attr(&i, "src");
-                    if src.is_empty() { attr(&i, "data-src") } else { src }
-                }).unwrap_or_default();
+                let thumbnail = card.select(&img_sel).next()
+                    .map(|i| {
+                        let src = attr(&i, "src");
+                        if src.is_empty() { attr(&i, "data-src") } else { src }
+                    }).unwrap_or_default();
 
-                let episode = ep_el.map(|e| inner_text(&e));
+                let episode = card.select(&badge_sel).next()
+                    .map(|b| inner_text(&b));
 
                 results.push(AnimeResult {
                     title,
                     url: normalize_url(&href, &self.base_url),
-                    thumbnail_url: thumbnail,
+                    thumbnail_url: normalize_url(&thumbnail, &self.base_url),
                     episode,
                     anime_type: Some("Donghua".to_string()),
                     source: self.id().to_string(),
@@ -132,12 +132,12 @@ impl AnimeExtractor for MundoDonghuaExtractor {
         Ok(results)
     }
 
-    // Horario
+    // Horario semanal
     async fn get_schedule(&self) -> AppResult<Vec<AnimeResult>> {
-        Ok(vec![])
+        self.get_latest(1).await
     }
 
-    // Detalles
+    // Detalles de serie
     async fn get_details(&self, url: &str) -> AppResult<AnimeDetails> {
         let html = fetch_html(url, Some(&self.base_url)).await
             .map_err(AppError::Network)?;
@@ -147,53 +147,54 @@ impl AnimeExtractor for MundoDonghuaExtractor {
 
         let doc = Html::parse_document(&html);
 
-        let title = select_nodes(&doc, "h1.donghua-title, h1.series-title, h1")
-            .first()
-            .map(|n| inner_text(n))
+        let title_sel = Selector::parse("h1.md-donghua-title, h1, .title").unwrap();
+        let title = doc.select(&title_sel).next()
+            .map(|n| inner_text(&n))
             .unwrap_or_default();
 
-        let thumbnail = select_nodes(&doc, "div.donghua-cover img, img.cover-img, img.series-img")
-            .first()
+        let pic_sel = Selector::parse("div.md-donghua-img img, img.cover, img").unwrap();
+        let thumbnail = doc.select(&pic_sel).next()
             .map(|n| {
-                let src = attr(n, "src");
-                if src.is_empty() { attr(n, "data-src") } else { src }
+                let src = attr(&n, "src");
+                if src.is_empty() { attr(&n, "data-src") } else { src }
             })
             .unwrap_or_default();
 
-        let synopsis = select_nodes(&doc, "div.synopsis, div.description, p.sinopsis")
-            .first()
-            .map(|n| inner_text(n))
+        let syn_sel = Selector::parse("div.md-donghua-sinopsis p, div.sinopsis p, p").unwrap();
+        let synopsis = doc.select(&syn_sel).next()
+            .map(|n| inner_text(&n))
             .unwrap_or_default();
 
-        let mut episodes: Vec<Episode> = select_nodes(&doc, "div.cap-list a, ul.episodes-list a, div.episodios a")
-            .iter()
-            .enumerate()
-            .map(|(i, a)| {
-                let href = attr(a, "href");
-                let text = inner_text(a);
-                let number = DIGIT_RE.find(&text)
-                    .and_then(|m| m.as_str().parse().ok())
-                    .unwrap_or((i + 1) as u32);
-
-                Episode {
-                    number,
-                    title: Some(format!("Episodio {number}")),
-                    url: normalize_url(&href, &self.base_url),
-                    thumbnail_url: None,
-                    watched: false,
-                    watch_progress: None,
-                }
-            })
+        let genre_sel = Selector::parse("div.md-donghua-genres a, a[href*='/genero/']").unwrap();
+        let genres: Vec<String> = doc.select(&genre_sel)
+            .map(|a| inner_text(&a))
             .collect();
 
-        episodes.sort_by_key(|e| e.number);
+        // Episodios
+        let mut episodes = vec![];
+        let ep_sel = Selector::parse("ul.md-donghua-episodes li a, div.episodes-list a, a[href*='/ver/']").unwrap();
+
+        for (idx, a) in doc.select(&ep_sel).enumerate() {
+            let href = attr(&a, "href");
+            if href.is_empty() { continue; }
+            let ep_num = (idx + 1) as u32;
+
+            episodes.push(Episode {
+                number: ep_num,
+                title: Some(format!("Episodio {}", ep_num)),
+                url: normalize_url(&href, &self.base_url),
+                thumbnail_url: None,
+                watched: false,
+                watch_progress: None,
+            });
+        }
 
         Ok(AnimeDetails {
             title,
             url: url.to_string(),
-            thumbnail_url: thumbnail,
+            thumbnail_url: normalize_url(&thumbnail, &self.base_url),
             synopsis,
-            genres: vec![],
+            genres,
             episodes,
             source: self.id().to_string(),
             ..Default::default()
@@ -206,59 +207,52 @@ impl AnimeExtractor for MundoDonghuaExtractor {
             .map_err(AppError::Network)?;
         if html.is_empty() { return Ok(vec![]); }
 
-        let mut servers = vec![];
         let doc = Html::parse_document(&html);
-        let iframes = select_nodes(&doc, "iframe#player, iframe.player, iframe[src*='player']");
+        let mut servers = vec![];
 
-        if let Some(iframe) = iframes.first() {
-            let src = attr(iframe, "src");
-            if !src.is_empty() {
-                servers.push(VideoServer {
-                    name: "MundoDonghua".to_string(),
-                    url: normalize_url(&src, &self.base_url),
-                    is_direct: false,
-                    referer: Some(self.base_url.clone()),
-                });
+        let tab_sel = Selector::parse("ul.md-player-tabs li, .server-item").unwrap();
+        let iframe_sel = Selector::parse("div.md-player-container iframe, iframe").unwrap();
+
+        for (idx, tab) in doc.select(&tab_sel).enumerate() {
+            let name = inner_text(&tab);
+            let srv_name = if name.is_empty() { format!("Servidor {}", idx + 1) } else { name };
+
+            if let Some(iframe) = doc.select(&iframe_sel).nth(idx) {
+                let src = attr(&iframe, "src");
+                if !src.is_empty() {
+                    servers.push(VideoServer {
+                        name: srv_name,
+                        url: src,
+                        is_direct: true,
+                        referer: Some(episode_url.to_string()),
+                    });
+                }
             }
         }
 
-        for btn in select_nodes(&doc, "a.btn-server, a[data-server]") {
-            let server_url = if !attr(&btn, "data-url").is_empty() {
-                attr(&btn, "data-url")
-            } else {
-                attr(&btn, "href")
-            };
-            let name = inner_text(&btn);
-
-            if !server_url.is_empty() {
-                servers.push(VideoServer {
-                    name: if name.is_empty() { "Servidor".to_string() } else { name },
-                    url: normalize_url(&server_url, &self.base_url),
-                    is_direct: false,
-                    referer: Some(self.base_url.clone()),
-                });
+        if servers.is_empty() {
+            for iframe in doc.select(&iframe_sel) {
+                let src = attr(&iframe, "src");
+                if !src.is_empty() {
+                    servers.push(VideoServer {
+                        name: "Reproductor Principal".to_string(),
+                        url: src,
+                        is_direct: true,
+                        referer: Some(episode_url.to_string()),
+                    });
+                }
             }
         }
 
         Ok(servers)
     }
 
-    // Resolver de stream
+    // Resolver de URL de video
     async fn resolve_stream(&self, server: &VideoServer) -> AppResult<ResolvedMedia> {
         let url = &server.url;
 
-        let resolved_url = if url.contains("redirector.php") {
-            resolve_redirector(url, &self.base_url).await.unwrap_or_else(|| url.clone())
-        } else {
-            url.clone()
-        };
-
-        let html = fetch_html(&resolved_url, server.referer.as_deref()).await
+        let html = fetch_html(url, server.referer.as_deref()).await
             .map_err(AppError::Network)?;
-
-        if html.is_empty() {
-            return Err(AppError::Resolver("Empty player page".to_string()));
-        }
 
         if let Some(stream_url) = JsUnpacker::extract_stream_url(&html) {
             let media_type = detect_media_type(&stream_url);
@@ -271,34 +265,56 @@ impl AnimeExtractor for MundoDonghuaExtractor {
             });
         }
 
-        Err(AppError::Resolver(format!("Could not resolve stream from: {resolved_url}")))
+        if let Some(nested) = IFRAME_RE.captures(&html).and_then(|c| c.get(1)) {
+            let nested_url = nested.as_str().replace(r#"\"#, "");
+            let nested_html = fetch_html(&nested_url, Some(url)).await
+                .map_err(AppError::Network)?;
+            if let Some(stream_url) = JsUnpacker::extract_stream_url(&nested_html) {
+                let media_type = detect_media_type(&stream_url);
+                return Ok(ResolvedMedia {
+                    direct_url: stream_url,
+                    media_type,
+                    referer: Some(nested_url),
+                    user_agent: None,
+                    qualities: vec![],
+                });
+            }
+        }
+
+        let media_type = detect_media_type(url);
+        Ok(ResolvedMedia {
+            direct_url: url.clone(),
+            media_type,
+            referer: server.referer.clone(),
+            user_agent: None,
+            qualities: vec![],
+        })
+    }
+}
+
+fn attr(element: &scraper::ElementRef, name: &str) -> String {
+    element.value().attr(name).unwrap_or_default().trim().to_string()
+}
+
+fn inner_text(element: &scraper::ElementRef) -> String {
+    element.text().collect::<Vec<_>>().join(" ").trim().to_string()
+}
+
+fn normalize_url(href: &str, base_url: &str) -> String {
+    if href.starts_with("http://") || href.starts_with("https://") {
+        href.to_string()
+    } else {
+        format!("{}{}", base_url.trim_end_matches('/'), if href.starts_with('/') { href.to_string() } else { format!("/{}", href) })
     }
 }
 
 fn detect_media_type(url: &str) -> MediaType {
-    let path = url.split('?').next().unwrap_or(url).to_lowercase();
-    if path.contains(".m3u8") { MediaType::Hls }
-    else if path.contains(".mp4") || path.contains(".mkv") { MediaType::Mp4 }
-    else { MediaType::Unknown }
-}
-
-async fn resolve_redirector(url: &str, base: &str) -> Option<String> {
-    use crate::scrapers::HTTP_CLIENT;
-    use reqwest::header;
-
-    let resp = HTTP_CLIENT
-        .get(url)
-        .header(header::REFERER, base)
-        .header("Origin", base)
-        .send()
-        .await
-        .ok()?;
-
-    let final_url = resp.url().to_string();
-    if !final_url.contains("redirector.php") {
-        return Some(final_url);
+    let lower = url.to_lowercase();
+    if lower.contains(".m3u8") || lower.contains("hls") {
+        MediaType::Hls
+    } else if lower.contains(".mp4") {
+        MediaType::Mp4
+    } else {
+        MediaType::Unknown
     }
-
-    let html = resp.text().await.ok()?;
-    REDIRECT_MEDIA_RE.find(&html).map(|m| m.as_str().to_string())
 }

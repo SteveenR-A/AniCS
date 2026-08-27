@@ -1,8 +1,8 @@
-mod commands;
-mod core;
-mod downloader;
-mod scrapers;
-mod storage;
+pub mod commands;
+pub mod core;
+pub mod downloader;
+pub mod scrapers;
+pub mod storage;
 
 use tauri::Manager;
 use commands::download_cmd::DownloadManager;

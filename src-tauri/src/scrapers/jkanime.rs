@@ -1,42 +1,37 @@
-use async_trait::async_trait;
-use regex::Regex;
-use scraper::Html;
-use once_cell::sync::Lazy;
-use reqwest::header;
 use std::collections::HashMap;
+use async_trait::async_trait;
+use once_cell::sync::Lazy;
+use regex::Regex;
+use scraper::{Html, Selector};
+use reqwest::header;
 
 use crate::core::*;
-use super::{attr, fetch_html, inner_text, normalize_url, select_nodes, AnimeExtractor, HTTP_CLIENT};
-use crate::core::unpacker::JsUnpacker;
+use crate::scrapers::{fetch_html, AnimeExtractor, HTTP_CLIENT};
 
-pub const DEFAULT_JKANIME_URL: &str = "https://jkanime.net";
-
-static EPISODE_ID_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"anime_id\s*=\s*["']?(\d+)["']?"#).unwrap()
-});
-
-static VIDEO_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"video\[(\d+)\]\s*=\s*'([^']+)'"#).unwrap()
-});
-
-static NAME_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"data-id=["'](\d+)["'][^>]*>([^<]+)<"#).unwrap()
-});
-
-static SRC_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"src=["']([^"']+)["']"#).unwrap()
-});
+const DEFAULT_JKANIME_URL: &str = "https://jkanime.net";
 
 static IFRAME_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r#"<iframe[^>]+src=["']([^"']+)["']"#).unwrap()
 });
 
-static MF_RE1: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"aria-label="Download file"\s+href="([^"]+)""#).unwrap()
+static VIDEO_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"video\[(\d+)\]\s*=\s*'<iframe[^>]+src="([^"]+)""#).unwrap()
 });
 
-static MF_RE2: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"https?://download\d+\.mediafire\.com/[^\s"'<>]+"#).unwrap()
+static NAME_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"names\[(\d+)\]\s*=\s*'([^']+)'"#).unwrap()
+});
+
+static EPISODE_ID_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"(?:ajax/episodes/|data-anime=["'])(\d+)"#).unwrap()
+});
+
+static TOTAL_EP_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"Episodios:</span>\s*(\d+)"#).unwrap()
+});
+
+static CSRF_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"name="csrf-token"\s+content="([^"]+)""#).unwrap()
 });
 
 pub struct JKAnimeExtractor {
@@ -78,26 +73,29 @@ impl AnimeExtractor for JKAnimeExtractor {
         let doc = Html::parse_document(&html);
         let mut results = vec![];
 
-        for item in select_nodes(&doc, "div.anime__item") {
-            let link = item.select(&scraper::Selector::parse("div.anime__item__text h5 a").unwrap())
-                .next();
-            let pic = item.select(&scraper::Selector::parse("div.anime__item__pic, div[class*='anime__item__pic']").unwrap())
-                .next();
+        let item_sel = Selector::parse("div.anime__item").unwrap();
+        let title_sel = Selector::parse("div.anime__item__text h5 a, h5 a, h5, .title").unwrap();
+        let pic_sel = Selector::parse("div.anime__item__pic, div[class*='anime__item__pic'], img").unwrap();
+        let a_sel = Selector::parse("a").unwrap();
 
-            if let Some(a) = link {
-                let href = attr(&a, "href");
-                let title = inner_text(&a);
-                if href.is_empty() || title.is_empty() { continue; }
+        for item in doc.select(&item_sel) {
+            let href = item.select(&a_sel).next().map(|a| attr(&a, "href")).unwrap_or_default();
+            let title = item.select(&title_sel).next().map(|h| inner_text(&h)).unwrap_or_default();
 
-                let thumbnail = pic.map(|p| attr(&p, "data-setbg")).unwrap_or_default();
-                results.push(AnimeResult {
-                    title,
-                    url: normalize_url(&href, &self.base_url),
-                    thumbnail_url: thumbnail,
-                    source: self.id().to_string(),
-                    ..Default::default()
-                });
-            }
+            if href.is_empty() || title.is_empty() { continue; }
+
+            let thumbnail = item.select(&pic_sel).next().map(|p| {
+                let bg = attr(&p, "data-setbg");
+                if !bg.is_empty() { bg } else { attr(&p, "src") }
+            }).unwrap_or_default();
+
+            results.push(AnimeResult {
+                title,
+                url: normalize_url(&href, &self.base_url),
+                thumbnail_url: thumbnail,
+                source: self.id().to_string(),
+                ..Default::default()
+            });
         }
         Ok(results)
     }
@@ -111,26 +109,34 @@ impl AnimeExtractor for JKAnimeExtractor {
         let doc = Html::parse_document(&html);
         let mut results = vec![];
 
-        let card_sel = scraper::Selector::parse("div.card").unwrap();
-        let title_sel = scraper::Selector::parse("h5.card-title a").unwrap();
-        let img_sel = scraper::Selector::parse("img.card-img-top, div.card-img-top").unwrap();
-        let ep_sel = scraper::Selector::parse("span.badge, div.card-chapter").unwrap();
+        let card_sel = Selector::parse("div.dir1 div.card, div.card").unwrap();
+        let link_sel = Selector::parse("a").unwrap();
+        let title_sel = Selector::parse("h5.card-title, h5[class*='card-title'], h5").unwrap();
+        let img_sel = Selector::parse("img.card-img-top, img[class*='card-img-top'], img").unwrap();
+        let ep_sel = Selector::parse("span.badge, span.badge-primary, span[class*='badge']").unwrap();
 
         for card in doc.select(&card_sel) {
-            if let Some(a) = card.select(&title_sel).next() {
+            if let Some(a) = card.select(&link_sel).next() {
                 let href = attr(&a, "href");
-                let title = inner_text(&a);
                 if href.is_empty() { continue; }
 
-                let thumbnail = card.select(&img_sel).next()
+                let title = a.select(&title_sel).next()
+                    .map(|h| inner_text(&h))
+                    .unwrap_or_else(|| inner_text(&a));
+                if title.is_empty() { continue; }
+
+                let thumbnail = a.select(&img_sel).next()
                     .map(|img| {
-                        let src = attr(&img, "src");
-                        if src.is_empty() { attr(&img, "data-setbg") } else { src }
+                        let pic = attr(&img, "data-animepic");
+                        if !pic.is_empty() { pic } else {
+                            let bg = attr(&img, "data-setbg");
+                            if !bg.is_empty() { bg } else { attr(&img, "src") }
+                        }
                     })
                     .unwrap_or_default();
 
-                let episode = card.select(&ep_sel).next()
-                    .map(|ep| inner_text(&ep));
+                let episode = a.select(&ep_sel).next()
+                    .map(|ep| inner_text(&ep).replace("Ep ", "").trim().to_string());
 
                 results.push(AnimeResult {
                     title,
@@ -154,8 +160,9 @@ impl AnimeExtractor for JKAnimeExtractor {
 
         let doc = Html::parse_document(&html);
         let mut results = vec![];
+        let link_sel = Selector::parse("div.boxx a").unwrap();
 
-        for a in select_nodes(&doc, "div.boxx a") {
+        for a in doc.select(&link_sel) {
             let href = attr(&a, "href");
             let title = inner_text(&a);
             if href.is_empty() || title.is_empty() { continue; }
@@ -171,41 +178,43 @@ impl AnimeExtractor for JKAnimeExtractor {
 
     // Detalles de serie
     async fn get_details(&self, url: &str) -> AppResult<AnimeDetails> {
-        let html = fetch_html(url, Some(&self.base_url)).await
+        let clean_url = normalize_series_url(url);
+        let html = fetch_html(&clean_url, Some(&self.base_url)).await
             .map_err(AppError::Network)?;
         if html.is_empty() {
-            return Err(AppError::NotFound(format!("No content at {url}")));
+            return Err(AppError::NotFound(format!("No content at {clean_url}")));
         }
 
-        let (title, thumbnail, synopsis, genres, anime_id) = {
+        let (title, thumbnail, synopsis, genres, anime_id, csrf_token, total_ep_hint) = {
             let doc = Html::parse_document(&html);
 
-            let title = select_nodes(&doc, "h2.anime__details__title h3")
-                .first()
-                .map(|n| inner_text(n))
-                .or_else(|| select_nodes(&doc, "h1").first().map(|n| inner_text(n)))
-                .unwrap_or_default();
+            let title_sel = Selector::parse("div.anime_info h3, h2.anime__details__title h3, h1").unwrap();
+            let title = doc.select(&title_sel).next()
+                .map(|n| inner_text(&n))
+                .filter(|t| !t.is_empty())
+                .unwrap_or_else(|| {
+                    let og_sel = Selector::parse("meta[property='og:title']").unwrap();
+                    doc.select(&og_sel).next()
+                        .map(|m| attr(&m, "content").replace(" - anime", "").replace(" online JkAnime", ""))
+                        .unwrap_or_default()
+                });
 
-            let thumbnail = select_nodes(&doc, "div.anime__details__pic")
-                .first()
-                .map(|n| attr(n, "data-setbg"))
-                .unwrap_or_default();
-
-            let synopsis = select_nodes(&doc, "div.anime__details__text p")
-                .first()
-                .map(|n| inner_text(n))
-                .unwrap_or_default();
-
-            let genres: Vec<String> = select_nodes(&doc, "div.anime__details__widget li")
-                .iter()
-                .filter_map(|li| {
-                    let text = inner_text(li);
-                    if text.to_lowercase().contains("género") || text.to_lowercase().contains("genero") {
-                        None
-                    } else {
-                        Some(text)
-                    }
+            let pic_sel = Selector::parse("div.anime_pic img, div.movpic img, div.anime__details__pic, img").unwrap();
+            let thumbnail = doc.select(&pic_sel).next()
+                .map(|n| {
+                    let src = attr(&n, "src");
+                    if !src.is_empty() { src } else { attr(&n, "data-setbg") }
                 })
+                .unwrap_or_default();
+
+            let syn_sel = Selector::parse("div.anime_info p, p.scroll, div.anime__details__text p, p#sinopsis").unwrap();
+            let synopsis = doc.select(&syn_sel).next()
+                .map(|n| inner_text(&n))
+                .unwrap_or_default();
+
+            let genre_sel = Selector::parse("div.anime_data li a[href*='/genero/'], a[href*='/genero/']").unwrap();
+            let genres: Vec<String> = doc.select(&genre_sel)
+                .map(|a| inner_text(&a))
                 .take(10)
                 .collect();
 
@@ -213,18 +222,35 @@ impl AnimeExtractor for JKAnimeExtractor {
                 .and_then(|c| c.get(1))
                 .map(|m| m.as_str().to_string());
 
-            (title, thumbnail, synopsis, genres, anime_id)
+            let csrf_token = CSRF_RE.captures(&html)
+                .and_then(|c| c.get(1))
+                .map(|m| m.as_str().to_string());
+
+            let total_ep_hint = TOTAL_EP_RE.captures(&html)
+                .and_then(|c| c.get(1))
+                .and_then(|m| m.as_str().parse::<u32>().ok());
+
+            (title, thumbnail, synopsis, genres, anime_id, csrf_token, total_ep_hint)
         };
 
-        let episodes = if let Some(id) = anime_id {
-            self.fetch_episodes_ajax(&id, url).await.unwrap_or_default()
+        let episodes = if let Some(id) = &anime_id {
+            let ajax_eps = self.fetch_episodes_ajax(id, &clean_url, csrf_token.as_deref()).await.unwrap_or_default();
+            if !ajax_eps.is_empty() {
+                ajax_eps
+            } else if let Some(tot) = total_ep_hint {
+                self.generate_episodes_list(&clean_url, tot)
+            } else {
+                vec![]
+            }
+        } else if let Some(tot) = total_ep_hint {
+            self.generate_episodes_list(&clean_url, tot)
         } else {
             vec![]
         };
 
         Ok(AnimeDetails {
             title,
-            url: url.to_string(),
+            url: clean_url,
             thumbnail_url: thumbnail,
             synopsis,
             genres,
@@ -248,20 +274,36 @@ impl AnimeExtractor for JKAnimeExtractor {
         }
 
         for cap in VIDEO_RE.captures_iter(&html) {
-            let id = &cap[1];
-            let iframe_html = &cap[2];
+            let idx = &cap[1];
+            let raw_url = &cap[2];
 
-            if let Some(src_cap) = SRC_RE.captures(iframe_html) {
-                let src = src_cap[1].replace(r#"\"#, "");
-                let name = name_map.get(id).cloned().unwrap_or_else(|| format!("Servidor {id}"));
-                let is_direct = ["desu", "magi", "mediafire", "jkplayer"]
-                    .iter().any(|s| src.to_lowercase().contains(s));
+            let server_url = raw_url.replace(r#"\"#, "");
+            let server_name = name_map.get(idx)
+                .cloned()
+                .unwrap_or_else(|| format!("Servidor {}", idx));
 
+            let is_direct = server_url.contains("desu.php")
+                || server_url.contains("magi")
+                || server_url.contains("/jkplayer")
+                || server_url.contains("mediafire.com");
+
+            servers.push(VideoServer {
+                name: server_name,
+                url: server_url,
+                is_direct,
+                referer: Some(episode_url.to_string()),
+            });
+        }
+
+        // Fallback si no hay scripts con video[]
+        if servers.is_empty() {
+            if let Some(iframe) = IFRAME_RE.captures(&html).and_then(|c| c.get(1)) {
+                let iframe_url = iframe.as_str().replace(r#"\"#, "");
                 servers.push(VideoServer {
-                    name,
-                    url: src,
-                    is_direct,
-                    referer: Some(self.base_url.clone()),
+                    name: "Reproductor Principal".to_string(),
+                    url: iframe_url,
+                    is_direct: true,
+                    referer: Some(episode_url.to_string()),
                 });
             }
         }
@@ -334,63 +376,104 @@ impl AnimeExtractor for JKAnimeExtractor {
 }
 
 impl JKAnimeExtractor {
-    async fn fetch_episodes_ajax(&self, anime_id: &str, referer: &str) -> AppResult<Vec<Episode>> {
-        let csrf_url = self.url(&format!("/{}/", anime_id));
-        let _ = fetch_html(&csrf_url, Some(&self.base_url)).await;
-
+    async fn fetch_episodes_ajax(&self, anime_id: &str, referer: &str, csrf: Option<&str>) -> AppResult<Vec<Episode>> {
         let ajax_url = self.url(&format!("/ajax/episodes/{}/1", anime_id));
-        let resp = HTTP_CLIENT
+        let mut req = HTTP_CLIENT
             .post(&ajax_url)
             .header(header::REFERER, referer)
             .header("X-Requested-With", "XMLHttpRequest")
-            .send()
-            .await
-            .map_err(AppError::Network)?;
+            .header(header::ACCEPT, "application/json");
+
+        if let Some(token) = csrf {
+            req = req.form(&[("_token", token)]);
+        }
+
+        let resp = req.send().await.map_err(AppError::Network)?;
 
         if !resp.status().is_success() {
             return Ok(vec![]);
         }
 
-        let json: serde_json::Value = resp.json().await
-            .map_err(|_| AppError::Parse("Invalid JSON from episodes API".to_string()))?;
+        let body: serde_json::Value = resp.json().await.map_err(AppError::Network)?;
+        let total = body.get("total")
+            .and_then(|t| t.as_u64())
+            .unwrap_or_else(|| {
+                body.get("data")
+                    .and_then(|d| d.as_array())
+                    .map(|a| a.len() as u64)
+                    .unwrap_or(0)
+            }) as u32;
 
-        let mut episodes = vec![];
-        if let Some(data) = json["data"].as_array() {
-            for ep in data {
-                let number = ep["number"].as_u64().unwrap_or(0) as u32;
-                let ep_url = format!("{}/{}/", referer.trim_end_matches('/'), number);
-                let thumbnail = ep["image"].as_str().map(|s| s.to_string());
-
-                episodes.push(Episode {
-                    number,
-                    title: Some(format!("Episodio {number}")),
-                    url: ep_url,
-                    thumbnail_url: thumbnail,
-                    watched: false,
-                    watch_progress: None,
-                });
-            }
+        if total == 0 {
+            return Ok(vec![]);
         }
 
-        episodes.sort_by_key(|e| e.number);
-        Ok(episodes)
+        Ok(self.generate_episodes_list(referer, total))
+    }
+
+    fn generate_episodes_list(&self, series_url: &str, total: u32) -> Vec<Episode> {
+        let slug = extract_slug(series_url);
+        let mut episodes = Vec::with_capacity(total as usize);
+
+        for i in 1..=total {
+            episodes.push(Episode {
+                number: i,
+                title: Some(format!("Episodio {}", i)),
+                url: self.url(&format!("/{}/{}/", slug, i)),
+                thumbnail_url: None,
+                watched: false,
+                watch_progress: None,
+            });
+        }
+        episodes
+    }
+}
+
+fn extract_slug(url: &str) -> String {
+    let clean = url.trim_end_matches('/');
+    clean.split('/').last().unwrap_or("").to_string()
+}
+
+fn normalize_series_url(url: &str) -> String {
+    let mut parts: Vec<&str> = url.trim_end_matches('/').split('/').collect();
+    if let Some(last) = parts.last() {
+        if last.chars().all(|c| c.is_ascii_digit()) {
+            parts.pop();
+        }
+    }
+    format!("{}/", parts.join("/"))
+}
+
+async fn resolve_mediafire(url: &str) -> Option<String> {
+    let html = fetch_html(url, None).await.ok()?;
+    let doc = Html::parse_document(&html);
+    let sel = Selector::parse("a#downloadButton, a.input").ok()?;
+    doc.select(&sel).next().map(|a| attr(&a, "href"))
+}
+
+fn attr(element: &scraper::ElementRef, name: &str) -> String {
+    element.value().attr(name).unwrap_or_default().trim().to_string()
+}
+
+fn inner_text(element: &scraper::ElementRef) -> String {
+    element.text().collect::<Vec<_>>().join(" ").trim().to_string()
+}
+
+fn normalize_url(href: &str, base_url: &str) -> String {
+    if href.starts_with("http://") || href.starts_with("https://") {
+        href.to_string()
+    } else {
+        format!("{}{}", base_url.trim_end_matches('/'), if href.starts_with('/') { href.to_string() } else { format!("/{}", href) })
     }
 }
 
 fn detect_media_type(url: &str) -> MediaType {
-    let path = url.split('?').next().unwrap_or(url).to_lowercase();
-    if path.contains(".m3u8") { MediaType::Hls }
-    else if path.contains(".mp4") || path.contains(".mkv") { MediaType::Mp4 }
-    else { MediaType::Unknown }
-}
-
-async fn resolve_mediafire(page_url: &str) -> Option<String> {
-    let html = fetch_html(page_url, None).await.ok()?;
-    if html.is_empty() { return None; }
-
-    if let Some(cap) = MF_RE1.captures(&html) {
-        return Some(cap[1].to_string());
+    let lower = url.to_lowercase();
+    if lower.contains(".m3u8") || lower.contains("hls") {
+        MediaType::Hls
+    } else if lower.contains(".mp4") {
+        MediaType::Mp4
+    } else {
+        MediaType::Unknown
     }
-
-    MF_RE2.find(&html).map(|m| m.as_str().to_string())
 }

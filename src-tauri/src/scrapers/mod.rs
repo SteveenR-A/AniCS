@@ -83,6 +83,7 @@ pub fn all_extractors() -> Vec<Box<dyn AnimeExtractor>> {
 // ──────────────────────────────────────────
 
 /// Parsea HTML y selecciona nodos de forma segura
+#[allow(dead_code)]
 pub fn select_nodes<'a>(
     document: &'a Html,
     selector_str: &str,
@@ -94,7 +95,7 @@ pub fn select_nodes<'a>(
     }
 }
 
-/// Extrae texto limpio de un nodo HTML
+#[allow(dead_code)]
 pub fn inner_text(el: &scraper::ElementRef) -> String {
     el.text()
         .collect::<String>()
@@ -105,7 +106,7 @@ pub fn inner_text(el: &scraper::ElementRef) -> String {
         .join(" ")
 }
 
-/// Extrae el valor de un atributo de forma segura
+#[allow(dead_code)]
 pub fn attr(el: &scraper::ElementRef, attr_name: &str) -> String {
     el.value()
         .attr(attr_name)
@@ -114,7 +115,7 @@ pub fn attr(el: &scraper::ElementRef, attr_name: &str) -> String {
         .to_string()
 }
 
-/// Normaliza URL relativa a absoluta
+#[allow(dead_code)]
 pub fn normalize_url(href: &str, base: &str) -> String {
     if href.starts_with("http://") || href.starts_with("https://") {
         href.to_string()
