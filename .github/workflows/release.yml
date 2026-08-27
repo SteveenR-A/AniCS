@@ -111,7 +111,7 @@ jobs:
       - name: Build Android APK
         run: |
           npx @tauri-apps/cli android init --skip-targets-install || true
-          npx @tauri-apps/cli android build --apk --target aarch64,armv7 --ci
+          npx @tauri-apps/cli android build --apk --target aarch64 --ci
 
       - name: Sign APK (Release Keystore)
         env:
