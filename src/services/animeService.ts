@@ -1,0 +1,42 @@
+import { invoke } from '@tauri-apps/api/core';
+import type {
+  AnimeResult,
+  AnimeDetails,
+  SearchFilters,
+  SearchResultPage,
+  VideoServer,
+  ResolvedMedia,
+  Source,
+} from '@/types';
+
+/** Buscar anime (en todos los extractores o en uno específico) */
+export const searchAnime = (query: string, source?: string): Promise<AnimeResult[]> =>
+  invoke('search_anime', { query, source });
+
+/** Obtener últimos episodios */
+export const getLatest = (source: string, page?: number): Promise<AnimeResult[]> =>
+  invoke('get_latest', { source, page });
+
+/** Obtener horario semanal */
+export const getSchedule = (source: string): Promise<AnimeResult[]> =>
+  invoke('get_schedule', { source });
+
+/** Obtener detalles completos de una serie */
+export const getDetails = (url: string, source: string): Promise<AnimeDetails> =>
+  invoke('get_details', { url, source });
+
+/** Búsqueda avanzada con filtros */
+export const advancedSearch = (filters: SearchFilters, source: string): Promise<SearchResultPage> =>
+  invoke('advanced_search', { filters, source });
+
+/** Obtener lista de extractores disponibles */
+export const getSources = (): Promise<Source[]> =>
+  invoke('get_sources');
+
+/** Obtener servidores de video de un episodio */
+export const getServers = (episodeUrl: string, source: string): Promise<VideoServer[]> =>
+  invoke('get_servers', { episodeUrl, source });
+
+/** Resolver un servidor a URL directa */
+export const resolveStream = (server: VideoServer, source: string): Promise<ResolvedMedia> =>
+  invoke('resolve_stream', { server, source });
