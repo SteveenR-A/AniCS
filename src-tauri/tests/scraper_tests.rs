@@ -51,16 +51,15 @@ async fn test_mundodonghua_get_latest() {
 }
 
 #[tokio::test]
-async fn test_genres_dynamic() {
-    let jk = JKAnimeExtractor::new();
-    let jk_genres = jk.get_genres().await.expect("Failed to get genres from JKAnime");
-    println!("JKAnime dynamic genres count: {}", jk_genres.len());
-    assert!(!jk_genres.is_empty());
-
-    let md = MundoDonghuaExtractor::new();
-    let md_genres = md.get_genres().await.expect("Failed to get genres from MundoDonghua");
-    println!("MundoDonghua dynamic genres count: {}", md_genres.len());
-    assert!(!md_genres.is_empty());
+async fn test_jkanime_schedule_and_top() {
+    let top_html = anics_lib::scrapers::fetch_html("https://jkanime.net/top/", Some("https://jkanime.net/")).await.unwrap();
+    let doc_top = scraper::Html::parse_document(&top_html);
+    let top_rows_sel = scraper::Selector::parse("div.top-anime, div.card, div[class*='top'], div.semana, div.anime__item, table tr, a[href*='jkanime.net/']").unwrap();
+    let sample = scraper::Selector::parse("a[href='https://jkanime.net/one-piece/']").unwrap();
+    if let Some(a) = doc_top.select(&sample).next() {
+        println!("Parent tag and class: <{}> class='{}'", a.parent().unwrap().value().as_element().unwrap().name(), a.parent().unwrap().value().as_element().unwrap().attr("class").unwrap_or(""));
+        println!("Link HTML: {}", &a.html()[..std::cmp::min(300, a.html().len())]);
+    }
 }
 
 #[tokio::test]

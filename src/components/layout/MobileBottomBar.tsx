@@ -1,12 +1,13 @@
 import { NavLink } from 'react-router-dom';
-import { Home, Search, BookMarked, Download, Clock } from 'lucide-react';
+import { Home, Search, Calendar, Flame, Download, Clock } from 'lucide-react';
 
 const navItems = [
   { to: '/',          icon: Home,       label: 'Inicio'    },
   { to: '/search',    icon: Search,     label: 'Buscar'    },
-  { to: '/favorites', icon: BookMarked, label: 'Favoritos' },
-  { to: '/history',   icon: Clock,      label: 'Historial' },
+  { to: '/schedule',  icon: Calendar,   label: 'Horarios'  },
+  { to: '/top',       icon: Flame,      label: 'Top'       },
   { to: '/downloads', icon: Download,   label: 'Descargas' },
+  { to: '/history',   icon: Clock,      label: 'Historial' },
 ];
 
 export function MobileBottomBar() {

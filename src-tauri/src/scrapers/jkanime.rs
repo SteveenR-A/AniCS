@@ -160,28 +160,136 @@ impl AnimeExtractor for JKAnimeExtractor {
         Ok(results)
     }
 
-    // Horario semanal
+    // Horario semanal plano
     async fn get_schedule(&self) -> AppResult<Vec<AnimeResult>> {
+        let days = self.get_schedule_days().await?;
+        let mut flat = vec![];
+        for d in days {
+            flat.extend(d.animes);
+        }
+        Ok(flat)
+    }
+
+    // Horario estructurado agrupado por días de la semana
+    async fn get_schedule_days(&self) -> AppResult<Vec<ScheduleDay>> {
         let url = self.url("/horario/");
         let html = fetch_html(&url, Some(&self.base_url)).await
             .map_err(AppError::Network)?;
         if html.is_empty() { return Ok(vec![]); }
 
         let doc = Html::parse_document(&html);
-        let mut results = vec![];
-        let link_sel = Selector::parse("div.boxx a").unwrap();
+        let mut days = vec![];
 
-        for a in doc.select(&link_sel) {
-            let href = attr(&a, "href");
-            let title = inner_text(&a);
-            if href.is_empty() || title.is_empty() { continue; }
-            results.push(AnimeResult {
-                title,
-                url: normalize_url(&href, &self.base_url),
-                source: self.id().to_string(),
-                ..Default::default()
-            });
+        let day_block_sel = Selector::parse("div.semana, div[class*='semana']").unwrap();
+        let day_title_sel = Selector::parse("h2").unwrap();
+        let anime_link_sel = Selector::parse("div.boxx a, a").unwrap();
+        let h3_sel = Selector::parse("h3").unwrap();
+
+        for block in doc.select(&day_block_sel) {
+            let day_name = block.select(&day_title_sel).next()
+                .map(|h| inner_text(&h).trim().to_string())
+                .unwrap_or_else(|| "Día".to_string());
+
+            let mut animes = vec![];
+            for a in block.select(&anime_link_sel) {
+                let href = attr(&a, "href");
+                let title = a.select(&h3_sel).next()
+                    .map(|h| inner_text(&h))
+                    .unwrap_or_else(|| inner_text(&a));
+
+                if href.is_empty() || title.is_empty() || !href.contains("jkanime.net/") { continue; }
+
+                let clean_url = normalize_url(&href, &self.base_url);
+                let slug = clean_url.trim_end_matches('/').split('/').last().unwrap_or("").to_string();
+                let thumbnail_url = if !slug.is_empty() {
+                    format!("https://cdn.jkdesa.com/assets/images/animes/image/{}.jpg", slug)
+                } else {
+                    String::new()
+                };
+
+                animes.push(AnimeResult {
+                    title,
+                    url: clean_url,
+                    thumbnail_url,
+                    source: self.id().to_string(),
+                    ..Default::default()
+                });
+            }
+
+            if !animes.is_empty() {
+                days.push(ScheduleDay {
+                    day: day_name,
+                    animes,
+                });
+            }
         }
+
+        Ok(days)
+    }
+
+    // Top y Ranking de animes más populares
+    async fn get_top(&self) -> AppResult<Vec<AnimeResult>> {
+        let url = self.url("/top/");
+        let html = fetch_html(&url, Some(&self.base_url)).await
+            .map_err(AppError::Network)?;
+        if html.is_empty() { return Ok(vec![]); }
+
+        let doc = Html::parse_document(&html);
+        let mut results = vec![];
+
+        let card_sel = Selector::parse("div.card").unwrap();
+        let a_sel = Selector::parse("a").unwrap();
+        let img_sel = Selector::parse("img.card-img-top, img").unwrap();
+        let title_sel = Selector::parse("h5.card-title, h5, h3, .title").unwrap();
+        let badge_sel = Selector::parse("div.card-badge, span.badge, .badge").unwrap();
+
+        for (idx, card) in doc.select(&card_sel).enumerate() {
+            if let Some(a) = card.select(&a_sel).next() {
+                let href = attr(&a, "href");
+                if href.is_empty() { continue; }
+
+                let raw_text = card.select(&title_sel).next()
+                    .map(|h| inner_text(&h))
+                    .unwrap_or_else(|| inner_text(&a));
+
+                // Extraer título sin el número #1, #2 o votos
+                let mut title = raw_text.clone();
+                if let Some(hash_pos) = raw_text.find('#') {
+                    let lines: Vec<&str> = raw_text[hash_pos..].lines().collect();
+                    if lines.len() > 1 {
+                        title = lines[1].trim().to_string();
+                    } else if let Some(first_line) = lines.first() {
+                        let parts: Vec<&str> = first_line.split_whitespace().collect();
+                        if parts.len() > 1 {
+                            title = parts[1..].join(" ");
+                        }
+                    }
+                }
+
+                if title.is_empty() {
+                    let slug = href.trim_end_matches('/').split('/').last().unwrap_or("Anime");
+                    title = slug.replace('-', " ").to_string();
+                }
+
+                let thumbnail = card.select(&img_sel).next()
+                    .map(|img| attr(&img, "src"))
+                    .unwrap_or_default();
+
+                let votes = card.select(&badge_sel).next()
+                    .map(|b| inner_text(&b).trim().to_string())
+                    .unwrap_or_else(|| format!("#{}", idx + 1));
+
+                results.push(AnimeResult {
+                    title,
+                    url: normalize_url(&href, &self.base_url),
+                    thumbnail_url: thumbnail,
+                    anime_type: Some(votes),
+                    source: self.id().to_string(),
+                    ..Default::default()
+                });
+            }
+        }
+
         Ok(results)
     }
 

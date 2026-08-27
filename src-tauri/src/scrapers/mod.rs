@@ -30,8 +30,22 @@ pub trait AnimeExtractor: Send + Sync {
     /// Últimos episodios emitidos (home/feed)
     async fn get_latest(&self, page: u32) -> AppResult<Vec<AnimeResult>>;
 
-    /// Estreno de la semana / horario
+    /// Estreno de la semana / horario plano
     async fn get_schedule(&self) -> AppResult<Vec<AnimeResult>>;
+
+    /// Horario estructurado agrupado por días de la semana
+    async fn get_schedule_days(&self) -> AppResult<Vec<ScheduleDay>> {
+        let animes = self.get_schedule().await?;
+        Ok(vec![ScheduleDay {
+            day: "Semana".to_string(),
+            animes,
+        }])
+    }
+
+    /// Top y Ranking de animes más populares / mejor valorados
+    async fn get_top(&self) -> AppResult<Vec<AnimeResult>> {
+        self.get_latest(1).await
+    }
 
     /// Detalles completos de una serie incluyendo lista de episodios
     async fn get_details(&self, url: &str) -> AppResult<AnimeDetails>;

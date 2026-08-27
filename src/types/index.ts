@@ -19,6 +19,11 @@ export interface GenreItem {
   slug: string;
 }
 
+export interface ScheduleDay {
+  day: string;
+  animes: AnimeResult[];
+}
+
 export interface AnimeDetails {
   title: string;
   url: string;

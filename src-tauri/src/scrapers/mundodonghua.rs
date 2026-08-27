@@ -132,8 +132,55 @@ impl AnimeExtractor for MundoDonghuaExtractor {
         Ok(results)
     }
 
-    // Horario semanal
+    // Horario semanal plano
     async fn get_schedule(&self) -> AppResult<Vec<AnimeResult>> {
+        self.get_latest(1).await
+    }
+
+    // Horario estructurado
+    async fn get_schedule_days(&self) -> AppResult<Vec<ScheduleDay>> {
+        let latest = self.get_latest(1).await?;
+        Ok(vec![ScheduleDay {
+            day: "Emisión Reciente".to_string(),
+            animes: latest,
+        }])
+    }
+
+    // Top Donghuas
+    async fn get_top(&self) -> AppResult<Vec<AnimeResult>> {
+        let url = self.url("/lista-donghuas");
+        if let Ok(html) = fetch_html(&url, Some(&self.base_url)).await {
+            if !html.is_empty() {
+                let doc = Html::parse_document(&html);
+                let item_sel = Selector::parse("div.md-donghua-card, div.col-6, div.col-md-4, .item").unwrap();
+                let a_sel = Selector::parse("a").unwrap();
+                let img_sel = Selector::parse("img").unwrap();
+                let title_sel = Selector::parse("h3, h4, h5, .title").unwrap();
+                let mut results = vec![];
+
+                for item in doc.select(&item_sel).take(40) {
+                    if let Some(a) = item.select(&a_sel).next() {
+                        let href = attr(&a, "href");
+                        let title = item.select(&title_sel).next().map(|h| inner_text(&h)).unwrap_or_else(|| inner_text(&a));
+                        if href.is_empty() || title.is_empty() { continue; }
+
+                        let thumb = item.select(&img_sel).next().map(|img| attr(&img, "src")).unwrap_or_default();
+
+                        results.push(AnimeResult {
+                            title,
+                            url: normalize_url(&href, &self.base_url),
+                            thumbnail_url: normalize_url(&thumb, &self.base_url),
+                            source: self.id().to_string(),
+                            ..Default::default()
+                        });
+                    }
+                }
+
+                if !results.is_empty() {
+                    return Ok(results);
+                }
+            }
+        }
         self.get_latest(1).await
     }
 

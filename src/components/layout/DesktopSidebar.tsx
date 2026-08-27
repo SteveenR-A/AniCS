@@ -2,17 +2,19 @@ import { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Home, Search, BookMarked, Download, Clock,
-  Settings, ChevronLeft, ChevronRight, Tv2
+  Home, Search, Calendar, Flame, Download, Clock,
+  BookMarked, Settings, ChevronLeft, ChevronRight, Tv2
 } from 'lucide-react';
 import { useAnimeStore } from '@/stores/useAnimeStore';
 
 const navItems = [
-  { to: '/',          icon: Home,       label: 'Inicio'    },
-  { to: '/search',    icon: Search,     label: 'Buscar'    },
-  { to: '/favorites', icon: BookMarked, label: 'Favoritos' },
-  { to: '/history',   icon: Clock,      label: 'Historial' },
-  { to: '/downloads', icon: Download,   label: 'Descargas' },
+  { to: '/',          icon: Home,       label: 'Inicio'       },
+  { to: '/search',    icon: Search,     label: 'Buscar Anime' },
+  { to: '/schedule',  icon: Calendar,   label: 'Horarios'     },
+  { to: '/top',       icon: Flame,      label: 'Top Animes'   },
+  { to: '/downloads', icon: Download,   label: 'Descargas'    },
+  { to: '/history',   icon: Clock,      label: 'Historial'    },
+  { to: '/favorites', icon: BookMarked, label: 'Favoritos'    },
 ];
 
 export function DesktopSidebar() {

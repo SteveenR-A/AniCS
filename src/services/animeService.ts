@@ -18,9 +18,17 @@ export const searchAnime = (query: string, source?: string): Promise<AnimeResult
 export const getLatest = (source: string, page?: number): Promise<AnimeResult[]> =>
   invoke('get_latest', { source, page });
 
-/** Obtener horario semanal */
+/** Obtener horario semanal plano */
 export const getSchedule = (source: string): Promise<AnimeResult[]> =>
   invoke('get_schedule', { source });
+
+/** Obtener horario estructurado por días de la semana */
+export const getScheduleDays = (source: string): Promise<import('@/types').ScheduleDay[]> =>
+  invoke('get_schedule_days', { source });
+
+/** Obtener ranking / top animes más populares */
+export const getTopAnimes = (source: string): Promise<AnimeResult[]> =>
+  invoke('get_top', { source });
 
 /** Obtener detalles completos de una serie */
 export const getDetails = (url: string, source: string): Promise<AnimeDetails> =>

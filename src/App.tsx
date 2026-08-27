@@ -5,6 +5,8 @@ import { HomePage } from '@/pages/HomePage';
 import { SearchPage } from '@/pages/SearchPage';
 import { DetailsPage } from '@/pages/DetailsPage';
 import { PlayerPage } from '@/pages/PlayerPage';
+import { SchedulePage } from '@/pages/SchedulePage';
+import { TopAnimePage } from '@/pages/TopAnimePage';
 import { HistoryPage, FavoritesPage, DownloadsPage } from '@/pages/OtherPages';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { useAnimeStore } from '@/stores/useAnimeStore';
@@ -18,10 +20,13 @@ function AppRoutes() {
       <Route element={<AppShell />}>
         <Route path="/" element={<HomePage />} />
         <Route path="/search" element={<SearchPage />} />
+        <Route path="/schedule" element={<SchedulePage />} />
+        <Route path="/top" element={<TopAnimePage />} />
         <Route path="/details/:url" element={<DetailsPage />} />
+        <Route path="/details" element={<DetailsPage />} />
+        <Route path="/downloads" element={<DownloadsPage />} />
         <Route path="/history" element={<HistoryPage />} />
         <Route path="/favorites" element={<FavoritesPage />} />
-        <Route path="/downloads" element={<DownloadsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Route>
       {/* El reproductor ocupa pantalla completa, fuera del AppShell */}

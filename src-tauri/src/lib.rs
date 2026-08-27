@@ -49,6 +49,8 @@ pub fn run() {
             commands::search_anime,
             commands::get_latest,
             commands::get_schedule,
+            commands::get_schedule_days,
+            commands::get_top,
             commands::get_details,
             commands::advanced_search,
             commands::get_genres,

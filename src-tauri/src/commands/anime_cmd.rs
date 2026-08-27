@@ -52,7 +52,7 @@ pub async fn get_latest(
     extractor.get_latest(page.unwrap_or(1)).await.map_err(|e| e.to_string())
 }
 
-/// Obtener horario semanal
+/// Obtener horario semanal plano
 #[tauri::command]
 pub async fn get_schedule(
     source: String,
@@ -61,6 +61,28 @@ pub async fn get_schedule(
     let extractor = create_extractor(&source)
         .ok_or_else(|| format!("Unknown source: {source}"))?;
     extractor.get_schedule().await.map_err(|e| e.to_string())
+}
+
+/// Obtener horario agrupado por días de la semana
+#[tauri::command]
+pub async fn get_schedule_days(
+    source: String,
+    _state: State<'_, AppState>,
+) -> Result<Vec<ScheduleDay>, String> {
+    let extractor = create_extractor(&source)
+        .ok_or_else(|| format!("Unknown source: {source}"))?;
+    extractor.get_schedule_days().await.map_err(|e| e.to_string())
+}
+
+/// Obtener ranking / top animes
+#[tauri::command]
+pub async fn get_top(
+    source: String,
+    _state: State<'_, AppState>,
+) -> Result<Vec<AnimeResult>, String> {
+    let extractor = create_extractor(&source)
+        .ok_or_else(|| format!("Unknown source: {source}"))?;
+    extractor.get_top().await.map_err(|e| e.to_string())
 }
 
 /// Obtener detalles completos de una serie (incluyendo lista de episodios)

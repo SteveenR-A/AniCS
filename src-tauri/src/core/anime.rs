@@ -131,6 +131,13 @@ impl Default for SearchFilters {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ScheduleDay {
+    pub day: String,
+    pub animes: Vec<AnimeResult>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SearchResultPage {
     pub results: Vec<AnimeResult>,
     pub current_page: u32,
