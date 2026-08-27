@@ -1,5 +1,18 @@
 [
   {
+    "version": "0.1.1",
+    "date": "2026-08-27",
+    "title": "Optimizacion de Memoria RAM L1/L2, Streaming Local y Mejoras de Reproductor",
+    "type": "patch",
+    "highlights": [
+      "Cache de imagenes en memoria RAM L1 con Base64",
+      "Poda dinamica LRU en disco con selector de tamano en Ajustes",
+      "Streaming nativo de descargas locales .ts y .mp4 en reproductor",
+      "Selector de fuentes Anime/Donghua en sidebar colapsado",
+      "Compilacion y release unificada EXE y APK con indicador de commit"
+    ]
+  },
+  {
     "version": "0.1.0",
     "date": "2026-08-27",
     "title": "Lanzamiento Inicial AniCS (Tauri v2)",

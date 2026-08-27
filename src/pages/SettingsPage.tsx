@@ -13,7 +13,7 @@ import { getCacheStats, clearImageCache } from '@/services/downloadService';
 
 const DEFAULT_JKANIME = 'https://jkanime.net';
 const DEFAULT_MUNDODONGHUA = 'https://www.mundodonghua.com';
-const CURRENT_VERSION = '0.1.0';
+const CURRENT_VERSION = '0.1.1';
 declare const __APP_COMMIT_HASH__: string;
 
 interface GitHubRelease {
