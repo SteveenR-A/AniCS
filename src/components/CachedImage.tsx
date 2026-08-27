@@ -39,27 +39,27 @@ export function CachedImage({
   className,
   ...props
 }: CachedImageProps) {
-  const isCached = MEMORY_CACHE.has(src);
   const [imgSrc, setImgSrc] = useState<string>(() => {
     if (!src) return '';
     return MEMORY_CACHE.get(src) || src;
   });
   const [hasError, setHasError] = useState(false);
-  const [isLoaded, setIsLoaded] = useState(isCached);
 
   useEffect(() => {
     if (!src) return;
 
-    // Si ya está en memoria caché RAM, usarla de inmediato (0ms)
+    // Si ya está en memoria caché RAM local, usarla de inmediato (0ms)
     if (MEMORY_CACHE.has(src)) {
       setImgSrc(MEMORY_CACHE.get(src)!);
-      setIsLoaded(true);
       return;
     }
 
+    // Mostrar inmediatamente la URL directa para que el navegador la pinte sin retraso
+    setImgSrc(src);
+
     let isMounted = true;
 
-    // Resolver ruta local desde backend
+    // Descargar y guardar en caché local en segundo plano
     cacheImage(src)
       .then((localPath) => {
         if (!isMounted) return;
@@ -69,13 +69,10 @@ export function CachedImage({
           setImgSrc(assetUrl);
         } else {
           MEMORY_CACHE.set(src, src);
-          setImgSrc(src);
         }
       })
       .catch(() => {
-        if (isMounted) {
-          setImgSrc(src);
-        }
+        MEMORY_CACHE.set(src, src);
       });
 
     return () => {

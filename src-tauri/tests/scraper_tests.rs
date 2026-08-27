@@ -5,6 +5,9 @@ async fn test_jkanime_get_latest() {
     let extractor = JKAnimeExtractor::new();
     let results = extractor.get_latest(1).await.expect("Failed to get latest from JKAnime");
     println!("JKAnime Latest results count: {}", results.len());
+    for r in results.iter().take(5) {
+        println!(" - Title: '{}', Ep: {:?}, Thumb: '{}'", r.title, r.episode, r.thumbnail_url);
+    }
     assert!(!results.is_empty(), "JKAnime get_latest returned empty results");
 }
 

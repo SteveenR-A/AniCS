@@ -86,9 +86,6 @@ function ResultCard({ anime, onClick }: { anime: AnimeResult; onClick: () => voi
         }}>
           {anime.title}
         </h4>
-        <span style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
-          {anime.source === 'jkanime' ? 'JKAnime' : 'MundoDonghua'}
-        </span>
       </div>
     </motion.div>
   );
