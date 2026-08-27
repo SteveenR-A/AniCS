@@ -1,6 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Film } from 'lucide-react';
-import { convertFileSrc } from '@tauri-apps/api/core';
 import { cacheImage } from '@/services/downloadService';
 
 interface CachedImageProps extends React.ImgHTMLAttributes<HTMLImageElement> {
@@ -9,26 +8,104 @@ interface CachedImageProps extends React.ImgHTMLAttributes<HTMLImageElement> {
   fallbackIconSize?: number;
 }
 
-// Caché en RAM global instantánea (0ms)
+// ─────────────────────────────────────────────────────────────────────────────
+// L1 JavaScript: mapa en RAM de URLs remotas -> Data URIs base64 completas (0ms)
+// ─────────────────────────────────────────────────────────────────────────────
 const MEMORY_CACHE = new Map<string, string>();
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Cache de Bitmaps decodificados en RAM del navegador: mantiene los objetos Image
+// en memoria para que el WebView tenga los píxeles decodificados en GPU/RAM listos
+// ─────────────────────────────────────────────────────────────────────────────
+const BITMAP_REFS = new Map<string, HTMLImageElement>();
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SingleFlight en frontend: evita múltiples llamadas IPC concurrentes para la misma URL.
+// ─────────────────────────────────────────────────────────────────────────────
+const IN_FLIGHT = new Map<string, Promise<string>>();
+
+/** Obtiene el Data URI en RAM si ya está en caché (0ms, sin IPC ni disco) */
 export function getCachedImageUrl(url: string): string {
-  return MEMORY_CACHE.get(url) || url;
+  return MEMORY_CACHE.get(url) ?? url;
 }
 
-export function prefetchImage(url: string) {
-  if (!url || MEMORY_CACHE.has(url)) return;
-  cacheImage(url)
-    .then((localPath) => {
-      if (localPath && localPath !== url && !localPath.startsWith('http')) {
-        MEMORY_CACHE.set(url, convertFileSrc(localPath));
+/** Inserta un lote de Data URIs en la memoria RAM de JavaScript */
+export function setMemoryCacheBatch(batch: Record<string, string>): void {
+  for (const [url, dataUri] of Object.entries(batch)) {
+    if (url && dataUri && dataUri.startsWith('data:')) {
+      MEMORY_CACHE.set(url, dataUri);
+      keepInRam(dataUri);
+    }
+  }
+}
+
+/** Predecodifica una imagen en RAM del WebView para pintura a 0ms */
+function keepInRam(dataUri: string) {
+  if (!dataUri || BITMAP_REFS.has(dataUri)) return;
+  try {
+    const img = new Image();
+    img.src = dataUri;
+    img.decode().catch(() => {/* best-effort */});
+    BITMAP_REFS.set(dataUri, img);
+    // Limitar el mapa de referencias a 1000 imágenes en RAM
+    if (BITMAP_REFS.size > 1000) {
+      const firstKey = BITMAP_REFS.keys().next().value;
+      if (firstKey) BITMAP_REFS.delete(firstKey);
+    }
+  } catch {
+    // Ignorar si el navegador no soporta decode
+  }
+}
+
+/**
+ * Precarga una imagen sin montar el componente.
+ * Deduplicada: si ya está cacheada o en vuelo, no lanza otra llamada IPC.
+ */
+export function prefetchImage(url: string): void {
+  if (!url || !url.startsWith('http') || MEMORY_CACHE.has(url) || IN_FLIGHT.has(url)) return;
+  resolveImageUrl(url).catch(() => {/* best-effort */});
+}
+
+/**
+ * Resuelve una URL a su Data URI en RAM con deduplicación SingleFlight.
+ * Retorna directamente el valor del caché si ya fue resuelto en RAM.
+ */
+export function resolveImageUrl(url: string): Promise<string> {
+  if (!url) return Promise.resolve('');
+
+  // Hit en L1 RAM: 0ms, sin IPC ni disco
+  const cached = MEMORY_CACHE.get(url);
+  if (cached) {
+    keepInRam(cached);
+    return Promise.resolve(cached);
+  }
+
+  // In-flight: compartir la Promise existente (SingleFlight)
+  const inflight = IN_FLIGHT.get(url);
+  if (inflight) return inflight;
+
+  // Nueva resolución: invocar Rust para obtener el Data URI
+  const promise = cacheImage(url)
+    .then((dataUri) => {
+      let resolved: string;
+      if (dataUri && dataUri.startsWith('data:')) {
+        resolved = dataUri;
+        MEMORY_CACHE.set(url, resolved);
+        keepInRam(resolved);
       } else {
-        MEMORY_CACHE.set(url, url);
+        resolved = url;
       }
+      return resolved;
     })
     .catch(() => {
-      MEMORY_CACHE.set(url, url);
+      return url;
+    })
+    .finally(() => {
+      IN_FLIGHT.delete(url);
     });
+
+  IN_FLIGHT.set(url, promise);
+  return promise;
 }
 
 export function CachedImage({
@@ -39,43 +116,35 @@ export function CachedImage({
   className,
   ...props
 }: CachedImageProps) {
-  const [imgSrc, setImgSrc] = useState<string>(() => {
-    if (!src) return '';
-    return MEMORY_CACHE.get(src) || src;
-  });
+  // Estado inicial: si ya está en RAM, usar inmediatamente el Data URI
+  const cachedInitial = src ? MEMORY_CACHE.get(src) : undefined;
+  const [imgSrc, setImgSrc] = useState<string>(() => cachedInitial ?? src ?? '');
   const [hasError, setHasError] = useState(false);
-  const [isLoaded, setIsLoaded] = useState(false);
+  const [isLoaded, setIsLoaded] = useState<boolean>(Boolean(cachedInitial));
+  const hasLoadedRef = useRef(Boolean(cachedInitial));
 
   useEffect(() => {
     if (!src) return;
-    setIsLoaded(false);
 
-    // Si ya está en memoria caché RAM local, usarla de inmediato (0ms)
-    if (MEMORY_CACHE.has(src)) {
-      setImgSrc(MEMORY_CACHE.get(src)!);
+    const cached = MEMORY_CACHE.get(src);
+    if (cached) {
+      setImgSrc(cached);
+      setIsLoaded(true);
+      hasLoadedRef.current = true;
+      setHasError(false);
       return;
     }
 
-    // Mostrar inmediatamente la URL directa para que el navegador la pinte sin retraso
+    let isMounted = true;
+    setHasError(false);
     setImgSrc(src);
 
-    let isMounted = true;
-
-    // Descargar y guardar en caché local en segundo plano
-    cacheImage(src)
-      .then((localPath) => {
-        if (!isMounted) return;
-        if (localPath && localPath !== src && !localPath.startsWith('http')) {
-          const assetUrl = convertFileSrc(localPath);
-          MEMORY_CACHE.set(src, assetUrl);
-          setImgSrc(assetUrl);
-        } else {
-          MEMORY_CACHE.set(src, src);
-        }
-      })
-      .catch(() => {
-        MEMORY_CACHE.set(src, src);
-      });
+    resolveImageUrl(src).then((resolvedUrl) => {
+      if (!isMounted) return;
+      if (resolvedUrl && resolvedUrl !== src) {
+        setImgSrc(resolvedUrl);
+      }
+    });
 
     return () => {
       isMounted = false;
@@ -93,7 +162,7 @@ export function CachedImage({
           justifyContent: 'center',
           background: 'linear-gradient(135deg, var(--bg-elevated), var(--bg-surface-2))',
           color: 'var(--text-muted)',
-          ...(style as any),
+          ...(style as React.CSSProperties),
         }}
         className={className}
       >
@@ -110,11 +179,14 @@ export function CachedImage({
       decoding="async"
       style={{
         ...style,
-        opacity: isLoaded ? 1 : 0.95,
-        transition: 'opacity 0.15s ease',
+        opacity: isLoaded ? 1 : 0.85,
+        transition: isLoaded ? 'none' : 'opacity 0.15s ease',
       }}
       className={className}
-      onLoad={() => setIsLoaded(true)}
+      onLoad={() => {
+        setIsLoaded(true);
+        hasLoadedRef.current = true;
+      }}
       onError={() => {
         if (imgSrc !== src) {
           setImgSrc(src);

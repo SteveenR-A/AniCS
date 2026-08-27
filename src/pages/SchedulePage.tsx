@@ -1,8 +1,8 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Calendar, Clock, RefreshCw, Film, Sparkles } from 'lucide-react';
-import { getScheduleDays } from '@/services/animeService';
+import { motion } from 'framer-motion';
+import { Calendar, Clock, RefreshCw } from 'lucide-react';
+import { getScheduleDays as getScheduleDaysFromApi } from '@/services/animeService';
 import { useAnimeStore } from '@/stores/useAnimeStore';
 import { CachedImage } from '@/components/CachedImage';
 import type { ScheduleDay, AnimeResult } from '@/types';
@@ -11,9 +11,11 @@ const DAYS_ORDER = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sába
 
 export function SchedulePage() {
   const navigate = useNavigate();
-  const { activeSource } = useAnimeStore();
-  const [scheduleDays, setScheduleDays] = useState<ScheduleDay[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const { activeSource, getScheduleDays, setScheduleDays } = useAnimeStore();
+
+  const cachedDays = getScheduleDays(activeSource);
+  const [scheduleDays, setLocalScheduleDays] = useState<ScheduleDay[]>(() => cachedDays ?? []);
+  const [isLoading, setIsLoading] = useState<boolean>(!cachedDays || cachedDays.length === 0);
   const [selectedDay, setSelectedDay] = useState<string>('all');
 
   // Detectar día actual de la semana en español
@@ -24,30 +26,41 @@ export function SchedulePage() {
     setSelectedDay(todayName);
   }, []);
 
-  const loadSchedule = async () => {
-    setIsLoading(true);
+  // Sincronizar con el store de RAM inmediatamente cuando cambia la fuente
+  useEffect(() => {
+    const fresh = getScheduleDays(activeSource);
+    if (fresh && fresh.length > 0) {
+      setLocalScheduleDays(fresh);
+      setIsLoading(false);
+    } else {
+      setLocalScheduleDays([]);
+      setIsLoading(true);
+    }
+  }, [activeSource, getScheduleDays]);
+
+  const loadSchedule = useCallback(async () => {
     try {
-      const days = await getScheduleDays(activeSource);
-      setScheduleDays(days);
+      const cached = getScheduleDays(activeSource);
+      if (!cached || cached.length === 0) {
+        setIsLoading(true);
+      }
+      const res = await getScheduleDaysFromApi(activeSource);
+      setScheduleDays(res, activeSource);
+      setLocalScheduleDays(res);
     } catch (e) {
       console.error('Failed to load schedule days', e);
-      setScheduleDays([]);
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [activeSource, getScheduleDays, setScheduleDays]);
 
   useEffect(() => {
-    loadSchedule();
-  }, [activeSource]);
-
-  // Lista de días disponibles
-  const availableDays = useMemo(() => {
-    const dayNames = scheduleDays.map((d) => d.day);
-    return DAYS_ORDER.filter((d) => dayNames.some((name) => name.toLowerCase().includes(d.toLowerCase()))).concat(
-      dayNames.filter((name) => !DAYS_ORDER.some((d) => name.toLowerCase().includes(d.toLowerCase())))
-    );
-  }, [scheduleDays]);
+    const cached = getScheduleDays(activeSource);
+    if (!cached || cached.length === 0) {
+      setIsLoading(true);
+      loadSchedule();
+    }
+  }, [activeSource, getScheduleDays, loadSchedule]);
 
   // Animes filtrados
   const displayedDays = useMemo(() => {
@@ -217,7 +230,7 @@ export function SchedulePage() {
                     key={anime.url}
                     whileHover={{ y: -4, scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
-                    onClick={() => navigate(`/details?url=${encodeURIComponent(anime.url)}&source=${anime.source}`, { state: { anime } })}
+                    onClick={() => navigate(`/details/${encodeURIComponent(anime.url)}?source=${anime.source}`, { state: { anime } })}
                     style={{
                       background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)',
                       overflow: 'hidden', cursor: 'pointer',

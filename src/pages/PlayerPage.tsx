@@ -205,9 +205,23 @@ export function PlayerPage() {
   // Cargar stream resuelto en el elemento de video
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !resolvedMedia) return;
+    if (!video || !resolvedMedia || !resolvedMedia.directUrl) return;
 
-    if (resolvedMedia.mediaType === 'hls' && Hls.isSupported()) {
+    let sourceUrl = resolvedMedia.directUrl;
+    let isHls = resolvedMedia.mediaType === 'hls';
+    let blobUrlToRevoke: string | null = null;
+
+    // Si es un archivo local de extensión .ts o MPEG-TS, envolver en playlist M3U8 para HLS.js
+    if (sourceUrl.toLowerCase().includes('.ts') || resolvedMedia.mediaType === 'hls') {
+      isHls = true;
+      if (!sourceUrl.includes('.m3u8')) {
+        const m3u8Content = `#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:7200\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:7200.0,\n${sourceUrl}\n#EXT-X-ENDLIST`;
+        sourceUrl = URL.createObjectURL(new Blob([m3u8Content], { type: 'application/vnd.apple.mpegurl' }));
+        blobUrlToRevoke = sourceUrl;
+      }
+    }
+
+    if (isHls && Hls.isSupported()) {
       hlsRef.current?.destroy();
       const hls = new Hls({
         enableWorker: true,
@@ -215,10 +229,10 @@ export function PlayerPage() {
         maxMaxBufferLength: 60,
       });
       hlsRef.current = hls;
-      hls.loadSource(resolvedMedia.directUrl);
+      hls.loadSource(sourceUrl);
       hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        video.play().catch(() => {});
+        video.play().catch(e => console.warn('Autoplay caught:', e));
       });
       hls.on(Hls.Events.ERROR, (_, data) => {
         if (data.fatal) {
@@ -227,11 +241,14 @@ export function PlayerPage() {
         }
       });
     } else {
-      video.src = resolvedMedia.directUrl;
-      video.play().catch(() => {});
+      video.src = sourceUrl;
+      video.play().catch(e => console.warn('Autoplay caught:', e));
     }
 
     return () => {
+      if (blobUrlToRevoke) {
+        URL.revokeObjectURL(blobUrlToRevoke);
+      }
       hlsRef.current?.destroy();
       hlsRef.current = null;
     };
@@ -1223,11 +1240,11 @@ export function PlayerPage() {
               </button>
             </div>
 
-            {/* Brillo */}
+            {/* Brillo del Video */}
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <Sun size={14} color="#fbbf24" /> Brillo de Pantalla
+                  <Sun size={14} color="#fbbf24" /> Brillo del Video
                 </span>
                 <span style={{ fontSize: 12, color: 'white', fontWeight: 700 }}>{Math.round(brightness * 100)}%</span>
               </div>
@@ -1241,15 +1258,15 @@ export function PlayerPage() {
                 style={{ width: '100%', marginTop: 8, accentColor: '#fbbf24', cursor: 'pointer' }}
               />
               <span style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
-                Tip: Desliza verticalmente en la mitad izquierda de la pantalla para ajustar.
+                Luminosidad del reproductor (no altera el brillo de tu monitor). Desliza verticalmente en la mitad izquierda.
               </span>
             </div>
 
-            {/* Nivel de Ganancia de Audio */}
+            {/* Volumen del Reproductor */}
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <Volume2 size={14} color="var(--accent-primary)" /> Ganancia de Audio
+                  <Volume2 size={14} color="var(--accent-primary)" /> Volumen del Reproductor
                 </span>
                 <span style={{ fontSize: 12, color: 'white', fontWeight: 700 }}>{isMuted ? 'Muted' : `${Math.round(volume * 100)}%`}</span>
               </div>
@@ -1266,7 +1283,7 @@ export function PlayerPage() {
                 style={{ width: '100%', marginTop: 8, accentColor: 'var(--accent-primary)', cursor: 'pointer' }}
               />
               <span style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
-                Tip: Desliza verticalmente en la mitad derecha de la pantalla para ajustar.
+                Volumen del video independiente del volumen maestro de Windows. Desliza verticalmente en la mitad derecha.
               </span>
             </div>
 

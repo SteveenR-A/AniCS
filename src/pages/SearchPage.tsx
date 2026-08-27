@@ -185,6 +185,11 @@ export function SearchPage() {
     if (genreParam !== selectedGenre) setSelectedGenre(genreParam);
     if (qParam !== query) setQuery(qParam);
 
+    // Si ya tenemos resultados en RAM para esta búsqueda y fuente, no recargar
+    if (searchResults.length > 0 && query === qParam && selectedGenre === genreParam) {
+      return;
+    }
+
     executeSearch(qParam, genreParam, selectedStatus, selectedType, selectedOrder, 1);
     setCurrentPage(1);
   }, [activeSource, selectedGenre, selectedStatus, selectedType, selectedOrder]);

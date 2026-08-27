@@ -14,6 +14,7 @@ import { getCacheStats, clearImageCache } from '@/services/downloadService';
 const DEFAULT_JKANIME = 'https://jkanime.net';
 const DEFAULT_MUNDODONGHUA = 'https://www.mundodonghua.com';
 const CURRENT_VERSION = '0.1.0';
+declare const __APP_COMMIT_HASH__: string;
 
 interface GitHubRelease {
   tag_name: string;
@@ -53,8 +54,9 @@ export function SettingsPage() {
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
   const [showChangelog, setShowChangelog] = useState(false);
 
-  // Estadísticas de Caché
+  // Estadísticas y Límite de Caché
   const [cacheStats, setCacheStats] = useState<{ totalFormatted: string; fileCount: number } | null>(null);
+  const [maxCacheMb, setMaxCacheMb] = useState('300');
   const [isClearingCache, setIsClearingCache] = useState(false);
 
   const loadCache = async () => {
@@ -82,6 +84,7 @@ export function SettingsPage() {
         if (settings.player_type) setPlayerType(settings.player_type);
         if (settings.external_player_path) setExternalPlayerPath(settings.external_player_path);
         if (settings.github_repo) setUpdateRepo(settings.github_repo);
+        if (settings.max_image_cache_mb) setMaxCacheMb(settings.max_image_cache_mb);
       } catch (e) {
         console.error('Error loading settings', e);
       }
@@ -98,6 +101,7 @@ export function SettingsPage() {
       await invoke('set_setting', { key: 'player_type', value: playerType });
       await invoke('set_setting', { key: 'external_player_path', value: externalPlayerPath.trim() });
       await invoke('set_setting', { key: 'github_repo', value: updateRepo.trim() });
+      await invoke('set_setting', { key: 'max_image_cache_mb', value: maxCacheMb });
 
       setSaveStatus('Ajustes guardados correctamente');
       setTimeout(() => setSaveStatus(null), 3000);
@@ -552,6 +556,38 @@ export function SettingsPage() {
               <Trash2 size={14} /> {isClearingCache ? 'Limpiando...' : 'Vaciar Caché'}
             </button>
           </div>
+
+          {/* Selector de límite de caché en disco */}
+          <div style={{ marginTop: 18 }}>
+            <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', display: 'block', marginBottom: 8 }}>
+              Límite de Almacenamiento en Disco (Poda LRU automática)
+            </label>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {[
+                { value: '100', label: '100 MB' },
+                { value: '300', label: '300 MB (Recomendado)' },
+                { value: '500', label: '500 MB' },
+                { value: '1024', label: '1 GB' },
+                { value: '2048', label: '2 GB' },
+              ].map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setMaxCacheMb(opt.value)}
+                  style={{
+                    padding: '8px 14px', borderRadius: 'var(--radius-md)',
+                    background: maxCacheMb === opt.value ? 'var(--accent-primary-glow)' : 'var(--bg-elevated)',
+                    border: maxCacheMb === opt.value ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)',
+                    color: maxCacheMb === opt.value ? 'var(--text-primary)' : 'var(--text-secondary)',
+                    fontWeight: maxCacheMb === opt.value ? 700 : 400, fontSize: 13, cursor: 'pointer',
+                    transition: 'all var(--transition-fast)',
+                  }}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
 
         {/* ─── 5. Actualizaciones GitHub ───────────────────── */}
@@ -590,8 +626,24 @@ export function SettingsPage() {
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 16, fontSize: 13 }}>
-              <span style={{ color: 'var(--text-secondary)' }}>Versión instalada: <strong style={{ color: 'var(--text-primary)' }}>v{CURRENT_VERSION}</strong></span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16, fontSize: 13, flexWrap: 'wrap' }}>
+              <span style={{ color: 'var(--text-secondary)' }}>
+                Versión instalada:{' '}
+                <strong style={{ color: 'var(--text-primary)' }}>v{CURRENT_VERSION}</strong>
+                {typeof __APP_COMMIT_HASH__ !== 'undefined' && __APP_COMMIT_HASH__ && (
+                  <span
+                    onClick={() => openUrl(`https://github.com/${updateRepo}/commit/${__APP_COMMIT_HASH__}`)}
+                    title="Ver commit en GitHub"
+                    style={{
+                      marginLeft: 8, background: 'var(--bg-surface)', border: '1px solid var(--border-moderate)',
+                      padding: '2px 6px', borderRadius: 4, fontFamily: 'monospace', fontSize: 11,
+                      color: 'var(--accent-primary)', cursor: 'pointer',
+                    }}
+                  >
+                    #{__APP_COMMIT_HASH__}
+                  </span>
+                )}
+              </span>
               <span style={{ color: 'var(--text-secondary)' }}>Repositorio: <strong style={{ color: 'var(--text-primary)' }}>{updateRepo}</strong></span>
             </div>
 
@@ -628,8 +680,9 @@ export function SettingsPage() {
                       <span style={{
                         background: 'var(--bg-surface)', color: 'var(--text-muted)',
                         fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 'var(--radius-full)',
+                        border: '1px solid var(--border-subtle)',
                       }}>
-                        Estás al día
+                        Misma versión / Parche disponible
                       </span>
                     )}
                   </div>
@@ -657,22 +710,44 @@ export function SettingsPage() {
                 )}
 
                 {updateInfo.assets.length > 0 && (
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                    {updateInfo.assets.map((asset) => (
-                      <button
-                        key={asset.name}
-                        onClick={() => openUrl(asset.browser_download_url)}
-                        style={{
-                          background: 'var(--bg-surface)', border: '1px solid var(--border-moderate)',
-                          borderRadius: 6, padding: '6px 12px', color: 'var(--text-primary)',
-                          cursor: 'pointer', fontSize: 12, fontWeight: 500,
-                          display: 'flex', alignItems: 'center', gap: 6,
-                        }}
-                      >
-                        <Download size={13} color="var(--accent-primary)" />
-                        {asset.name} ({(asset.size / (1024 * 1024)).toFixed(1)} MB)
-                      </button>
-                    ))}
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8, marginTop: 12 }}>
+                      {isNewVersionAvailable(updateInfo.tag_name)
+                        ? 'Descargar e instalar actualización:'
+                        : 'Reinstalar o aplicar parche sobre la misma versión:'}
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                      {updateInfo.assets
+                        .filter(asset => !asset.name.endsWith('.msi')) // Solo mostrar el .exe y .apk
+                        .map((asset) => {
+                          const isExe = asset.name.endsWith('.exe');
+                          const isApk = asset.name.endsWith('.apk');
+                          const isNew = isNewVersionAvailable(updateInfo.tag_name);
+                          const prefix = isNew ? 'Instalar' : 'Reinstalar / Parche';
+                          const label = isExe ? `${prefix} Windows (.exe)` : isApk ? `${prefix} Android (.apk)` : asset.name;
+
+                          return (
+                            <button
+                              key={asset.name}
+                              onClick={() => openUrl(asset.browser_download_url)}
+                              style={{
+                                background: isExe ? 'var(--accent-primary-glow)' : 'var(--bg-surface)',
+                                border: isExe ? '1px solid var(--accent-primary)' : '1px solid var(--border-moderate)',
+                                borderRadius: 'var(--radius-md)', padding: '8px 14px',
+                                color: 'var(--text-primary)', cursor: 'pointer', fontSize: 13,
+                                fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8,
+                                transition: 'all var(--transition-fast)',
+                              }}
+                            >
+                              <Download size={14} color="var(--accent-primary)" />
+                              <span>{label}</span>
+                              <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400 }}>
+                                ({(asset.size / (1024 * 1024)).toFixed(1)} MB)
+                              </span>
+                            </button>
+                          );
+                        })}
+                    </div>
                   </div>
                 )}
               </div>
@@ -698,7 +773,7 @@ export function SettingsPage() {
             <div>
               <h3 style={{ fontSize: 15, fontWeight: 700 }}>AniCS — Multiplataforma</h3>
               <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                Versión {CURRENT_VERSION} · Tauri v2 + Rust + React + TypeScript
+                Versión {CURRENT_VERSION} {typeof __APP_COMMIT_HASH__ !== 'undefined' ? `(#${__APP_COMMIT_HASH__})` : ''} · Tauri v2 + Rust + React + TypeScript
               </p>
             </div>
           </div>

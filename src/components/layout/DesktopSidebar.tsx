@@ -17,8 +17,34 @@ const navItems = [
   { to: '/favorites', icon: BookMarked, label: 'Favoritos'    },
 ];
 
+/** Mapea el ID interno de la fuente a un label legible corto */
+function sourceLabel(id: string): string {
+  if (id === 'jkanime') return 'Anime';
+  if (id === 'mundodonghua') return 'Donghua';
+  return id;
+}
+
+/** Letra/emoji para el icono compacto de fuente en sidebar colapsada */
+function sourceGlyph(id: string): string {
+  if (id === 'jkanime') return 'A';
+  if (id === 'mundodonghua') return 'D';
+  return id.slice(0, 1).toUpperCase();
+}
+
 export function DesktopSidebar() {
-  const [collapsed, setCollapsed] = useState(false);
+  // Persiste el estado colapsado en localStorage entre sesiones
+  const [collapsed, setCollapsed] = useState(() =>
+    localStorage.getItem('sidebar-collapsed') === 'true'
+  );
+
+  const toggleCollapsed = () => {
+    setCollapsed((c) => {
+      const next = !c;
+      localStorage.setItem('sidebar-collapsed', String(next));
+      return next;
+    });
+  };
+
   const { sources, activeSource, setActiveSource } = useAnimeStore();
 
   return (
@@ -120,33 +146,72 @@ export function DesktopSidebar() {
         ))}
 
         {/* Source Switcher */}
-        {!collapsed && sources.length > 1 && (
-          <div style={{ marginTop: 16, padding: '0 4px' }}>
-            <p style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 8 }}>
-              Fuente
-            </p>
-            {sources.map((s) => (
-              <button
-                key={s.id}
-                onClick={() => setActiveSource(s.id)}
-                style={{
-                  width: '100%', display: 'flex', alignItems: 'center', gap: 8,
-                  padding: '7px 10px', borderRadius: 'var(--radius-sm)',
-                  background: activeSource === s.id ? 'var(--accent-primary-glow)' : 'transparent',
-                  border: activeSource === s.id ? '1px solid var(--border-accent)' : '1px solid transparent',
-                  color: activeSource === s.id ? 'var(--text-primary)' : 'var(--text-secondary)',
-                  cursor: 'pointer', fontSize: 13, fontWeight: activeSource === s.id ? 600 : 400,
-                  transition: 'all var(--transition-fast)',
-                }}
-              >
-                <div style={{
-                  width: 6, height: 6, borderRadius: '50%',
-                  background: activeSource === s.id ? 'var(--accent-primary)' : 'var(--text-muted)',
-                  flexShrink: 0,
-                }} />
-                {s.name}
-              </button>
-            ))}
+        {sources.length > 1 && (
+          <div style={{ marginTop: 16, padding: collapsed ? '0' : '0 4px' }}>
+            {/* Label solo en modo expandido */}
+            {!collapsed && (
+              <p style={{
+                fontSize: 11, color: 'var(--text-muted)', fontWeight: 600,
+                letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 8,
+                paddingLeft: 4,
+              }}>
+                Fuente
+              </p>
+            )}
+
+            {sources.map((s) => {
+              const isActive = activeSource === s.id;
+              return collapsed ? (
+                /* Modo colapsado: botón compacto con inicial y tooltip */
+                <button
+                  key={s.id}
+                  onClick={() => setActiveSource(s.id)}
+                  title={`Cambiar a ${sourceLabel(s.id)}`}
+                  style={{
+                    width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    padding: '8px 0', borderRadius: 'var(--radius-sm)',
+                    background: isActive ? 'var(--accent-primary-glow)' : 'transparent',
+                    border: isActive ? '1px solid var(--border-accent)' : '1px solid transparent',
+                    cursor: 'pointer', marginBottom: 4,
+                    transition: 'all var(--transition-fast)',
+                  }}
+                >
+                  <span style={{
+                    width: 26, height: 26, borderRadius: '50%', display: 'flex',
+                    alignItems: 'center', justifyContent: 'center',
+                    background: isActive
+                      ? 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))'
+                      : 'var(--bg-elevated)',
+                    color: isActive ? 'white' : 'var(--text-muted)',
+                    fontSize: 12, fontWeight: 800,
+                  }}>
+                    {sourceGlyph(s.id)}
+                  </span>
+                </button>
+              ) : (
+                /* Modo expandido: botón con nombre legible */
+                <button
+                  key={s.id}
+                  onClick={() => setActiveSource(s.id)}
+                  style={{
+                    width: '100%', display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '7px 10px', borderRadius: 'var(--radius-sm)',
+                    background: isActive ? 'var(--accent-primary-glow)' : 'transparent',
+                    border: isActive ? '1px solid var(--border-accent)' : '1px solid transparent',
+                    color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
+                    cursor: 'pointer', fontSize: 13, fontWeight: isActive ? 600 : 400,
+                    transition: 'all var(--transition-fast)', marginBottom: 4,
+                  }}
+                >
+                  <div style={{
+                    width: 6, height: 6, borderRadius: '50%',
+                    background: isActive ? 'var(--accent-primary)' : 'var(--text-muted)',
+                    flexShrink: 0,
+                  }} />
+                  {sourceLabel(s.id)}
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
@@ -169,15 +234,20 @@ export function DesktopSidebar() {
         </NavLink>
 
         <button
-          onClick={() => setCollapsed(c => !c)}
+          onClick={toggleCollapsed}
+          title={collapsed ? 'Expandir barra lateral' : 'Colapsar barra lateral'}
           style={{
-            width: '100%', display: 'flex', alignItems: 'center', justifyContent: collapsed ? 'center' : 'flex-start',
+            width: '100%', display: 'flex', alignItems: 'center',
+            justifyContent: collapsed ? 'center' : 'flex-start',
             gap: 12, padding: '10px 12px', borderRadius: 'var(--radius-md)',
             background: 'transparent', border: 'none', color: 'var(--text-muted)',
             cursor: 'pointer', fontSize: 14, transition: 'all var(--transition-fast)',
           }}
         >
-          {collapsed ? <ChevronRight size={18} /> : <><ChevronLeft size={18} /><span>Colapsar</span></>}
+          {collapsed
+            ? <ChevronRight size={18} />
+            : <><ChevronLeft size={18} /><span>Colapsar</span></>
+          }
         </button>
       </div>
     </motion.nav>

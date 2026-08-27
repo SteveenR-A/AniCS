@@ -285,61 +285,73 @@ pub async fn cancel_download(
     Ok(())
 }
 
-/// Obtiene el directorio de descargas predeterminado, buscando en settings, luego en Videos/AniCS (C#) y Downloads/AniCS
+/// Obtiene el directorio de descargas predeterminado.
+/// - Windows/PC: C:\Users\<user>\Videos\AniCS   (compatible con la versión C#)
+/// - Android:    /storage/emulated/0/Anime        (crea si no existe)
 #[tauri::command]
 pub fn get_default_download_dir(app_handle: AppHandle) -> Result<String, String> {
-    // 1. Si el usuario ya guardó una carpeta personalizada en ajustes
+    // 1. Si el usuario ya guardó una carpeta personalizada válida, usarla
     if let Ok(Some(saved_dir)) = storage::get_setting("download_dir") {
         if !saved_dir.trim().is_empty() && Path::new(&saved_dir).exists() {
             return Ok(saved_dir);
         }
     }
 
-    // 2. Comprobar si existe la carpeta Videos/AniCS (usada por la versión de C#) y contiene animes
-    if let Ok(vid_dir) = app_handle.path().video_dir() {
-        let csharp_videos_dir = vid_dir.join("AniCS");
-        if csharp_videos_dir.exists() {
-            if let Ok(entries) = fs::read_dir(&csharp_videos_dir) {
-                if entries.count() > 0 {
-                    let _ = storage::set_setting("download_dir", &csharp_videos_dir.to_string_lossy());
-                    return Ok(csharp_videos_dir.to_string_lossy().to_string());
+    // 2. Selección por plataforma en tiempo de compilación
+    #[cfg(target_os = "android")]
+    {
+        let android_path = PathBuf::from("/storage/emulated/0/Anime");
+        let _ = fs::create_dir_all(&android_path);
+        let path_str = android_path.to_string_lossy().to_string();
+        let _ = storage::set_setting("download_dir", &path_str);
+        return Ok(path_str);
+    }
+
+    // 3. Windows / macOS / Linux: preferir Videos\AniCS (compatible con C#)
+    #[cfg(not(target_os = "android"))]
+    {
+        // Comprobar Videos/AniCS con contenido (herencia de la versión C#)
+        if let Ok(vid_dir) = app_handle.path().video_dir() {
+            let videos_anics = vid_dir.join("AniCS");
+            if videos_anics.exists() {
+                if let Ok(mut entries) = fs::read_dir(&videos_anics) {
+                    if entries.next().is_some() {
+                        let path_str = videos_anics.to_string_lossy().to_string();
+                        let _ = storage::set_setting("download_dir", &path_str);
+                        return Ok(path_str);
+                    }
                 }
             }
         }
-    }
 
-    // 3. Comprobar Downloads/AniCS
-    if let Ok(dl_dir) = app_handle.path().download_dir() {
-        let dl_anics = dl_dir.join("AniCS");
-        if dl_anics.exists() {
-            if let Ok(entries) = fs::read_dir(&dl_anics) {
-                if entries.count() > 0 {
-                    let _ = storage::set_setting("download_dir", &dl_anics.to_string_lossy());
-                    return Ok(dl_anics.to_string_lossy().to_string());
+        // Comprobar Downloads/AniCS con contenido
+        if let Ok(dl_dir) = app_handle.path().download_dir() {
+            let dl_anics = dl_dir.join("AniCS");
+            if dl_anics.exists() {
+                if let Ok(mut entries) = fs::read_dir(&dl_anics) {
+                    if entries.next().is_some() {
+                        let path_str = dl_anics.to_string_lossy().to_string();
+                        let _ = storage::set_setting("download_dir", &path_str);
+                        return Ok(path_str);
+                    }
                 }
             }
         }
-    }
 
-    // 4. Fallback: Videos/AniCS si existe, o Downloads/AniCS
-    let fallback = if let Ok(vid_dir) = app_handle.path().video_dir() {
-        let csharp_videos_dir = vid_dir.join("AniCS");
-        if csharp_videos_dir.exists() {
-            csharp_videos_dir
+        // Fallback: crear Videos\AniCS si video_dir está disponible, si no Downloads\AniCS
+        let fallback = if let Ok(vid_dir) = app_handle.path().video_dir() {
+            vid_dir.join("AniCS")
         } else if let Ok(dl_dir) = app_handle.path().download_dir() {
             dl_dir.join("AniCS")
         } else {
-            csharp_videos_dir
-        }
-    } else if let Ok(dl_dir) = app_handle.path().download_dir() {
-        dl_dir.join("AniCS")
-    } else {
-        PathBuf::from("Downloads/AniCS")
-    };
+            PathBuf::from("Downloads/AniCS")
+        };
 
-    let _ = fs::create_dir_all(&fallback);
-    let _ = storage::set_setting("download_dir", &fallback.to_string_lossy());
-    Ok(fallback.to_string_lossy().to_string())
+        let _ = fs::create_dir_all(&fallback);
+        let path_str = fallback.to_string_lossy().to_string();
+        let _ = storage::set_setting("download_dir", &path_str);
+        Ok(path_str)
+    }
 }
 
 /// Guarda la carpeta de descargas personalizada en ajustes
@@ -528,6 +540,61 @@ pub async fn cache_image(url: String, app_handle: AppHandle) -> Result<String, S
         .map_err(|e| e.to_string())
 }
 
+/// Guarda la portada de un anime en disco como poster.jpg dentro de la carpeta del anime.
+/// Esto garantiza disponibilidad offline permanente sin depender del CDN.
+#[tauri::command]
+pub async fn save_local_anime_cover(
+    folder_path: String,
+    cover_url: String,
+    app_handle: AppHandle,
+) -> Result<String, String> {
+    if cover_url.is_empty() || !cover_url.starts_with("http") {
+        return Err("URL de portada inválida".to_string());
+    }
+
+    let anime_folder = Path::new(&folder_path);
+    if !anime_folder.exists() {
+        return Err(format!("Carpeta no existe: {}", folder_path));
+    }
+
+    // 1. Asegurarnos de que esté descargada y en caché
+    let _ = crate::storage::get_cached_image(&cover_url, &app_handle)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // 2. Localizar el archivo en el directorio de caché de imágenes
+    let cache_dir = crate::storage::get_image_cache_dir(&app_handle)
+        .map_err(|e| e.to_string())?;
+    let filename = crate::storage::hash_image_url(&cover_url);
+    let cached_file = cache_dir.join(&filename);
+
+    if !cached_file.exists() {
+        return Err("No se pudo guardar la imagen en caché".to_string());
+    }
+
+    // 3. Determinar la extensión y el nombre del poster
+    let ext = cached_file
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("jpg");
+    let poster_path = anime_folder.join(format!("poster.{}", ext));
+
+    // 4. Si ya existe un poster idéntico (mismo tamaño), no re-copiar
+    if poster_path.exists() {
+        if let (Ok(src_meta), Ok(dst_meta)) = (fs::metadata(&cached_file), fs::metadata(&poster_path)) {
+            if src_meta.len() == dst_meta.len() {
+                return Ok(poster_path.to_string_lossy().to_string());
+            }
+        }
+    }
+
+    // 5. Copiar desde la caché al directorio del anime
+    fs::copy(&cached_file, &poster_path)
+        .map_err(|e| format!("Error copiando portada: {}", e))?;
+
+    Ok(poster_path.to_string_lossy().to_string())
+}
+
 /// Obtiene estadísticas del tamaño de la caché de imágenes
 #[tauri::command]
 pub fn get_cache_stats(app_handle: AppHandle) -> Result<serde_json::Value, String> {
@@ -541,7 +608,7 @@ pub fn get_cache_stats(app_handle: AppHandle) -> Result<serde_json::Value, Strin
     }))
 }
 
-/// Limpia la caché de imágenes en disco
+/// Limpia la caché de imágenes en disco y memoria
 #[tauri::command]
 pub fn clear_image_cache(app_handle: AppHandle) -> Result<serde_json::Value, String> {
     let freed = crate::storage::clear_image_cache(&app_handle)
@@ -552,6 +619,16 @@ pub fn clear_image_cache(app_handle: AppHandle) -> Result<serde_json::Value, Str
         "freedFormatted": format_bytes(freed),
     }))
 }
+
+/// Precarga un lote de URLs de imágenes en paralelo y retorna un Map con los Data URIs en RAM.
+#[tauri::command]
+pub async fn preload_images_batch(
+    urls: Vec<String>,
+    app_handle: AppHandle,
+) -> Result<HashMap<String, String>, String> {
+    Ok(crate::storage::get_cached_images_batch(urls, &app_handle).await)
+}
+
 
 fn scan_episodes_in_dir(
     dir: &Path,

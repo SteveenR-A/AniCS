@@ -63,7 +63,15 @@ export function DetailsPage() {
 
   useEffect(() => {
     const load = async () => {
-      if (!cached && (!passedAnime || !passedAnime.episodes?.length)) {
+      // Si ya está completo en RAM con episodios, renderizar instantáneamente en 0ms
+      if (cached && cached.episodes && cached.episodes.length > 0) {
+        setDetails(cached);
+        setIsLoading(false);
+        checkFavorite(decodedUrl).then(setIsFavorite).catch(() => {});
+        return;
+      }
+
+      if (!passedAnime || !passedAnime.episodes?.length) {
         setIsLoading(true);
       }
       try {

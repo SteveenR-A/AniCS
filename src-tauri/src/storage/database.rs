@@ -61,8 +61,20 @@ pub fn init_database(app_data_dir: PathBuf) -> AppResult<()> {
             value TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS image_cache (
+            url TEXT PRIMARY KEY,
+            file_path TEXT NOT NULL,
+            file_size INTEGER NOT NULL DEFAULT 0,
+            mime_type TEXT,
+            access_count INTEGER NOT NULL DEFAULT 1,
+            last_accessed_at TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+
         CREATE INDEX IF NOT EXISTS idx_history_anime_url ON watch_history(anime_url);
         CREATE INDEX IF NOT EXISTS idx_history_watched_at ON watch_history(watched_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_image_cache_last_accessed ON image_cache(last_accessed_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_image_cache_access_count ON image_cache(access_count DESC);
     ").map_err(AppError::Database)?;
 
     DB.set(Mutex::new(conn))
@@ -235,5 +247,176 @@ pub fn get_favorites() -> AppResult<Vec<AnimeResult>> {
         .filter_map(|r| r.ok())
         .collect();
         Ok(results)
+    })
+}
+
+// ──────────────────────────────────────────
+// Caché de Imágenes
+// ──────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct ImageCacheEntry {
+    pub url: String,
+    pub file_path: String,
+    pub file_size: u64,
+    pub mime_type: Option<String>,
+    pub access_count: u64,
+    pub last_accessed_at: String,
+    pub created_at: String,
+}
+
+/// Inserta o actualiza una entrada en la caché de imágenes
+pub fn upsert_image_cache_entry(
+    url: &str,
+    file_path: &str,
+    file_size: u64,
+    mime_type: Option<&str>,
+) -> AppResult<()> {
+    let now = chrono::Utc::now().to_rfc3339();
+    with_db(|conn| {
+        conn.execute(
+            "INSERT INTO image_cache (url, file_path, file_size, mime_type, access_count, last_accessed_at, created_at)
+             VALUES (?1, ?2, ?3, ?4, 1, ?5, ?5)
+             ON CONFLICT(url) DO UPDATE SET
+               file_path = excluded.file_path,
+               file_size = excluded.file_size,
+               mime_type = excluded.mime_type,
+               access_count = access_count + 1,
+               last_accessed_at = excluded.last_accessed_at",
+            params![url, file_path, file_size as i64, mime_type, now],
+        )?;
+        Ok(())
+    })
+}
+
+/// Actualiza solo el timestamp y contador de acceso sin re-escribir la ruta
+pub fn touch_image_cache(url: &str) -> AppResult<()> {
+    let now = chrono::Utc::now().to_rfc3339();
+    with_db(|conn| {
+        conn.execute(
+            "UPDATE image_cache SET access_count = access_count + 1, last_accessed_at = ?1 WHERE url = ?2",
+            params![now, url],
+        )?;
+        Ok(())
+    })
+}
+
+/// Obtiene una entrada de caché de imágenes por URL (sin tocar el disco)
+pub fn get_image_cache_entry(url: &str) -> AppResult<Option<ImageCacheEntry>> {
+    with_db(|conn| {
+        let mut stmt = conn.prepare(
+            "SELECT url, file_path, file_size, mime_type, access_count, last_accessed_at, created_at
+             FROM image_cache WHERE url = ?1"
+        )?;
+        let entry = stmt.query_row(params![url], |row| {
+            Ok(ImageCacheEntry {
+                url: row.get(0)?,
+                file_path: row.get(1)?,
+                file_size: row.get::<_, i64>(2)? as u64,
+                mime_type: row.get(3)?,
+                access_count: row.get::<_, i64>(4)? as u64,
+                last_accessed_at: row.get(5)?,
+                created_at: row.get(6)?,
+            })
+        }).optional()?;
+        Ok(entry)
+    })
+}
+
+/// Obtiene las N imágenes más frecuentemente accedidas (para precalentamiento de RAM al inicio)
+pub fn get_top_frequent_cached_images(limit: u32) -> AppResult<Vec<ImageCacheEntry>> {
+    with_db(|conn| {
+        let mut stmt = conn.prepare(
+            "SELECT url, file_path, file_size, mime_type, access_count, last_accessed_at, created_at
+             FROM image_cache
+             ORDER BY access_count DESC, last_accessed_at DESC
+             LIMIT ?1"
+        )?;
+        let entries = stmt.query_map(params![limit], |row| {
+            Ok(ImageCacheEntry {
+                url: row.get(0)?,
+                file_path: row.get(1)?,
+                file_size: row.get::<_, i64>(2)? as u64,
+                mime_type: row.get(3)?,
+                access_count: row.get::<_, i64>(4)? as u64,
+                last_accessed_at: row.get(5)?,
+                created_at: row.get(6)?,
+            })
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+        Ok(entries)
+    })
+}
+
+/// Estadísticas de caché directamente desde SQLite (sin tocar el disco)
+pub fn get_image_cache_stats_db() -> AppResult<(u64, usize)> {
+    with_db(|conn| {
+        let (total_bytes, count): (i64, i64) = conn.query_row(
+            "SELECT COALESCE(SUM(file_size), 0), COUNT(*) FROM image_cache",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        Ok((total_bytes as u64, count as usize))
+    })
+}
+
+/// Limpia entradas LRU de la caché hasta que el tamaño total esté bajo `target_max_bytes`.
+/// Retorna las rutas de archivos a borrar en disco.
+pub fn prune_image_cache_lru(target_max_bytes: u64) -> AppResult<Vec<String>> {
+    with_db(|conn| {
+        // Verificar si ya estamos bajo el límite
+        let total: i64 = conn.query_row(
+            "SELECT COALESCE(SUM(file_size), 0) FROM image_cache",
+            [],
+            |row| row.get(0),
+        )?;
+        if total as u64 <= target_max_bytes {
+            return Ok(vec![]);
+        }
+
+        // Obtener candidatos LRU a eliminar (menos accedidos y más viejos primero)
+        let mut stmt = conn.prepare(
+            "SELECT url, file_path, file_size FROM image_cache
+             ORDER BY last_accessed_at ASC, access_count ASC"
+        )?;
+        let rows: Vec<(String, String, i64)> = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        let mut freed = 0i64;
+        let to_free = total - target_max_bytes as i64;
+        let mut paths_to_delete = Vec::new();
+        let mut urls_to_delete = Vec::new();
+
+        for (url, path, size) in rows {
+            if freed >= to_free {
+                break;
+            }
+            freed += size;
+            paths_to_delete.push(path);
+            urls_to_delete.push(url);
+        }
+
+        // Eliminar de SQLite
+        for url in &urls_to_delete {
+            conn.execute("DELETE FROM image_cache WHERE url = ?1", params![url])?;
+        }
+
+        Ok(paths_to_delete)
+    })
+}
+
+/// Elimina todas las entradas de image_cache en SQLite. Retorna las rutas a borrar en disco.
+pub fn clear_all_image_cache_db() -> AppResult<Vec<String>> {
+    with_db(|conn| {
+        let mut stmt = conn.prepare("SELECT file_path FROM image_cache")?;
+        let paths: Vec<String> = stmt
+            .query_map([], |row| row.get(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+        conn.execute("DELETE FROM image_cache", [])?;
+        Ok(paths)
     })
 }

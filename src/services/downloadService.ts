@@ -56,6 +56,23 @@ export const deleteLocalAnimeFolder = (folderPath: string): Promise<void> =>
 export const cacheImage = (url: string): Promise<string> =>
   invoke('cache_image', { url });
 
+/** Precarga un lote de imágenes en paralelo en el backend y retorna un Record { [url]: dataUri } en RAM */
+export const preloadImagesBatch = (urls: string[]): Promise<Record<string, string>> => {
+  const filtered = urls.filter((u) => u && u.startsWith('http'));
+  if (filtered.length === 0) return Promise.resolve({});
+  return invoke<Record<string, string>>('preload_images_batch', { urls: filtered });
+};
+
+/**
+ * Copia la portada de un anime al directorio local de la serie como poster.jpg.
+ * Garantiza disponibilidad offline sin depender del CDN.
+ * Retorna la ruta local del poster o lanza un error si falla.
+ */
+export const saveLocalAnimeCover = (
+  folderPath: string,
+  coverUrl: string
+): Promise<string> => invoke('save_local_anime_cover', { folderPath, coverUrl });
+
 /** Obtener estadísticas de uso de caché de imágenes */
 export const getCacheStats = (): Promise<import('@/types').CacheStats> =>
   invoke('get_cache_stats');

@@ -41,6 +41,12 @@ pub fn run() {
                 }
             }
 
+            // Precalentar caché de imágenes en background sin bloquear la apertura de UI
+            let app_handle_warmup = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                storage::warmup_image_cache(&app_handle_warmup).await;
+            });
+
             log::info!("AniCS started");
             Ok(())
         })
@@ -70,6 +76,8 @@ pub fn run() {
             commands::cache_image,
             commands::get_cache_stats,
             commands::clear_image_cache,
+            commands::preload_images_batch,
+            commands::save_local_anime_cover,
             // Almacenamiento e Historial
             commands::upsert_history,
             commands::get_history,

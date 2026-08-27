@@ -1,7 +1,7 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { RefreshCw, Zap, TrendingUp, Film, Tv } from 'lucide-react';
+import { RefreshCw, Zap, TrendingUp, Tv } from 'lucide-react';
 import { useAnimeStore } from '@/stores/useAnimeStore';
 import { getLatest, getSchedule } from '@/services/animeService';
 import { CachedImage } from '@/components/CachedImage';
@@ -99,9 +99,37 @@ function SkeletonCard() {
 
 export function HomePage() {
   const navigate = useNavigate();
-  const { activeSource, latestEpisodes, setLatestEpisodes, schedule, setSchedule } = useAnimeStore();
-  const [isLoading, setIsLoading] = useState(latestEpisodes.length === 0);
+  const {
+    activeSource,
+    getLatestEpisodes, setLatestEpisodes,
+    getSchedule: getScheduleStore, setSchedule,
+  } = useAnimeStore();
+
+  const cachedLatest = getLatestEpisodes(activeSource);
+  const cachedSchedule = getScheduleStore(activeSource);
+
+  const [latestList, setLatestList] = useState<AnimeResult[]>(() => cachedLatest ?? []);
+  const [scheduleList, setScheduleList] = useState<AnimeResult[]>(() => cachedSchedule ?? []);
+  const [isLoading, setIsLoading] = useState<boolean>(!cachedLatest || cachedLatest.length === 0);
   const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Sincronizar con el store de RAM inmediatamente cuando cambia la fuente o el store
+  useEffect(() => {
+    const freshLatest = getLatestEpisodes(activeSource);
+    const freshSchedule = getScheduleStore(activeSource);
+    if (freshLatest && freshLatest.length > 0) {
+      setLatestList(freshLatest);
+      setIsLoading(false);
+    } else {
+      setLatestList([]);
+      setIsLoading(true);
+    }
+    if (freshSchedule) {
+      setScheduleList(freshSchedule);
+    } else {
+      setScheduleList([]);
+    }
+  }, [activeSource, getLatestEpisodes, getScheduleStore]);
 
   const load = useCallback(async () => {
     try {
@@ -110,10 +138,16 @@ export function HomePage() {
         getSchedule(activeSource),
       ]);
 
-      if (latest.status === 'fulfilled') setLatestEpisodes(latest.value);
-      if (sched.status === 'fulfilled') setSchedule(sched.value);
+      if (latest.status === 'fulfilled') {
+        setLatestEpisodes(latest.value, activeSource);
+        setLatestList(latest.value);
+      }
+      if (sched.status === 'fulfilled') {
+        setSchedule(sched.value, activeSource);
+        setScheduleList(sched.value);
+      }
     } catch (e) {
-      console.error(e);
+      console.error('Error cargando datos de inicio', e);
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -121,11 +155,13 @@ export function HomePage() {
   }, [activeSource, setLatestEpisodes, setSchedule]);
 
   useEffect(() => {
-    if (latestEpisodes.length === 0) {
+    // Solo consultar red si la fuente activa no tiene datos en la RAM
+    const current = getLatestEpisodes(activeSource);
+    if (!current || current.length === 0) {
       setIsLoading(true);
       load();
     }
-  }, [activeSource, latestEpisodes.length, load]);
+  }, [activeSource, getLatestEpisodes, load]);
 
   const handleRefresh = () => {
     setIsRefreshing(true);
@@ -187,7 +223,7 @@ export function HomePage() {
       </div>
 
       {/* Horario semanal (chips) */}
-      {schedule.length > 0 && (
+      {scheduleList.length > 0 && (
         <section style={{ marginBottom: 32 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
             <TrendingUp size={16} color="var(--accent-secondary)" />
@@ -196,7 +232,7 @@ export function HomePage() {
             </h2>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {schedule.slice(0, 12).map((anime, i) => (
+            {scheduleList.slice(0, 12).map((anime, i) => (
               <motion.button
                 key={i}
                 whileHover={{ scale: 1.03 }}
@@ -232,15 +268,10 @@ export function HomePage() {
         }}>
           {isLoading
             ? Array.from({ length: 18 }).map((_, i) => <SkeletonCard key={i} />)
-            : latestEpisodes.map((anime, i) => (
-                <motion.div
-                  key={`${anime.url}-${i}`}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: i * 0.03, duration: 0.3 }}
-                >
+            : latestList.map((anime) => (
+                <div key={anime.url}>
                   <AnimeCard anime={anime} onClick={() => handleAnimeClick(anime)} />
-                </motion.div>
+                </div>
               ))
           }
         </div>

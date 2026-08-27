@@ -1,7 +1,9 @@
-name: Release & Build (MSI & APK)
+name: Release & Build (EXE & APK)
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
   workflow_dispatch:
@@ -47,15 +49,13 @@ jobs:
         run: npm install
 
       - name: Build Tauri Windows application
-        run: npx @tauri-apps/cli build --bundles msi,nsis
+        run: npx @tauri-apps/cli build --bundles nsis
 
-      - name: Upload Windows MSI & EXE artifacts
+      - name: Upload Windows EXE artifacts
         uses: actions/upload-artifact@v4
         with:
           name: windows-binaries
-          path: |
-            src-tauri/target/release/bundle/msi/*.msi
-            src-tauri/target/release/bundle/nsis/*.exe
+          path: src-tauri/target/release/bundle/nsis/*.exe
 
   # ──────────────────────────────────────────────────────────
   # 2. Build Android (APK)
@@ -182,7 +182,6 @@ jobs:
       - name: Prepare release files
         run: |
           mkdir -p final-assets
-          find windows-release -name "*.msi" -exec cp {} final-assets/AniCS.msi \; || true
           find windows-release -name "*.exe" -exec cp {} final-assets/AniCS-setup.exe \; || true
           find android-release -name "*.apk" -exec cp {} final-assets/AniCS.apk \; || true
           ls -la final-assets/

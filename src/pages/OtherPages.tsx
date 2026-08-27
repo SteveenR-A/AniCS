@@ -11,7 +11,8 @@ import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { getHistory, clearHistory, getFavorites, removeFavorite } from '@/services/storageService';
 import {
-  scanLocalDownloads, deleteLocalDownload, deleteLocalAnimeFolder, getDefaultDownloadDir, setDownloadDir
+  scanLocalDownloads, deleteLocalDownload, deleteLocalAnimeFolder,
+  getDefaultDownloadDir, setDownloadDir, saveLocalAnimeCover
 } from '@/services/downloadService';
 import { useDownloadStore } from '@/stores/useDownloadStore';
 import { usePlayerStore } from '@/stores/usePlayerStore';
@@ -241,7 +242,7 @@ export function FavoritesPage() {
 export function DownloadsPage() {
   const navigate = useNavigate();
   const { tasks, cancelTask, removeTask } = useDownloadStore();
-  const { setCurrentAnime, setCurrentEpisode, setResolvedMedia, openPlayer } = usePlayerStore();
+  const { setCurrentAnime, setCurrentEpisode, setResolvedMedia, setServers, openPlayer } = usePlayerStore();
 
   const [activeTab, setActiveTab] = useState<'local' | 'active'>('local');
   const [downloadFolder, setDownloadFolder] = useState<string>('');
@@ -257,14 +258,7 @@ export function DownloadsPage() {
       setDownloadFolder(folder);
       const groups = await scanLocalDownloads(folder);
       setAnimeFolders(groups);
-      
-      // Auto-expandir la primera carpeta por conveniencia
-      if (groups.length > 0) {
-        setExpandedFolders(prev => ({
-          ...prev,
-          [groups[0].folderPath]: true,
-        }));
-      }
+      // NO auto-expandir: el usuario elige qué carpeta ver
     } catch (e) {
       console.error('Error scanning downloads folder:', e);
     } finally {
@@ -332,10 +326,11 @@ export function DownloadsPage() {
   // Reproducir episodio local directamente en el reproductor interno
   const handlePlayEpisode = (ep: LocalEpisodeItem, anime: LocalAnimeFolder) => {
     const assetUrl = convertFileSrc(ep.filePath);
+    const isTs = ep.filePath.toLowerCase().endsWith('.ts');
     setCurrentAnime({
       title: anime.animeTitle,
       url: ep.filePath,
-      thumbnailUrl: anime.coverImage ? convertFileSrc(anime.coverImage) : '',
+      thumbnailUrl: anime.coverImage || '',
       synopsis: `Archivo local en: ${ep.filePath}`,
       genres: ['Descarga local'],
       episodes: anime.episodes.map(e => ({
@@ -354,16 +349,25 @@ export function DownloadsPage() {
     });
     setResolvedMedia({
       directUrl: assetUrl,
-      mediaType: 'mp4',
+      mediaType: isTs ? 'hls' : 'mp4',
       qualities: [],
     });
+    setServers([]);
     openPlayer();
     navigate('/player');
   };
 
-  // Buscar en línea el anime detectado
-  const handleSearchOnline = (animeTitle: string) => {
-    navigate(`/search?q=${encodeURIComponent(animeTitle)}`);
+  // Buscar en línea el anime detectado y guardar portada en disco si no tiene una local
+  const handleSearchOnline = (anime: LocalAnimeFolder) => {
+    // Si tiene portada remota pero no local (poster.jpg), guardarla en segundo plano
+    if (
+      anime.coverImage &&
+      anime.coverImage.startsWith('http') &&
+      anime.folderPath
+    ) {
+      saveLocalAnimeCover(anime.folderPath, anime.coverImage).catch(() => {/* best-effort */});
+    }
+    navigate(`/search?q=${encodeURIComponent(anime.animeTitle)}`);
   };
 
   const taskList = Array.from(tasks.values());
@@ -544,7 +548,7 @@ export function DownloadsPage() {
                       {/* Acciones de Serie: Buscar en Línea, Eliminar Carpeta & Chevron */}
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }} onClick={e => e.stopPropagation()}>
                         <button
-                          onClick={() => handleSearchOnline(anime.animeTitle)}
+                          onClick={() => handleSearchOnline(anime)}
                           title={`Buscar "${anime.animeTitle}" en catálogo para ver sinopsis y temporadas`}
                           style={{
                             padding: '6px 12px', borderRadius: 'var(--radius-md)',

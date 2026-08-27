@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Flame, Trophy, RefreshCw, Star, ArrowUpRight } from 'lucide-react';
+import { Flame, Trophy, RefreshCw, Star } from 'lucide-react';
 import { getTopAnimes } from '@/services/animeService';
 import { useAnimeStore } from '@/stores/useAnimeStore';
 import { CachedImage } from '@/components/CachedImage';
@@ -9,26 +9,47 @@ import type { AnimeResult } from '@/types';
 
 export function TopAnimePage() {
   const navigate = useNavigate();
-  const { activeSource } = useAnimeStore();
-  const [topList, setTopList] = useState<AnimeResult[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const { activeSource, getTopList, setTopList } = useAnimeStore();
 
-  const loadTop = async () => {
-    setIsLoading(true);
+  const cachedTop = getTopList(activeSource);
+  const [topList, setLocalTopList] = useState<AnimeResult[]>(() => cachedTop ?? []);
+  const [isLoading, setIsLoading] = useState<boolean>(!cachedTop || cachedTop.length === 0);
+
+  // Sincronizar con el store de RAM inmediatamente al cambiar fuente
+  useEffect(() => {
+    const fresh = getTopList(activeSource);
+    if (fresh && fresh.length > 0) {
+      setLocalTopList(fresh);
+      setIsLoading(false);
+    } else {
+      setLocalTopList([]);
+      setIsLoading(true);
+    }
+  }, [activeSource, getTopList]);
+
+  const loadTop = useCallback(async () => {
     try {
+      const cached = getTopList(activeSource);
+      if (!cached || cached.length === 0) {
+        setIsLoading(true);
+      }
       const res = await getTopAnimes(activeSource);
-      setTopList(res);
+      setTopList(res, activeSource);
+      setLocalTopList(res);
     } catch (e) {
       console.error('Failed to load top animes', e);
-      setTopList([]);
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [activeSource, getTopList, setTopList]);
 
   useEffect(() => {
-    loadTop();
-  }, [activeSource]);
+    const cached = getTopList(activeSource);
+    if (!cached || cached.length === 0) {
+      setIsLoading(true);
+      loadTop();
+    }
+  }, [activeSource, getTopList, loadTop]);
 
   return (
     <div style={{ padding: '24px 28px', maxWidth: 1300, margin: '0 auto' }}>
@@ -113,7 +134,7 @@ export function TopAnimePage() {
                 key={anime.url}
                 whileHover={{ y: -4, scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
-                onClick={() => navigate(`/details?url=${encodeURIComponent(anime.url)}&source=${anime.source}`, { state: { anime } })}
+                onClick={() => navigate(`/details/${encodeURIComponent(anime.url)}?source=${anime.source}`, { state: { anime } })}
                 style={{
                   background: 'var(--bg-surface)', borderRadius: 'var(--radius-xl)',
                   overflow: 'hidden', cursor: 'pointer',
