@@ -43,7 +43,7 @@ export function SettingsPage() {
   const [externalPlayerPath, setExternalPlayerPath] = useState('');
 
   // Actualizaciones GitHub
-  const [updateRepo, setUpdateRepo] = useState('SteveenR-A/ani-cli-dotnet');
+  const [updateRepo, setUpdateRepo] = useState('SteveenR-A/AniCS');
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<GitHubRelease | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
@@ -114,7 +114,7 @@ export function SettingsPage() {
     setUpdateError(null);
     setUpdateInfo(null);
     try {
-      const repo = updateRepo.trim() || 'SteveenR-A/ani-cli-dotnet';
+      const repo = updateRepo.trim() || 'SteveenR-A/AniCS';
       const response = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
         headers: { 'Accept': 'application/vnd.github.v3+json' },
       });
@@ -638,7 +638,7 @@ export function SettingsPage() {
             </button>
 
             <button
-              onClick={() => openUrl('https://github.com/SteveenR-A/ani-cli-dotnet')}
+              onClick={() => openUrl('https://github.com/SteveenR-A/AniCS')}
               style={{
                 background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
                 borderRadius: 'var(--radius-md)', padding: '8px 14px',
