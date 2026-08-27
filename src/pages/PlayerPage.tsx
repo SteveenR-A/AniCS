@@ -320,6 +320,20 @@ export function PlayerPage() {
   // - Doble toque izquierda: -10s
   // - Doble toque derecha: +10s
   const handleTouchStart = (e: React.TouchEvent) => {
+    const target = e.target as HTMLElement;
+    if (
+      activeDrawer !== 'none' ||
+      target.closest('[data-drawer]') ||
+      target.closest('.controls-overlay') ||
+      target.closest('button') ||
+      target.closest('input') ||
+      target.closest('select') ||
+      target.closest('.no-gesture')
+    ) {
+      touchActionSide.current = null;
+      return;
+    }
+
     if (e.touches.length === 1) {
       const touch = e.touches[0];
       const screenWidth = window.innerWidth;
@@ -409,8 +423,22 @@ export function PlayerPage() {
     touchActionSide.current = null;
   };
 
-  // Rueda del ratón para PC / Desktop (ajuste rápido con scroll)
+  // Rueda del ratón para PC / Desktop (ajuste rápido con scroll solo en el lienzo de video libre)
   const handleWheel = (e: React.WheelEvent) => {
+    const target = e.target as HTMLElement;
+    // Si hay un menú lateral/drawer abierto, o el usuario hace scroll sobre la lista de episodios, controles, sliders o botones, NO alterar volumen/brillo
+    if (
+      activeDrawer !== 'none' ||
+      target.closest('[data-drawer]') ||
+      target.closest('.controls-overlay') ||
+      target.closest('button') ||
+      target.closest('input') ||
+      target.closest('select') ||
+      target.closest('.no-gesture')
+    ) {
+      return;
+    }
+
     const x = e.clientX;
     const screenWidth = window.innerWidth;
     const isUp = e.deltaY < 0;
@@ -677,6 +705,7 @@ export function PlayerPage() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
+            className="controls-overlay"
             style={{
               position: 'absolute', inset: 0,
               background: 'linear-gradient(to bottom, rgba(0,0,0,0.85) 0%, transparent 25%, transparent 75%, rgba(0,0,0,0.92) 100%)',
@@ -685,6 +714,9 @@ export function PlayerPage() {
               zIndex: 20, pointerEvents: 'auto',
             }}
             onClick={e => e.stopPropagation()}
+            onWheel={e => e.stopPropagation()}
+            onTouchStart={e => e.stopPropagation()}
+            onTouchMove={e => e.stopPropagation()}
           >
             {/* Top Bar: Back, Title & Dynamic Server Selector Chips */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
@@ -825,7 +857,13 @@ export function PlayerPage() {
             </div>
 
             {/* Bottom Bar: Timeline, Volume, Skip Opening, Fullscreen */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div
+              className="no-gesture"
+              style={{ display: 'flex', flexDirection: 'column', gap: 10 }}
+              onWheel={e => e.stopPropagation()}
+              onTouchStart={e => e.stopPropagation()}
+              onTouchMove={e => e.stopPropagation()}
+            >
               {/* Timeline Slider */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <span style={{ fontSize: 12, fontWeight: 700, color: 'white', minWidth: 40, textAlign: 'right' }}>
@@ -836,6 +874,9 @@ export function PlayerPage() {
                   min={0}
                   max={duration || 100}
                   value={playbackTime}
+                  onWheel={e => e.stopPropagation()}
+                  onTouchStart={e => e.stopPropagation()}
+                  onTouchMove={e => e.stopPropagation()}
                   onChange={e => {
                     const time = parseFloat(e.target.value);
                     setPlaybackTime(time);
@@ -940,6 +981,8 @@ export function PlayerPage() {
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
             transition={{ type: 'spring', damping: 25 }}
+            data-drawer="true"
+            className="drawer-panel"
             style={{
               position: 'absolute', top: 0, right: 0, bottom: 0, width: isMobile ? '80vw' : 340,
               background: 'rgba(10,11,15,0.95)', backdropFilter: 'blur(24px)',
@@ -947,6 +990,9 @@ export function PlayerPage() {
               zIndex: 30, padding: 20, display: 'flex', flexDirection: 'column',
             }}
             onClick={e => e.stopPropagation()}
+            onWheel={e => e.stopPropagation()}
+            onTouchStart={e => e.stopPropagation()}
+            onTouchMove={e => e.stopPropagation()}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <h3 style={{ fontSize: 16, fontWeight: 800, color: 'white', margin: 0 }}>Episodios</h3>
@@ -958,7 +1004,12 @@ export function PlayerPage() {
               </button>
             </div>
 
-            <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div
+              style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}
+              onWheel={e => e.stopPropagation()}
+              onTouchStart={e => e.stopPropagation()}
+              onTouchMove={e => e.stopPropagation()}
+            >
               {currentAnime.episodes.map(ep => {
                 const isCurrent = ep.number === currentEpisode.number;
                 return (
@@ -995,6 +1046,8 @@ export function PlayerPage() {
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
             transition={{ type: 'spring', damping: 25 }}
+            data-drawer="true"
+            className="drawer-panel"
             style={{
               position: 'absolute', top: 0, right: 0, bottom: 0, width: isMobile ? '80vw' : 340,
               background: 'rgba(10,11,15,0.95)', backdropFilter: 'blur(24px)',
@@ -1003,6 +1056,9 @@ export function PlayerPage() {
               overflowY: 'auto',
             }}
             onClick={e => e.stopPropagation()}
+            onWheel={e => e.stopPropagation()}
+            onTouchStart={e => e.stopPropagation()}
+            onTouchMove={e => e.stopPropagation()}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h3 style={{ fontSize: 16, fontWeight: 800, color: 'white', margin: 0 }}>Ajustes de Reproducción</h3>
