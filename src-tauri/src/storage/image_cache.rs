@@ -1,10 +1,18 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::{OnceLock, RwLock};
 use tauri::{AppHandle, Manager};
 use reqwest::header;
 
 use crate::core::*;
 use crate::scrapers::HTTP_CLIENT;
+
+static MEMORY_IMAGE_CACHE: OnceLock<RwLock<HashMap<String, String>>> = OnceLock::new();
+
+fn get_memory_cache() -> &'static RwLock<HashMap<String, String>> {
+    MEMORY_IMAGE_CACHE.get_or_init(|| RwLock::new(HashMap::new()))
+}
 
 /// Obtiene o inicializa el directorio de caché de imágenes
 pub fn get_image_cache_dir(app_handle: &AppHandle) -> AppResult<PathBuf> {
@@ -40,7 +48,7 @@ fn hash_image_url(url: &str) -> String {
     format!("{:016x}.{}", hash, ext)
 }
 
-/// Descarga o recupera de la caché local una imagen
+/// Descarga o recupera de la caché en memoria y disco una imagen a máxima velocidad (0ms si ya está en RAM)
 pub async fn get_cached_image(url: &str, app_handle: &AppHandle) -> AppResult<String> {
     if url.is_empty() {
         return Ok(String::new());
@@ -51,20 +59,34 @@ pub async fn get_cached_image(url: &str, app_handle: &AppHandle) -> AppResult<St
         return Ok(url.to_string());
     }
 
-    let cache_dir = get_image_cache_dir(app_handle)?;
-    let filename = hash_image_url(url);
-    let local_file = cache_dir.join(&filename);
-
-    // Si ya está en caché y tiene contenido válido (> 100 bytes)
-    if local_file.exists() {
-        if let Ok(meta) = fs::metadata(&local_file) {
-            if meta.len() > 100 {
-                return Ok(local_file.to_string_lossy().to_string());
+    // 1. Verificación ultra-rápida en RAM
+    {
+        let cache = get_memory_cache();
+        if let Ok(map) = cache.read() {
+            if let Some(cached_path) = map.get(url) {
+                return Ok(cached_path.clone());
             }
         }
     }
 
-    // Descargar y guardar en caché local
+    let cache_dir = get_image_cache_dir(app_handle)?;
+    let filename = hash_image_url(url);
+    let local_file = cache_dir.join(&filename);
+
+    // 2. Si ya está en disco y tiene contenido válido (> 100 bytes)
+    if local_file.exists() {
+        if let Ok(meta) = fs::metadata(&local_file) {
+            if meta.len() > 100 {
+                let local_path = local_file.to_string_lossy().to_string();
+                if let Ok(mut map) = get_memory_cache().write() {
+                    map.insert(url.to_string(), local_path.clone());
+                }
+                return Ok(local_path);
+            }
+        }
+    }
+
+    // 3. Descargar y guardar en disco + RAM
     let req = HTTP_CLIENT
         .get(url)
         .header(header::ACCEPT, "image/avif,image/webp,image/apng,image/*,*/*;q=0.8");
@@ -74,7 +96,11 @@ pub async fn get_cached_image(url: &str, app_handle: &AppHandle) -> AppResult<St
             if let Ok(bytes) = resp.bytes().await {
                 if bytes.len() > 100 {
                     let _ = fs::write(&local_file, &bytes);
-                    return Ok(local_file.to_string_lossy().to_string());
+                    let local_path = local_file.to_string_lossy().to_string();
+                    if let Ok(mut map) = get_memory_cache().write() {
+                        map.insert(url.to_string(), local_path.clone());
+                    }
+                    return Ok(local_path);
                 }
             }
         }
@@ -105,18 +131,23 @@ pub fn get_cache_stats(app_handle: &AppHandle) -> AppResult<(u64, usize)> {
     Ok((total_bytes, file_count))
 }
 
-/// Borra todas las imágenes en caché y devuelve los bytes liberados
+/// Limpia la caché de imágenes en disco y memoria
 pub fn clear_image_cache(app_handle: &AppHandle) -> AppResult<u64> {
+    if let Ok(mut map) = get_memory_cache().write() {
+        map.clear();
+    }
+
     let cache_dir = get_image_cache_dir(app_handle)?;
     let mut freed_bytes = 0u64;
 
     if let Ok(entries) = fs::read_dir(&cache_dir) {
         for entry in entries.flatten() {
-            if let Ok(meta) = entry.metadata() {
-                if meta.is_file() {
+            let path = entry.path();
+            if path.is_file() {
+                if let Ok(meta) = entry.metadata() {
                     freed_bytes += meta.len();
-                    let _ = fs::remove_file(entry.path());
                 }
+                let _ = fs::remove_file(path);
             }
         }
     }

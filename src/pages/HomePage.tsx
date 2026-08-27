@@ -102,9 +102,8 @@ function SkeletonCard() {
 
 export function HomePage() {
   const navigate = useNavigate();
-  const { activeSource, latestEpisodes, setLatestEpisodes } = useAnimeStore();
-  const [schedule, setSchedule] = useState<AnimeResult[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const { activeSource, latestEpisodes, setLatestEpisodes, schedule, setSchedule } = useAnimeStore();
+  const [isLoading, setIsLoading] = useState(latestEpisodes.length === 0);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const load = useCallback(async () => {
@@ -122,12 +121,14 @@ export function HomePage() {
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, [activeSource, setLatestEpisodes]);
+  }, [activeSource, setLatestEpisodes, setSchedule]);
 
   useEffect(() => {
-    setIsLoading(true);
-    load();
-  }, [load]);
+    if (latestEpisodes.length === 0) {
+      setIsLoading(true);
+      load();
+    }
+  }, [activeSource, latestEpisodes.length, load]);
 
   const handleRefresh = () => {
     setIsRefreshing(true);
@@ -135,7 +136,9 @@ export function HomePage() {
   };
 
   const handleAnimeClick = (anime: AnimeResult) => {
-    navigate(`/details/${encodeURIComponent(anime.url)}?source=${anime.source}`);
+    navigate(`/details/${encodeURIComponent(anime.url)}?source=${anime.source}`, {
+      state: { anime },
+    });
   };
 
   return (

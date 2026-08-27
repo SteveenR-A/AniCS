@@ -481,7 +481,9 @@ export function SearchPage() {
               <ResultCard
                 key={`${anime.source}-${anime.url}`}
                 anime={anime}
-                onClick={() => navigate(`/details/${encodeURIComponent(anime.url)}?source=${anime.source}`)}
+                onClick={() => navigate(`/details/${encodeURIComponent(anime.url)}?source=${anime.source}`, {
+                  state: { anime },
+                })}
               />
             ))}
           </div>

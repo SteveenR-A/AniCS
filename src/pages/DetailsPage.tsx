@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
+import { useParams, useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft, Play, Download, Bookmark, BookmarkCheck,
@@ -10,6 +10,7 @@ import { getDetails, getServers, resolveStream } from '@/services/animeService';
 import { addFavorite, removeFavorite, isFavorite as checkFavorite } from '@/services/storageService';
 import { startDownload } from '@/services/downloadService';
 import { usePlayerStore } from '@/stores/usePlayerStore';
+import { useAnimeStore } from '@/stores/useAnimeStore';
 import { useDownloadStore } from '@/stores/useDownloadStore';
 import { CachedImage } from '@/components/CachedImage';
 import type { AnimeDetails, Episode, VideoServer } from '@/types';
@@ -18,11 +19,33 @@ export function DetailsPage() {
   const { url } = useParams<{ url: string }>();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const source = searchParams.get('source') ?? 'jkanime';
   const decodedUrl = decodeURIComponent(url ?? '');
 
-  const [details, setDetails] = useState<AnimeDetails | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const { getCachedDetails, cacheDetails } = useAnimeStore();
+  const cached = getCachedDetails(decodedUrl);
+  const passedAnime = location.state?.anime;
+
+  const [details, setDetails] = useState<AnimeDetails | null>(() => {
+    if (cached) return cached;
+    if (passedAnime) {
+      return {
+        title: passedAnime.title,
+        url: passedAnime.url,
+        thumbnailUrl: passedAnime.thumbnailUrl,
+        synopsis: passedAnime.synopsis || 'Cargando información del anime...',
+        genres: passedAnime.genres || [],
+        status: passedAnime.status,
+        animeType: passedAnime.animeType,
+        episodes: passedAnime.episodes || [],
+        source: passedAnime.source || source,
+      };
+    }
+    return null;
+  });
+
+  const [isLoading, setIsLoading] = useState(!cached && (!passedAnime || !passedAnime.episodes?.length));
   const [isFavorite, setIsFavorite] = useState(false);
   const [showAllEps, setShowAllEps] = useState(false);
   const [epSearch, setEpSearch] = useState('');
@@ -40,13 +63,16 @@ export function DetailsPage() {
 
   useEffect(() => {
     const load = async () => {
-      setIsLoading(true);
+      if (!cached && (!passedAnime || !passedAnime.episodes?.length)) {
+        setIsLoading(true);
+      }
       try {
         const [det, fav] = await Promise.all([
           getDetails(decodedUrl, source),
           checkFavorite(decodedUrl),
         ]);
         setDetails(det);
+        cacheDetails(det);
         setIsFavorite(fav);
       } catch (e) {
         console.error(e);
@@ -55,7 +81,7 @@ export function DetailsPage() {
       }
     };
     load();
-  }, [decodedUrl, source]);
+  }, [decodedUrl, source, cached, cacheDetails]);
 
   const handlePlayEpisode = async (ep: Episode) => {
     if (!details) return;

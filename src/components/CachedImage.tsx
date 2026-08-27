@@ -9,8 +9,27 @@ interface CachedImageProps extends React.ImgHTMLAttributes<HTMLImageElement> {
   fallbackIconSize?: number;
 }
 
-// Caché en memoria para evitar invocar tauri repetidamente en la misma sesión
+// Caché en RAM global instantánea (0ms)
 const MEMORY_CACHE = new Map<string, string>();
+
+export function getCachedImageUrl(url: string): string {
+  return MEMORY_CACHE.get(url) || url;
+}
+
+export function prefetchImage(url: string) {
+  if (!url || MEMORY_CACHE.has(url)) return;
+  cacheImage(url)
+    .then((localPath) => {
+      if (localPath && localPath !== url && !localPath.startsWith('http')) {
+        MEMORY_CACHE.set(url, convertFileSrc(localPath));
+      } else {
+        MEMORY_CACHE.set(url, url);
+      }
+    })
+    .catch(() => {
+      MEMORY_CACHE.set(url, url);
+    });
+}
 
 export function CachedImage({
   src,
@@ -20,25 +39,27 @@ export function CachedImage({
   className,
   ...props
 }: CachedImageProps) {
+  const isCached = MEMORY_CACHE.has(src);
   const [imgSrc, setImgSrc] = useState<string>(() => {
     if (!src) return '';
     return MEMORY_CACHE.get(src) || src;
   });
   const [hasError, setHasError] = useState(false);
-  const [isLoaded, setIsLoaded] = useState(false);
+  const [isLoaded, setIsLoaded] = useState(isCached);
 
   useEffect(() => {
     if (!src) return;
 
-    // Si ya está en memoria caché
+    // Si ya está en memoria caché RAM, usarla de inmediato (0ms)
     if (MEMORY_CACHE.has(src)) {
       setImgSrc(MEMORY_CACHE.get(src)!);
+      setIsLoaded(true);
       return;
     }
 
     let isMounted = true;
 
-    // Obtener la ruta de caché local desde el backend de Rust
+    // Resolver ruta local desde backend
     cacheImage(src)
       .then((localPath) => {
         if (!isMounted) return;
@@ -86,15 +107,16 @@ export function CachedImage({
     <img
       src={imgSrc}
       alt={alt}
+      loading="eager"
+      decoding="async"
       style={{
         ...style,
-        opacity: isLoaded ? 1 : 0.85,
-        transition: 'opacity 0.2s ease',
+        opacity: isLoaded ? 1 : 0.95,
+        transition: 'opacity 0.15s ease',
       }}
       className={className}
       onLoad={() => setIsLoaded(true)}
       onError={() => {
-        // Si falló el assetUrl local, intentar con src original antes de dar error
         if (imgSrc !== src) {
           setImgSrc(src);
         } else {
