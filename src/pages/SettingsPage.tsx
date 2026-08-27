@@ -2,13 +2,14 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Globe, Download, Tv, RefreshCw, Check, Undo2,
-  FolderOpen, AlertCircle, Info, ExternalLink, Sparkles, ShieldCheck, Palette
+  FolderOpen, AlertCircle, Info, ExternalLink, Sparkles, ShieldCheck, Palette, HardDrive, Trash2
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { ChangelogModal } from '@/components/ChangelogModal';
 import { useThemeStore, THEMES } from '@/stores/useThemeStore';
+import { getCacheStats, clearImageCache } from '@/services/downloadService';
 
 const DEFAULT_JKANIME = 'https://jkanime.net';
 const DEFAULT_MUNDODONGHUA = 'https://www.mundodonghua.com';
@@ -51,6 +52,23 @@ export function SettingsPage() {
   // Estado guardado y modal
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
   const [showChangelog, setShowChangelog] = useState(false);
+
+  // Estadísticas de Caché
+  const [cacheStats, setCacheStats] = useState<{ totalFormatted: string; fileCount: number } | null>(null);
+  const [isClearingCache, setIsClearingCache] = useState(false);
+
+  const loadCache = async () => {
+    try {
+      const stats = await getCacheStats();
+      setCacheStats(stats);
+    } catch (e) {
+      console.error('Failed to get cache stats', e);
+    }
+  };
+
+  useEffect(() => {
+    loadCache();
+  }, []);
 
   useEffect(() => {
     // Cargar configuraciones guardadas
@@ -475,7 +493,68 @@ export function SettingsPage() {
           </div>
         </div>
 
-        {/* ─── 4. Actualizaciones GitHub ───────────────────── */}
+        {/* ─── 4. Almacenamiento y Caché de Imágenes ─────────── */}
+        <div style={{
+          background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)',
+          border: '1px solid var(--border-subtle)', padding: 20,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ padding: 8, borderRadius: 'var(--radius-md)', background: 'rgba(59, 130, 246, 0.15)' }}>
+                <HardDrive size={18} color="var(--accent-primary)" />
+              </div>
+              <div>
+                <h2 style={{ fontSize: 16, fontWeight: 700 }}>Almacenamiento & Caché de Imágenes</h2>
+                <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  Las portadas se guardan en tu disco para no volver a descargarse al navegar
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            background: 'var(--bg-elevated)', padding: '14px 18px',
+            borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)',
+            flexWrap: 'wrap', gap: 12,
+          }}>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>
+                {cacheStats ? `${cacheStats.fileCount} imágenes en caché (${cacheStats.totalFormatted})` : 'Calculando tamaño...'}
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+                Caché persistente en disco local para acelerar la navegación offline
+              </div>
+            </div>
+
+            <button
+              onClick={async () => {
+                setIsClearingCache(true);
+                try {
+                  const res = await clearImageCache();
+                  setSaveStatus(`Caché liberada: ${res.freedFormatted}`);
+                  loadCache();
+                  setTimeout(() => setSaveStatus(null), 3000);
+                } catch (e) {
+                  console.error(e);
+                } finally {
+                  setIsClearingCache(false);
+                }
+              }}
+              disabled={isClearingCache}
+              style={{
+                background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.3)',
+                borderRadius: 'var(--radius-md)', padding: '8px 16px',
+                color: 'var(--accent-error)', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: 6,
+              }}
+            >
+              <Trash2 size={14} /> {isClearingCache ? 'Limpiando...' : 'Vaciar Caché'}
+            </button>
+          </div>
+        </div>
+
+        {/* ─── 5. Actualizaciones GitHub ───────────────────── */}
         <div style={{
           background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)',
           border: '1px solid var(--border-subtle)', padding: 20,

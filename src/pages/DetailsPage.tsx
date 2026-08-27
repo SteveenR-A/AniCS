@@ -11,6 +11,7 @@ import { addFavorite, removeFavorite, isFavorite as checkFavorite } from '@/serv
 import { startDownload } from '@/services/downloadService';
 import { usePlayerStore } from '@/stores/usePlayerStore';
 import { useDownloadStore } from '@/stores/useDownloadStore';
+import { CachedImage } from '@/components/CachedImage';
 import type { AnimeDetails, Episode, VideoServer } from '@/types';
 
 export function DetailsPage() {
@@ -260,10 +261,12 @@ export function DetailsPage() {
               background: 'var(--bg-elevated)',
             }}
           >
-            {details.thumbnailUrl
-              ? <img src={details.thumbnailUrl} alt={details.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-              : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}><Film size={36} /></div>
-            }
+            <CachedImage
+              src={details.thumbnailUrl}
+              alt={details.title}
+              fallbackIconSize={48}
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            />
           </motion.div>
 
           {/* Info Principal */}

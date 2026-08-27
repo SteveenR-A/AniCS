@@ -7,10 +7,10 @@ import {
 } from 'lucide-react';
 import { useAnimeStore } from '@/stores/useAnimeStore';
 import { searchAnime, advancedSearch } from '@/services/animeService';
+import { CachedImage } from '@/components/CachedImage';
 import type { AnimeResult, SearchFilters } from '@/types';
 
 function ResultCard({ anime, onClick }: { anime: AnimeResult; onClick: () => void }) {
-  const [imgError, setImgError] = useState(false);
   return (
     <motion.div
       layout
@@ -30,22 +30,12 @@ function ResultCard({ anime, onClick }: { anime: AnimeResult; onClick: () => voi
       }}
     >
       <div style={{ position: 'relative', paddingBottom: '140%', background: 'var(--bg-elevated)' }}>
-        {anime.thumbnailUrl && !imgError ? (
-          <img
-            src={anime.thumbnailUrl} alt={anime.title}
-            onError={() => setImgError(true)}
-            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
-          />
-        ) : (
-          <div style={{
-            position: 'absolute', inset: 0, display: 'flex',
-            alignItems: 'center', justifyContent: 'center',
-            background: 'linear-gradient(135deg, var(--bg-elevated), var(--bg-surface-2))',
-            color: 'var(--text-muted)',
-          }}>
-            <Film size={32} />
-          </div>
-        )}
+        <CachedImage
+          src={anime.thumbnailUrl}
+          alt={anime.title}
+          fallbackIconSize={32}
+          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+        />
         <div style={{
           position: 'absolute', inset: 0,
           background: 'linear-gradient(to top, rgba(10,11,15,0.9) 0%, transparent 60%)',

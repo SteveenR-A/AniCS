@@ -31,3 +31,27 @@ export const onDownloadProgress = (
 export const onDownloadCompleted = (
   callback: (result: { id: string; path: string }) => void
 ) => listen<{ id: string; path: string }>('download-completed', (event) => callback(event.payload));
+
+/** Obtener la carpeta de descargas por defecto */
+export const getDefaultDownloadDir = (): Promise<string> =>
+  invoke('get_default_download_dir');
+
+/** Escanear carpeta de descargas buscando videos existentes */
+export const scanLocalDownloads = (folderPath?: string): Promise<import('@/types').LocalVideoFile[]> =>
+  invoke('scan_local_downloads', { folderPath });
+
+/** Eliminar un archivo descargado localmente */
+export const deleteLocalDownload = (filePath: string): Promise<void> =>
+  invoke('delete_local_download', { filePath });
+
+/** Obtener o guardar en caché local una imagen */
+export const cacheImage = (url: string): Promise<string> =>
+  invoke('cache_image', { url });
+
+/** Obtener estadísticas de uso de caché de imágenes */
+export const getCacheStats = (): Promise<import('@/types').CacheStats> =>
+  invoke('get_cache_stats');
+
+/** Limpiar la caché de imágenes en disco */
+export const clearImageCache = (): Promise<{ freedBytes: number; freedFormatted: string }> =>
+  invoke('clear_image_cache');

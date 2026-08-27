@@ -153,11 +153,20 @@ impl AnimeExtractor for MundoDonghuaExtractor {
             .map(|n| inner_text(&n))
             .unwrap_or_default();
 
-        let pic_sel = Selector::parse("div.md-donghua-img img, img.cover, img").unwrap();
-        let thumbnail = doc.select(&pic_sel).next()
-            .map(|n| {
-                let src = attr(&n, "src");
-                if src.is_empty() { attr(&n, "data-src") } else { src }
+        let og_img_sel = Selector::parse("meta[property='og:image'], meta[name='twitter:image']").unwrap();
+        let pic_sel = Selector::parse("div.md-donghua-img img, img.cover, .cover-img").unwrap();
+        let thumbnail = doc.select(&og_img_sel).next()
+            .map(|m| attr(&m, "content"))
+            .filter(|c| !c.is_empty() && c.starts_with("http") && !c.contains("logo"))
+            .or_else(|| {
+                doc.select(&pic_sel).next().map(|n| {
+                    let src = attr(&n, "src");
+                    if !src.is_empty() && !src.contains("logo") {
+                        src
+                    } else {
+                        attr(&n, "data-src")
+                    }
+                })
             })
             .unwrap_or_default();
 

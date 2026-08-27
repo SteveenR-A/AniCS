@@ -57,9 +57,15 @@ pub fn run() {
             commands::get_servers,
             commands::resolve_stream,
             commands::detect_media_type,
-            // Descargas
+            // Descargas y Archivos Locales
             commands::start_download,
             commands::cancel_download,
+            commands::scan_local_downloads,
+            commands::delete_local_download,
+            commands::get_default_download_dir,
+            commands::cache_image,
+            commands::get_cache_stats,
+            commands::clear_image_cache,
             // Almacenamiento e Historial
             commands::upsert_history,
             commands::get_history,

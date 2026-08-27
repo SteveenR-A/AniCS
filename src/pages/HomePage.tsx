@@ -4,11 +4,10 @@ import { motion } from 'framer-motion';
 import { RefreshCw, Zap, TrendingUp, Film, Tv } from 'lucide-react';
 import { useAnimeStore } from '@/stores/useAnimeStore';
 import { getLatest, getSchedule } from '@/services/animeService';
+import { CachedImage } from '@/components/CachedImage';
 import type { AnimeResult } from '@/types';
 
 function AnimeCard({ anime, onClick }: { anime: AnimeResult; onClick: () => void }) {
-  const [imgError, setImgError] = useState(false);
-
   return (
     <motion.div
       whileHover={{ y: -4, scale: 1.02 }}
@@ -24,28 +23,17 @@ function AnimeCard({ anime, onClick }: { anime: AnimeResult; onClick: () => void
         position: 'relative',
       }}
     >
-      {/* Thumbnail */}
+      {/* Thumbnail con Caché Local */}
       <div style={{ position: 'relative', paddingBottom: '140%', background: 'var(--bg-elevated)' }}>
-        {anime.thumbnailUrl && !imgError ? (
-          <img
-            src={anime.thumbnailUrl}
-            alt={anime.title}
-            onError={() => setImgError(true)}
-            style={{
-              position: 'absolute', inset: 0, width: '100%', height: '100%',
-              objectFit: 'cover',
-            }}
-          />
-        ) : (
-          <div style={{
-            position: 'absolute', inset: 0, display: 'flex',
-            alignItems: 'center', justifyContent: 'center',
-            background: 'linear-gradient(135deg, var(--bg-elevated), var(--bg-surface-2))',
-            color: 'var(--text-muted)',
-          }}>
-            <Film size={36} />
-          </div>
-        )}
+        <CachedImage
+          src={anime.thumbnailUrl}
+          alt={anime.title}
+          fallbackIconSize={36}
+          style={{
+            position: 'absolute', inset: 0, width: '100%', height: '100%',
+            objectFit: 'cover',
+          }}
+        />
 
         {/* Overlay gradient */}
         <div style={{

@@ -125,6 +125,22 @@ export interface DownloadProgress {
   error?: string;
 }
 
+export interface LocalVideoFile {
+  filePath: string;
+  fileName: string;
+  fileSize: number;
+  fileSizeFormatted: string;
+  animeTitle: string;
+  episodeNumber?: number;
+  modifiedAt: string;
+}
+
+export interface CacheStats {
+  totalBytes: number;
+  totalFormatted: string;
+  fileCount: number;
+}
+
 export interface Source {
   id: string;
   name: string;

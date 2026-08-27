@@ -59,3 +59,13 @@ async fn test_genres_dynamic() {
     println!("MundoDonghua dynamic genres count: {}", md_genres.len());
     assert!(!md_genres.is_empty());
 }
+
+#[tokio::test]
+async fn test_jkanime_poster_extraction() {
+    let extractor = JKAnimeExtractor::new();
+    let details = extractor.get_details("https://jkanime.net/lv999-no-murabito/").await.expect("Failed to get anime details");
+    println!("Lv999 Details: title='{}', thumbnail='{}'", details.title, details.thumbnail_url);
+    assert!(!details.thumbnail_url.is_empty());
+    assert!(!details.thumbnail_url.contains("logo"));
+    assert!(details.thumbnail_url.ends_with(".jpg") || details.thumbnail_url.ends_with(".png") || details.thumbnail_url.ends_with(".webp"));
+}

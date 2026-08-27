@@ -209,14 +209,26 @@ impl AnimeExtractor for JKAnimeExtractor {
                         .unwrap_or_default()
                 });
 
-            // 2. Thumbnail
-            let pic_sel = Selector::parse("div.anime_pic img, div.movpic img, div.anime__details__pic, img").unwrap();
-            let thumbnail = doc.select(&pic_sel).next()
-                .map(|n| {
-                    let src = attr(&n, "src");
-                    if !src.is_empty() { src } else { attr(&n, "data-setbg") }
+            // 2. Thumbnail de alta resolución
+            let slug = extract_slug(&clean_url);
+            let og_img_sel = Selector::parse("meta[property='og:image'], meta[name='twitter:image']").unwrap();
+            let pic_sel = Selector::parse("div.anime_pic img, div.movpic img, div.anime__details__pic").unwrap();
+            
+            let thumbnail = doc.select(&og_img_sel).next()
+                .map(|m| attr(&m, "content"))
+                .filter(|c| !c.is_empty() && c.starts_with("http") && !c.contains("logo"))
+                .or_else(|| {
+                    doc.select(&pic_sel).next().and_then(|n| {
+                        let src = attr(&n, "src");
+                        if !src.is_empty() && !src.contains("logo") {
+                            Some(src)
+                        } else {
+                            let bg = attr(&n, "data-setbg");
+                            if !bg.is_empty() { Some(bg) } else { None }
+                        }
+                    })
                 })
-                .unwrap_or_default();
+                .unwrap_or_else(|| format!("https://cdn.jkdesa.com/assets/images/animes/image/{}.jpg", slug));
 
             // 3. Sinopsis
             let syn_sel = Selector::parse("div.anime_info p, p.scroll, div.anime__details__text p, p#sinopsis").unwrap();
