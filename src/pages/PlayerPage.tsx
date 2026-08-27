@@ -285,15 +285,26 @@ export function PlayerPage() {
     };
   }, [saveProgress]);
 
-  const showControlsTemp = () => {
+  const showControlsTemp = useCallback(() => {
     setShowControls(true);
     if (controlsTimeout.current) clearTimeout(controlsTimeout.current);
     controlsTimeout.current = setTimeout(() => {
-      if (isPlaying && activeDrawer === 'none') {
+      // Ocultar controles automáticamente tanto en reproducción como en pausa (protección OLED / Lenovo Vantage)
+      if (activeDrawer === 'none') {
         setShowControls(false);
         setShowServerDropdown(false);
       }
-    }, 4000);
+    }, 2800);
+  }, [activeDrawer]);
+
+  const toggleControlsManual = () => {
+    if (showControls) {
+      if (controlsTimeout.current) clearTimeout(controlsTimeout.current);
+      setShowControls(false);
+      setShowServerDropdown(false);
+    } else {
+      showControlsTemp();
+    }
   };
 
   const togglePlay = () => {
@@ -529,6 +540,11 @@ export function PlayerPage() {
           setVolume(Math.max(0, volume - 0.1));
           showToast({ icon: 'volume', text: `Volumen: ${Math.round(Math.max(0, volume - 0.1) * 100)}%`, value: Math.max(0, volume - 0.1) });
           break;
+        case 'c':
+        case 'h':
+          e.preventDefault();
+          toggleControlsManual();
+          break;
         case 'f':
           e.preventDefault();
           toggleFullscreen();
@@ -584,6 +600,7 @@ export function PlayerPage() {
         width: '100vw', height: '100vh', background: '#000000',
         position: 'relative', overflow: 'hidden', userSelect: 'none',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
+        cursor: showControls ? 'default' : 'none',
         paddingTop: isMobile ? 'env(safe-area-inset-top, 0px)' : 0,
         paddingBottom: isMobile ? 'env(safe-area-inset-bottom, 0px)' : 0,
       }}
@@ -749,13 +766,16 @@ export function PlayerPage() {
               padding: isMobile ? '14px 18px' : '20px 24px',
               zIndex: 20, pointerEvents: 'auto',
             }}
-            onClick={e => e.stopPropagation()}
+            onClick={togglePlay}
             onWheel={e => e.stopPropagation()}
             onTouchStart={e => e.stopPropagation()}
             onTouchMove={e => e.stopPropagation()}
           >
             {/* ── Top Bar: Volver, Título Central y Acciones ── */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+            <div
+              onClick={e => e.stopPropagation()}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}
+            >
               {/* Botón Volver */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, flex: 1 }}>
                 <button
@@ -785,7 +805,7 @@ export function PlayerPage() {
                 </h2>
               </div>
 
-              {/* Acciones Superiores Derecha (Servidor Ocultable / Desplegable, Episodios, Ajustes) */}
+              {/* Acciones Superiores Derecha (Servidor Ocultable / Desplegable, Ocultar Controles, Episodios, Ajustes) */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end', flex: 1 }}>
                 {/* Selector Desplegable de Servidor */}
                 <div style={{ position: 'relative' }}>
@@ -852,6 +872,21 @@ export function PlayerPage() {
                   </AnimatePresence>
                 </div>
 
+                {/* Botón Ocultar Controles Manualmente */}
+                <button
+                  onClick={toggleControlsManual}
+                  title="Ocultar controles (C o H)"
+                  style={{
+                    background: 'rgba(255,255,255,0.1)',
+                    border: '1px solid rgba(255,255,255,0.15)',
+                    borderRadius: 'var(--radius-full)', width: 34, height: 34,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    color: 'white', cursor: 'pointer', backdropFilter: 'blur(10px)',
+                  }}
+                >
+                  <EyeOff size={15} />
+                </button>
+
                 {/* Botón Drawer de Episodios */}
                 <button
                   onClick={() => {
@@ -893,6 +928,7 @@ export function PlayerPage() {
             {/* ─── Bottom Bar: Barra de Progreso + Controles Inferiores (Estilo AniCS C#) ─── */}
             <div
               className="no-gesture"
+              onClick={e => e.stopPropagation()}
               style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
               onWheel={e => e.stopPropagation()}
               onTouchStart={e => e.stopPropagation()}
