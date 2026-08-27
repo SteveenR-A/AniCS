@@ -35,6 +35,7 @@ pub fn run() {
             storage::init_database(app_data_dir)
                 .expect("Failed to initialize database");
 
+            #[cfg(desktop)]
             if let Some(main_win) = app.get_webview_window("main") {
                 if let Some(icon) = app.default_window_icon() {
                     let _ = main_win.set_icon(icon.clone());

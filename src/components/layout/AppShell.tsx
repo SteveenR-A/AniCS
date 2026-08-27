@@ -2,6 +2,7 @@ import { Outlet } from 'react-router-dom';
 import { useResponsive } from '@/hooks/useResponsive';
 import { DesktopSidebar } from './DesktopSidebar';
 import { MobileBottomBar } from './MobileBottomBar';
+import { MobileHeader } from './MobileHeader';
 
 export function AppShell() {
   const { isMobile } = useResponsive();
@@ -17,6 +18,9 @@ export function AppShell() {
     }}>
       {/* Sidebar solo en desktop */}
       {!isMobile && <DesktopSidebar />}
+
+      {/* Header superior solo en móvil con logo, switch Anime/Donghua y Ajustes */}
+      {isMobile && <MobileHeader />}
 
       {/* Área de contenido principal */}
       <main style={{
