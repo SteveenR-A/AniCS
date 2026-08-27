@@ -87,7 +87,7 @@ export interface HistoryEntry {
   source: string;
 }
 
-export type DownloadStatus = 'queued' | 'downloading' | 'paused' | 'completed' | 'failed';
+export type DownloadStatus = 'queued' | 'downloading' | 'paused' | 'completed' | 'failed' | 'canceled';
 
 export interface DownloadTask {
   id: string;
