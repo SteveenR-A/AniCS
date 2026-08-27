@@ -588,8 +588,42 @@ export function DetailsPage() {
 
           {/* Grid de Episodios */}
           {visibleEps.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text-muted)' }}>
-              No se encontraron episodios.
+            <div style={{
+              textAlign: 'center', padding: '36px 20px',
+              background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
+              borderRadius: 'var(--radius-xl)', display: 'flex', flexDirection: 'column',
+              alignItems: 'center', gap: 12, maxWidth: 600, margin: '0 auto',
+            }}>
+              <div style={{
+                width: 48, height: 48, borderRadius: '50%',
+                background: 'rgba(251, 191, 36, 0.12)', border: '1px solid rgba(251, 191, 36, 0.25)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fbbf24',
+              }}>
+                <Calendar size={24} />
+              </div>
+              <div>
+                <h4 style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-primary)', margin: '0 0 6px' }}>
+                  {details.season ? `Próximo Estreno · ${details.season}` : 'Próximamente'}
+                </h4>
+                <p style={{ color: 'var(--text-secondary)', fontSize: 13, margin: 0, lineHeight: 1.5 }}>
+                  Esta producción por <strong>{details.studio || 'estudio'}</strong> está anunciada para su estreno en <strong>{details.season || 'próximas fechas'}</strong>. Los episodios se añadirán automáticamente cuando comience su emisión oficial.
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  const baseName = details.title.replace(/\(.*\)|TV|Season.*|2nd.*|3rd.*/gi, '').trim();
+                  navigate(`/search?q=${encodeURIComponent(baseName)}`);
+                }}
+                style={{
+                  marginTop: 6,
+                  background: 'var(--bg-elevated)', border: '1px solid var(--border-moderate)',
+                  borderRadius: 'var(--radius-full)', padding: '8px 20px',
+                  color: 'var(--accent-primary)', fontSize: 12, fontWeight: 700,
+                  cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
+                }}
+              >
+                <Sparkles size={14} /> Ver otras temporadas y películas de la franquicia
+              </button>
             </div>
           ) : (
             <div style={{
