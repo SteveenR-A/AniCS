@@ -10,6 +10,7 @@ import { SettingsPage } from '@/pages/SettingsPage';
 import { useAnimeStore } from '@/stores/useAnimeStore';
 import { onDownloadProgress, onDownloadCompleted } from '@/services/downloadService';
 import { useDownloadStore } from '@/stores/useDownloadStore';
+import { useThemeStore } from '@/stores/useThemeStore';
 
 function AppRoutes() {
   return (
@@ -32,8 +33,12 @@ function AppRoutes() {
 export default function App() {
   const { loadSources } = useAnimeStore();
   const { updateProgress } = useDownloadStore();
+  const { loadTheme } = useThemeStore();
 
   useEffect(() => {
+    // Cargar tema visual guardado
+    loadTheme();
+
     // Cargar fuentes de extracción al iniciar
     loadSources();
 

@@ -2,12 +2,13 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Globe, Download, Tv, RefreshCw, Check, Undo2,
-  FolderOpen, AlertCircle, Info, ExternalLink, Sparkles, ShieldCheck
+  FolderOpen, AlertCircle, Info, ExternalLink, Sparkles, ShieldCheck, Palette
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { ChangelogModal } from '@/components/ChangelogModal';
+import { useThemeStore, THEMES } from '@/stores/useThemeStore';
 
 const DEFAULT_JKANIME = 'https://jkanime.net';
 const DEFAULT_MUNDODONGHUA = 'https://www.mundodonghua.com';
@@ -27,6 +28,8 @@ interface GitHubRelease {
 }
 
 export function SettingsPage() {
+  const { currentTheme, setTheme } = useThemeStore();
+
   // URLs de fuentes
   const [jkanimeUrl, setJkanimeUrl] = useState(DEFAULT_JKANIME);
   const [donghuaUrl, setDonghuaUrl] = useState(DEFAULT_MUNDODONGHUA);
@@ -178,6 +181,79 @@ export function SettingsPage() {
       </AnimatePresence>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+
+        {/* ─── 0. Apariencia y Temas Visuales ─────────────── */}
+        <div style={{
+          background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)',
+          border: '1px solid var(--border-subtle)', padding: 20,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+            <div style={{ padding: 8, borderRadius: 'var(--radius-md)', background: 'var(--accent-primary-glow)' }}>
+              <Palette size={18} color="var(--accent-primary)" />
+            </div>
+            <div>
+              <h2 style={{ fontSize: 16, fontWeight: 700 }}>Tema y Apariencia Visual</h2>
+              <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                Selecciona la paleta de colores de la interfaz
+              </p>
+            </div>
+          </div>
+
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+            gap: 12,
+          }}>
+            {THEMES.map((theme) => {
+              const isSelected = currentTheme === theme.id;
+              return (
+                <motion.div
+                  key={theme.id}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => setTheme(theme.id)}
+                  style={{
+                    background: theme.surfaceColor,
+                    border: isSelected ? `2px solid ${theme.primaryColor}` : '1px solid var(--border-moderate)',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '12px 14px',
+                    cursor: 'pointer',
+                    boxShadow: isSelected ? `0 0 16px ${theme.primaryColor}40` : 'none',
+                    display: 'flex', flexDirection: 'column', gap: 10,
+                    transition: 'all var(--transition-fast)',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: theme.isDark ? '#f8fafc' : '#0f172a' }}>
+                      {theme.name}
+                    </span>
+                    {isSelected && (
+                      <div style={{
+                        width: 18, height: 18, borderRadius: '50%',
+                        background: theme.primaryColor,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      }}>
+                        <Check size={12} color={theme.isDark ? '#000' : '#fff'} />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Swatches de color */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div style={{ width: 22, height: 22, borderRadius: '50%', background: theme.baseColor, border: '1px solid rgba(255,255,255,0.2)' }} title="Fondo base" />
+                    <div style={{ width: 22, height: 22, borderRadius: '50%', background: theme.surfaceColor, border: '1px solid rgba(255,255,255,0.2)' }} title="Superficie" />
+                    <div style={{ width: 22, height: 22, borderRadius: '50%', background: theme.primaryColor }} title="Color primario" />
+                    <div style={{ width: 22, height: 22, borderRadius: '50%', background: theme.secondaryColor }} title="Color secundario" />
+                  </div>
+
+                  <p style={{ fontSize: 11, color: theme.isDark ? '#94a3b8' : '#64748b', lineHeight: 1.3 }}>
+                    {theme.description}
+                  </p>
+                </motion.div>
+              );
+            })}
+          </div>
+        </div>
 
         {/* ─── 1. Fuentes de Contenido y URLs ─────────────── */}
         <div style={{
