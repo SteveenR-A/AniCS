@@ -96,7 +96,7 @@ export function PlayerPage() {
     centerAnimTimeout.current = setTimeout(() => setCenterPlayPulse(null), 500);
   };
 
-  // Orientación automática a horizontal en Android al entrar al reproductor
+  // Orientación automática a horizontal y Screen Wake Lock en Android al reproducir
   useEffect(() => {
     try {
       if (typeof window !== 'undefined' && window.screen && 'orientation' in window.screen) {
@@ -107,7 +107,33 @@ export function PlayerPage() {
       }
     } catch {}
 
+    // Wake Lock: Mantener pantalla encendida en Android
+    let wakeLockSentinel: any = null;
+    const requestWakeLock = async () => {
+      try {
+        if ('wakeLock' in navigator) {
+          wakeLockSentinel = await (navigator as any).wakeLock.request('screen');
+        }
+      } catch {
+        // Ignorar si el dispositivo no soporta o deniega Wake Lock
+      }
+    };
+
+    requestWakeLock();
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        requestWakeLock();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
     return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (wakeLockSentinel && typeof wakeLockSentinel.release === 'function') {
+        wakeLockSentinel.release().catch(() => {});
+      }
       try {
         if (typeof window !== 'undefined' && window.screen && 'orientation' in window.screen) {
           const orient = window.screen.orientation as any;

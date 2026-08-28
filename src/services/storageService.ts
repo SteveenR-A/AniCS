@@ -24,3 +24,25 @@ export const isFavorite = (url: string): Promise<boolean> =>
 
 export const getFavorites = (): Promise<AnimeResult[]> =>
   invoke('get_favorites');
+
+export interface DatabaseStats {
+  historyCount: number;
+  favoritesCount: number;
+  downloadsCount: number;
+  cachedImagesCount: number;
+  databaseSizeBytes: number;
+  databaseSizeFormatted: string;
+}
+
+/** Obtener estadísticas y peso de la base de datos SQLite */
+export const getDatabaseStats = (): Promise<DatabaseStats> =>
+  invoke('get_database_stats');
+
+/** Optimiza y compacta SQLite (VACUUM) recuperando espacio sin perder datos */
+export const optimizeDatabase = (): Promise<void> =>
+  invoke('optimize_database');
+
+/** Restablece de forma segura las tablas de SQLite sin romper la integridad de la app */
+export const resetDatabase = (): Promise<void> =>
+  invoke('reset_database');
+

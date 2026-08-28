@@ -1,19 +1,20 @@
 import { useEffect, useState } from 'react';
 import { useParams, useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
+import { convertFileSrc } from '@tauri-apps/api/core';
 import {
   ArrowLeft, Play, Download, Bookmark, BookmarkCheck,
-  ChevronDown, ChevronUp, Check,
+  ChevronDown, ChevronUp, Check, HardDrive, CheckCircle2,
   Calendar, Layers, Tag, Tv, Globe, Sparkles, Clock
 } from 'lucide-react';
 import { getDetails, getServers, resolveStream } from '@/services/animeService';
-import { addFavorite, removeFavorite, isFavorite as checkFavorite } from '@/services/storageService';
-import { startDownload } from '@/services/downloadService';
+import { addFavorite, removeFavorite, isFavorite as checkFavorite, getHistory } from '@/services/storageService';
+import { startDownload, scanLocalDownloads, saveLocalAnimeCover } from '@/services/downloadService';
 import { usePlayerStore } from '@/stores/usePlayerStore';
 import { useAnimeStore } from '@/stores/useAnimeStore';
 import { useDownloadStore } from '@/stores/useDownloadStore';
 import { CachedImage } from '@/components/CachedImage';
-import type { AnimeDetails, Episode, VideoServer } from '@/types';
+import type { AnimeDetails, Episode, VideoServer, LocalEpisodeItem } from '@/types';
 
 export function DesktopDetailsPage() {
   const { url } = useParams<{ url: string }>();
@@ -51,6 +52,10 @@ export function DesktopDetailsPage() {
   const [epSearch, setEpSearch] = useState('');
   const [loadingEpisode, setLoadingEpisode] = useState<number | null>(null);
 
+  // Sincronización con Descargas Locales e Historial de Visualización
+  const [localEpisodesMap, setLocalEpisodesMap] = useState<Map<number, LocalEpisodeItem>>(new Map());
+  const [historyMap, setHistoryMap] = useState<Map<number, number>>(new Map());
+
   // Modal de descarga
   const [downloadModalEp, setDownloadModalEp] = useState<Episode | null>(null);
   const [downloadServers, setDownloadServers] = useState<VideoServer[]>([]);
@@ -59,7 +64,7 @@ export function DesktopDetailsPage() {
   const [isStartingDownload, setIsStartingDownload] = useState(false);
   const [downloadSuccessToast, setDownloadSuccessToast] = useState<string | null>(null);
 
-  const { openPlayer, setCurrentAnime, setCurrentEpisode, setServers } = usePlayerStore();
+  const { openPlayer, setCurrentAnime, setCurrentEpisode, setServers, setResolvedMedia } = usePlayerStore();
 
   useEffect(() => {
     const load = async () => {
@@ -90,9 +95,115 @@ export function DesktopDetailsPage() {
     load();
   }, [decodedUrl, source, cached, cacheDetails]);
 
+  // Normalizador de títulos ultra-tolerante (ignora tildes, guiones, espacios y puntuación)
+  const normalizeTitle = (str: string): string => {
+    if (!str) return '';
+    return str
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '') // Eliminar tildes/acentos (é -> e)
+      .replace(/[^a-z0-9]/g, ' ')     // Convertir cualquier símbolo o guión bajo a espacio
+      .replace(/\s+/g, ' ')           // Espacios simples
+      .trim();
+  };
+
+  const titlesMatch = (a: string, b: string): boolean => {
+    const normA = normalizeTitle(a);
+    const normB = normalizeTitle(b);
+    if (!normA || !normB) return false;
+    if (normA === normB) return true;
+    if (normA.includes(normB) || normB.includes(normA)) return true;
+
+    const wordsA = normA.split(' ').filter(w => w.length > 2);
+    const wordsB = normB.split(' ').filter(w => w.length > 2);
+    if (wordsA.length >= 2 && wordsB.length >= 2) {
+      const common = wordsA.filter(w => wordsB.includes(w));
+      if (common.length >= Math.min(wordsA.length, wordsB.length) - 1 && common.length >= 2) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // Sincronizar descargas locales e historial cada vez que cambien los detalles del anime
+  useEffect(() => {
+    if (!details?.title) return;
+
+    // 1. Sincronizar episodios descargados en disco
+    scanLocalDownloads().then((folders) => {
+      const match = folders.find(f => titlesMatch(f.animeTitle, details.title));
+
+      const map = new Map<number, LocalEpisodeItem>();
+      if (match) {
+        for (const ep of match.episodes) {
+          map.set(ep.episodeNumber, ep);
+        }
+        // Si el anime está descargado y tenemos la portada oficial online, repararla/guardarla en disco
+        if (details.thumbnailUrl && details.thumbnailUrl.startsWith('http')) {
+          saveLocalAnimeCover(match.folderPath, details.thumbnailUrl).catch(console.error);
+        }
+      }
+      setLocalEpisodesMap(map);
+    }).catch(console.error);
+
+    // 2. Sincronizar progreso de visualización de SQLite
+    getHistory(500, 0).then((history) => {
+      const map = new Map<number, number>();
+      for (const h of history) {
+        if (titlesMatch(h.animeTitle, details.title)) {
+          if (!map.has(h.episodeNumber)) {
+            map.set(h.episodeNumber, h.watchProgress);
+          }
+        }
+      }
+      setHistoryMap(map);
+    }).catch(console.error);
+  }, [details?.title]);
+
   const handlePlayEpisode = async (ep: Episode) => {
     if (!details) return;
     setLoadingEpisode(ep.number);
+
+    // Si el episodio ya está descargado en disco, reproducir el archivo local al instante
+    const localEp = localEpisodesMap.get(ep.number);
+    if (localEp) {
+      const assetUrl = convertFileSrc(localEp.filePath);
+      const isTs = localEp.filePath.toLowerCase().endsWith('.ts');
+      setCurrentAnime({
+        title: details.title,
+        url: localEp.filePath,
+        thumbnailUrl: details.thumbnailUrl,
+        synopsis: details.synopsis,
+        genres: details.genres,
+        episodes: details.episodes.map(e => ({
+          number: e.number,
+          title: e.title || `Episodio ${e.number}`,
+          url: localEpisodesMap.get(e.number)?.filePath || e.url,
+          watched: (historyMap.get(e.number) ?? 0) >= 0.85,
+          watchProgress: historyMap.get(e.number) ?? 0,
+        })),
+        source: 'local',
+      });
+      setCurrentEpisode({
+        number: ep.number,
+        title: `Episodio ${ep.number}`,
+        url: localEp.filePath,
+        watched: (historyMap.get(ep.number) ?? 0) >= 0.85,
+        watchProgress: historyMap.get(ep.number) ?? 0,
+      });
+      setResolvedMedia({
+        directUrl: assetUrl,
+        mediaType: isTs ? 'hls' : 'mp4',
+        qualities: [],
+      });
+      setServers([]);
+      openPlayer();
+      setLoadingEpisode(null);
+      navigate('/player');
+      return;
+    }
+
+    // Reproducción Online normal
     try {
       const servers = await getServers(ep.url, source);
       setCurrentAnime(details);
@@ -634,6 +745,14 @@ export function DesktopDetailsPage() {
             }}>
               {visibleEps.map((ep) => {
                 const isLoadingThis = loadingEpisode === ep.number;
+                const localEp = localEpisodesMap.get(ep.number);
+                const isDownloaded = !!localEp;
+
+                const prog = historyMap.get(ep.number) ?? (ep.watchProgress ?? (ep.watched ? 1.0 : 0));
+                const isWatched = prog >= 0.85 || ep.watched;
+                const isInProgress = prog > 0.01 && prog < 0.85;
+                const progPct = Math.round(prog * 100);
+
                 return (
                   <motion.div
                     key={ep.number}
@@ -641,19 +760,70 @@ export function DesktopDetailsPage() {
                     whileTap={{ scale: 0.96 }}
                     style={{
                       background: 'var(--bg-surface)',
-                      border: '1px solid var(--border-subtle)',
+                      border: `1px solid ${isWatched ? 'rgba(16, 185, 129, 0.4)' : isInProgress ? 'rgba(99, 102, 241, 0.4)' : isDownloaded ? 'rgba(59, 130, 246, 0.35)' : 'var(--border-subtle)'}`,
                       borderRadius: 'var(--radius-md)',
-                      padding: '14px 12px',
+                      padding: '14px 12px 10px',
                       display: 'flex', flexDirection: 'column',
                       alignItems: 'center', justifyContent: 'center',
-                      gap: 10, cursor: 'pointer', position: 'relative',
+                      gap: 8, cursor: 'pointer', position: 'relative',
                       boxShadow: 'var(--shadow-subtle)',
+                      overflow: 'hidden',
                     }}
                     onClick={() => handlePlayEpisode(ep)}
                   >
+                    {/* Badge de Estado: Descargado */}
+                    {isDownloaded && (
+                      <div
+                        title={`Descargado localmente (${localEp.fileSizeFormatted})`}
+                        style={{
+                          position: 'absolute', top: 6, left: 6,
+                          background: 'rgba(59, 130, 246, 0.18)',
+                          color: '#60a5fa',
+                          fontSize: 9, fontWeight: 800,
+                          padding: '2px 5px', borderRadius: 4,
+                          display: 'flex', alignItems: 'center', gap: 3,
+                        }}
+                      >
+                        <HardDrive size={10} />
+                        <span>{localEp.fileSizeFormatted}</span>
+                      </div>
+                    )}
+
+                    {/* Badge de Estado: Visto o En Progreso */}
+                    {isWatched ? (
+                      <div
+                        title="Episodio visto"
+                        style={{
+                          position: 'absolute', top: 6, right: 6,
+                          background: 'rgba(16, 185, 129, 0.18)',
+                          color: '#34d399',
+                          fontSize: 9, fontWeight: 800,
+                          padding: '2px 5px', borderRadius: 4,
+                          display: 'flex', alignItems: 'center', gap: 2,
+                        }}
+                      >
+                        <CheckCircle2 size={10} />
+                        <span>Visto</span>
+                      </div>
+                    ) : isInProgress ? (
+                      <div
+                        title={`Progreso: ${progPct}%`}
+                        style={{
+                          position: 'absolute', top: 6, right: 6,
+                          background: 'rgba(99, 102, 241, 0.18)',
+                          color: '#818cf8',
+                          fontSize: 9, fontWeight: 800,
+                          padding: '2px 5px', borderRadius: 4,
+                        }}
+                      >
+                        {progPct}%
+                      </div>
+                    ) : null}
+
                     <div style={{
-                      fontSize: 14, fontWeight: 700, color: 'var(--text-primary)',
-                      textAlign: 'center',
+                      fontSize: 14, fontWeight: 700,
+                      color: isWatched ? '#34d399' : 'var(--text-primary)',
+                      textAlign: 'center', marginTop: (isDownloaded || isWatched || isInProgress) ? 10 : 0,
                     }}>
                       Episodio {ep.number}
                     </div>
@@ -661,11 +831,12 @@ export function DesktopDetailsPage() {
                     <div style={{ display: 'flex', gap: 8 }} onClick={e => e.stopPropagation()}>
                       <button
                         onClick={() => handlePlayEpisode(ep)}
-                        title="Reproducir episodio"
+                        title={isDownloaded ? `Reproducir desde disco local (${localEp.fileSizeFormatted})` : 'Reproducir online'}
                         style={{
                           width: 32, height: 32, borderRadius: 8,
-                          background: 'rgba(59, 130, 246, 0.15)',
-                          border: 'none', color: 'var(--accent-primary)',
+                          background: isDownloaded ? 'rgba(16, 185, 129, 0.18)' : 'rgba(59, 130, 246, 0.15)',
+                          border: 'none',
+                          color: isDownloaded ? '#34d399' : 'var(--accent-primary)',
                           display: 'flex', alignItems: 'center', justifyContent: 'center',
                           cursor: 'pointer',
                         }}
@@ -684,18 +855,32 @@ export function DesktopDetailsPage() {
 
                       <button
                         onClick={() => handleOpenDownloadModal(ep)}
-                        title="Descargar episodio"
+                        title={isDownloaded ? 'Ya descargado (clic para re-descargar)' : 'Descargar episodio'}
                         style={{
                           width: 32, height: 32, borderRadius: 8,
-                          background: 'rgba(255,255,255,0.06)',
-                          border: 'none', color: 'var(--text-secondary)',
+                          background: isDownloaded ? 'rgba(16, 185, 129, 0.15)' : 'rgba(255,255,255,0.06)',
+                          border: isDownloaded ? '1px solid rgba(16, 185, 129, 0.3)' : 'none',
+                          color: isDownloaded ? '#34d399' : 'var(--text-secondary)',
                           display: 'flex', alignItems: 'center', justifyContent: 'center',
                           cursor: 'pointer',
                         }}
                       >
-                        <Download size={14} />
+                        {isDownloaded ? <Check size={14} /> : <Download size={14} />}
                       </button>
                     </div>
+
+                    {/* Barrita inferior de progreso de reproducción */}
+                    {isInProgress && (
+                      <div style={{
+                        position: 'absolute', bottom: 0, left: 0, right: 0,
+                        height: 3, background: 'rgba(255,255,255,0.08)',
+                      }}>
+                        <div style={{
+                          width: `${progPct}%`, height: '100%',
+                          background: 'linear-gradient(90deg, var(--accent-primary), var(--accent-secondary))',
+                        }} />
+                      </div>
+                    )}
                   </motion.div>
                 );
               })}

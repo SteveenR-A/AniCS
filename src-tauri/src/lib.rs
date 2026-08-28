@@ -92,6 +92,9 @@ pub fn run() {
             commands::get_setting,
             commands::set_setting,
             commands::get_all_settings,
+            commands::get_database_stats,
+            commands::optimize_database,
+            commands::reset_database,
         ])
         .run(tauri::generate_context!())
         .expect("Error while running AniCS");

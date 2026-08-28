@@ -48,6 +48,29 @@ pub static HTTP_CLIENT: Lazy<Client> = Lazy::new(|| {
         .expect("Failed to create HTTP client")
 });
 
+/// Cliente HTTP dedicado para descargas de archivos pesados (MP4 / segmentos TS).
+/// No tiene timeout de lectura global para no cortar descargas de varios minutos/horas.
+pub static DOWNLOAD_CLIENT: Lazy<Client> = Lazy::new(|| {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::ACCEPT,
+        HeaderValue::from_static("*/*"),
+    );
+    headers.insert(
+        header::ACCEPT_LANGUAGE,
+        HeaderValue::from_static("es-ES,es;q=0.9,en;q=0.8"),
+    );
+
+    ClientBuilder::new()
+        .default_headers(headers)
+        .connect_timeout(std::time::Duration::from_secs(30))
+        .gzip(true)
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .user_agent(USER_AGENTS[0])
+        .build()
+        .expect("Failed to create Download HTTP client")
+});
+
 /// Descarga el HTML de una URL con rotación automática de User-Agent y
 /// lógica de reintento con backoff exponencial para errores 429/5xx.
 pub async fn fetch_html(url: &str, referer: Option<&str>) -> Result<String, reqwest::Error> {

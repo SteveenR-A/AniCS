@@ -438,3 +438,81 @@ pub fn clear_all_image_cache_db() -> AppResult<Vec<String>> {
         Ok(paths)
     })
 }
+
+// ──────────────────────────────────────────
+// Estadísticas y Mantenimiento Seguro de DB
+// ──────────────────────────────────────────
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DatabaseStats {
+    pub history_count: u32,
+    pub favorites_count: u32,
+    pub downloads_count: u32,
+    pub cached_images_count: u32,
+    pub database_size_bytes: u64,
+    pub database_size_formatted: String,
+}
+
+fn format_db_size(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = KB * 1024;
+    const GB: u64 = MB * 1024;
+
+    if bytes >= GB {
+        format!("{:.2} GB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.1} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.1} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{} B", bytes)
+    }
+}
+
+pub fn get_database_stats(app_data_dir: &std::path::Path) -> AppResult<DatabaseStats> {
+    let db_path = app_data_dir.join("anics.db");
+    let database_size_bytes = std::fs::metadata(&db_path).map(|m| m.len()).unwrap_or(0);
+
+    with_db(|conn| {
+        let history_count: u32 = conn.query_row("SELECT COUNT(*) FROM watch_history", [], |r| r.get(0)).unwrap_or(0);
+        let favorites_count: u32 = conn.query_row("SELECT COUNT(*) FROM favorites", [], |r| r.get(0)).unwrap_or(0);
+        let downloads_count: u32 = conn.query_row("SELECT COUNT(*) FROM downloads", [], |r| r.get(0)).unwrap_or(0);
+        let cached_images_count: u32 = conn.query_row("SELECT COUNT(*) FROM image_cache", [], |r| r.get(0)).unwrap_or(0);
+
+        Ok(DatabaseStats {
+            history_count,
+            favorites_count,
+            downloads_count,
+            cached_images_count,
+            database_size_bytes,
+            database_size_formatted: format_db_size(database_size_bytes),
+        })
+    })
+}
+
+/// Optimiza y compacta SQLite (VACUUM + PRAGMA optimize) recuperando espacio sin perder datos
+pub fn optimize_database() -> AppResult<()> {
+    with_db(|conn| {
+        conn.execute_batch("
+            PRAGMA optimize;
+            VACUUM;
+        ")?;
+        Ok(())
+    })
+}
+
+/// Restablece de forma segura las tablas de SQLite sin romper el archivo ni la integridad
+pub fn reset_database() -> AppResult<()> {
+    with_db(|conn| {
+        conn.execute_batch("
+            DELETE FROM watch_history;
+            DELETE FROM favorites;
+            DELETE FROM downloads;
+            DELETE FROM image_cache;
+            VACUUM;
+        ")?;
+        Ok(())
+    })
+}
+

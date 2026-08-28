@@ -90,3 +90,24 @@ pub async fn set_setting(key: String, value: String, _state: State<'_, AppState>
 pub async fn get_all_settings(_state: State<'_, AppState>) -> Result<HashMap<String, String>, String> {
     storage::get_all_settings().map_err(|e| e.to_string())
 }
+
+/// Obtener estadísticas y tamaño de la base de datos SQLite
+#[tauri::command]
+pub async fn get_database_stats(app_handle: tauri::AppHandle) -> Result<storage::DatabaseStats, String> {
+    use tauri::Manager;
+    let app_data_dir = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
+    storage::get_database_stats(&app_data_dir).map_err(|e| e.to_string())
+}
+
+/// Optimiza y compacta SQLite (VACUUM) recuperando espacio sin borrar datos
+#[tauri::command]
+pub async fn optimize_database() -> Result<(), String> {
+    storage::optimize_database().map_err(|e| e.to_string())
+}
+
+/// Restablece de forma segura las tablas de SQLite sin romper la aplicación
+#[tauri::command]
+pub async fn reset_database() -> Result<(), String> {
+    storage::reset_database().map_err(|e| e.to_string())
+}
+

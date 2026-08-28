@@ -140,28 +140,20 @@ pub async fn start_download(
         });
 
         if is_mp4 {
-            // Si es un enlace de MediaFire, resolver la página HTML primero para obtener el link directo
-            let actual_url = if stream_url_clone.contains("mediafire.com") {
-                match resolve_mediafire_url(&stream_url_clone).await {
-                    Some(direct) => direct,
-                    None => {
-                        let _ = progress_tx.send(DownloadProgress {
-                            id: dl_id_for_task,
-                            progress: 0.0,
-                            speed_kbps: 0.0,
-                            downloaded_bytes: 0,
-                            total_bytes: None,
-                            status: DownloadStatus::Failed,
-                            error: Some("No se pudo resolver el enlace de MediaFire. Intenta con otro servidor.".to_string()),
-                        });
-                        return;
-                    }
-                }
+            // Si es un enlace de página de MediaFire (no directo aún), resolverla para obtener el link de descarga directo
+            let is_mediafire_page = stream_url_clone.contains("mediafire.com")
+                && !stream_url_clone.starts_with("https://download")
+                && !stream_url_clone.starts_with("http://download")
+                && !stream_url_clone.ends_with(".mp4")
+                && !stream_url_clone.ends_with(".mkv");
+
+            let actual_url = if is_mediafire_page {
+                resolve_mediafire_url(&stream_url_clone).await.unwrap_or_else(|| stream_url_clone.clone())
             } else {
                 stream_url_clone.clone()
             };
 
-            // Descarga directa MP4
+            // Descarga directa MP4 con DOWNLOAD_CLIENT
             match download_direct_mp4(&dl_id_for_task, &actual_url, referer_clone.as_deref(), &output_path, &progress_tx).await {
                 Ok(_) => {
                     let _ = app_handle_finish.emit("download-completed", serde_json::json!({
@@ -306,7 +298,7 @@ async fn download_direct_mp4(
     use futures::StreamExt;
     use std::time::Instant;
 
-    let mut req = crate::scrapers::HTTP_CLIENT.get(url);
+    let mut req = crate::scrapers::DOWNLOAD_CLIENT.get(url);
     if let Some(r) = referer {
         req = req.header(header::REFERER, r);
     } else if url.contains("jkanime") {
@@ -563,13 +555,15 @@ pub async fn scan_local_downloads(
         let total_size: u64 = episodes.iter().map(|e| e.file_size).sum();
         let total_episodes = episodes.len();
 
-        // 1. Buscar si existe un poster.jpg o cover.png en la carpeta
+        // 1. Buscar si existe un poster.jpg o cover.png en la carpeta que sea válido (> 100 bytes)
         let local_cover = [
             folder_path.join("poster.jpg"),
             folder_path.join("cover.jpg"),
             folder_path.join("poster.png"),
             folder_path.join("cover.png"),
-        ].iter().find(|p| p.exists()).map(|p| p.to_string_lossy().to_string());
+        ].iter().find(|p| {
+            p.exists() && p.metadata().map(|m| m.len() > 100).unwrap_or(false)
+        }).map(|p| p.to_string_lossy().to_string());
 
         // 2. Buscar en historial o favoritos de SQLite
         let db_cover = history_list.iter()
@@ -683,18 +677,19 @@ pub async fn save_local_anime_cover(
         .unwrap_or("jpg");
     let poster_path = anime_folder.join(format!("poster.{}", ext));
 
-    // 4. Si ya existe un poster idéntico (mismo tamaño), no re-copiar
+    // 4. Si ya existe un poster válido e idéntico (> 100 bytes y mismo tamaño), no re-copiar
     if poster_path.exists() {
         if let (Ok(src_meta), Ok(dst_meta)) = (fs::metadata(&cached_file), fs::metadata(&poster_path)) {
-            if src_meta.len() == dst_meta.len() {
+            if src_meta.len() == dst_meta.len() && dst_meta.len() > 100 {
                 return Ok(poster_path.to_string_lossy().to_string());
             }
         }
     }
 
-    // 5. Copiar desde la caché al directorio del anime
+    // 5. Copiar desde la caché al directorio del anime (sobrescribe archivos dañados/vacíos)
     fs::copy(&cached_file, &poster_path)
         .map_err(|e| format!("Error copiando portada: {}", e))?;
+
 
     Ok(poster_path.to_string_lossy().to_string())
 }

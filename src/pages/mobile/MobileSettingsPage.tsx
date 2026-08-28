@@ -2,13 +2,15 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Globe, Download, RefreshCw, Check, Undo2,
-  AlertCircle, ExternalLink, Sparkles, ShieldCheck, Palette, HardDrive, Trash2
+  AlertCircle, ExternalLink, Sparkles, ShieldCheck, Palette, HardDrive, Trash2, Database, Activity
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { ChangelogModal } from '@/components/ChangelogModal';
 import { useThemeStore, THEMES } from '@/stores/useThemeStore';
 import { getCacheStats, clearImageCache } from '@/services/downloadService';
+import { getDatabaseStats, optimizeDatabase, resetDatabase, clearHistory, type DatabaseStats } from '@/services/storageService';
+import { clearMemoryCache } from '@/components/CachedImage';
 
 const DEFAULT_JKANIME = 'https://jkanime.net';
 const DEFAULT_MUNDODONGHUA = 'https://www.mundodonghua.com';
@@ -47,6 +49,11 @@ export function MobileSettingsPage() {
   const [maxCacheMb, setMaxCacheMb] = useState('300');
   const [isClearingCache, setIsClearingCache] = useState(false);
 
+  // Mantenimiento de Base de Datos y Memoria
+  const [dbStats, setDbStats] = useState<DatabaseStats | null>(null);
+  const [isOptimizingDb, setIsOptimizingDb] = useState(false);
+  const [isResettingDb, setIsResettingDb] = useState(false);
+
   const loadCache = async () => {
     try {
       const stats = await getCacheStats();
@@ -56,8 +63,18 @@ export function MobileSettingsPage() {
     }
   };
 
+  const loadDb = async () => {
+    try {
+      const stats = await getDatabaseStats();
+      setDbStats(stats);
+    } catch (e) {
+      console.error('Failed to get database stats', e);
+    }
+  };
+
   useEffect(() => {
     loadCache();
+    loadDb();
   }, []);
 
   useEffect(() => {
@@ -253,6 +270,116 @@ export function MobileSettingsPage() {
             </div>
           </div>
         </div>
+
+        {/* Base de Datos SQLite y Memoria Móvil */}
+        <div style={{
+          background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)',
+          border: '1px solid var(--border-subtle)', padding: 14,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+            <Database size={16} color="var(--accent-success)" />
+            <h3 style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>Base de Datos SQLite</h3>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, marginBottom: 12 }}>
+            <div style={{ background: 'var(--bg-elevated)', padding: '8px 10px', borderRadius: 'var(--radius-sm)' }}>
+              <div style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>TAMAÑO DB</div>
+              <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-primary)', marginTop: 2 }}>
+                {dbStats ? dbStats.databaseSizeFormatted : '...'}
+              </div>
+            </div>
+            <div style={{ background: 'var(--bg-elevated)', padding: '8px 10px', borderRadius: 'var(--radius-sm)' }}>
+              <div style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>HISTORIAL</div>
+              <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-primary)', marginTop: 2 }}>
+                {dbStats ? `${dbStats.historyCount} eps` : '...'}
+              </div>
+            </div>
+            <div style={{ background: 'var(--bg-elevated)', padding: '8px 10px', borderRadius: 'var(--radius-sm)' }}>
+              <div style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>FAVORITOS</div>
+              <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-primary)', marginTop: 2 }}>
+                {dbStats ? `${dbStats.favoritesCount}` : '...'}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <button
+              onClick={async () => {
+                setIsOptimizingDb(true);
+                try {
+                  await optimizeDatabase();
+                  clearMemoryCache();
+                  await loadDb();
+                  setSaveStatus('DB optimizada (VACUUM)');
+                } catch (e) {
+                  console.error(e);
+                } finally {
+                  setIsOptimizingDb(false);
+                }
+              }}
+              disabled={isOptimizingDb}
+              style={{
+                background: 'var(--bg-elevated)', border: '1px solid var(--border-moderate)',
+                borderRadius: 'var(--radius-md)', padding: '8px 12px',
+                color: 'var(--text-primary)', fontSize: 12, fontWeight: 600,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+              }}
+            >
+              <Sparkles size={14} color="#34d399" />
+              {isOptimizingDb ? 'Optimizando...' : 'Optimizar y Compactar (VACUUM)'}
+            </button>
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                onClick={async () => {
+                  if (!window.confirm('¿Vaciar historial de reproducción?')) return;
+                  try {
+                    await clearHistory();
+                    await loadDb();
+                    setSaveStatus('Historial vaciado');
+                  } catch (e) {
+                    console.error(e);
+                  }
+                }}
+                style={{
+                  flex: 1, background: 'var(--bg-elevated)', border: '1px solid var(--border-moderate)',
+                  borderRadius: 'var(--radius-md)', padding: '8px 10px',
+                  color: 'var(--text-primary)', fontSize: 11, fontWeight: 600,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+                }}
+              >
+                <Trash2 size={12} color="#f59e0b" /> Limpiar Historial
+              </button>
+
+              <button
+                onClick={async () => {
+                  if (!window.confirm('⚠️ ¿Restablecer toda la base de datos limpia?')) return;
+                  setIsResettingDb(true);
+                  try {
+                    await resetDatabase();
+                    clearMemoryCache();
+                    await loadDb();
+                    setSaveStatus('Base de datos restablecida');
+                  } catch (e) {
+                    console.error(e);
+                  } finally {
+                    setIsResettingDb(false);
+                  }
+                }}
+                disabled={isResettingDb}
+                style={{
+                  flex: 1, background: 'rgba(239, 68, 68, 0.12)', border: 'none',
+                  borderRadius: 'var(--radius-md)', padding: '8px 10px',
+                  color: 'var(--accent-error)', fontSize: 11, fontWeight: 700,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+                }}
+              >
+                <Activity size={12} /> {isResettingDb ? '...' : 'Restablecer DB'}
+              </button>
+            </div>
+          </div>
+        </div>
+
 
         {/* Actualizaciones APK Móvil */}
         <div style={{

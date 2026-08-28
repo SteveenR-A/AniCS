@@ -352,14 +352,24 @@ a:hover { color: var(--accent-secondary); }
   border-radius: var(--radius-sm);
 }
 
-/* ─── Tauri window drag ───────────────────────────── */
-[data-tauri-drag-region] {
-  -webkit-app-region: drag;
-  app-region: drag;
+/* ─── Optimizaciones Android / Móvil ──────────────── */
+* {
+  -webkit-tap-highlight-color: transparent;
 }
-[data-tauri-drag-region] button,
-[data-tauri-drag-region] a,
-[data-tauri-drag-region] input {
-  -webkit-app-region: no-drag;
-  app-region: no-drag;
+
+button, a, input, select, textarea {
+  touch-action: manipulation;
 }
+
+nav, header, [data-tauri-drag-region] {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Aceleración por hardware para transiciones suaves en GPU móvil */
+.gpu-layer {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  will-change: transform, opacity;
+}
+

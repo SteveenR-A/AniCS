@@ -2,14 +2,18 @@
   {
     "version": "0.1.1",
     "date": "2026-08-27",
-    "title": "Optimizacion de Memoria RAM L1/L2, Streaming Local y Mejoras de Reproductor",
+    "title": "Sincronización Offline, Optimización SQLite, Descargas y Soporte Android",
     "type": "patch",
     "highlights": [
-      "Cache de imagenes en memoria RAM L1 con Base64",
-      "Poda dinamica LRU en disco con selector de tamano en Ajustes",
-      "Streaming nativo de descargas locales .ts y .mp4 en reproductor",
-      "Selector de fuentes Anime/Donghua en sidebar colapsado",
-      "Compilacion y release unificada EXE y APK con indicador de commit"
+      "Sincronización de descargas locales con catálogo online (badges de descargado, visto e inicio directo offline)",
+      "Normalización inteligente de títulos tolerante a tildes, acentos y caracteres especiales",
+      "Descargas MediaFire corregidas y cliente HTTP dedicado sin timeout para videos pesados",
+      "Cola de descargas concurrentes controlada (máx. 2 simultáneas con estado En Cola)",
+      "Reparación y guardado automático de portadas locales corruptas en disco (convertFileSrc)",
+      "Panel de Mantenimiento de Base de Datos SQLite (VACUUM, optimización de índices y estadísticas en Ajustes)",
+      "Control estricto de Memoria RAM LRU (máx 150 imágenes en memoria)",
+      "Screen Wake Lock API en Android para evitar que la pantalla se apague al ver anime",
+      "Optimizaciones táctiles en Android (eliminación de delay de 300ms, aceleración GPU y tap transparente)"
     ]
   },
   {
@@ -18,10 +22,11 @@
     "title": "Lanzamiento Inicial AniCS (Tauri v2)",
     "type": "patch",
     "highlights": [
-      "Nueva arquitectura ultrarrápida",
-      "Scraping sin navegador",
-      "Descargas HLS paralelas",
-      "Panel de Ajustes con URLs personalizadas"
+      "Nueva arquitectura ultrarrápida en Rust y React",
+      "Scraping nativo de JKAnime y MundoDonghua sin navegador",
+      "Descargas HLS paralelas multihilo",
+      "Panel de Ajustes con URLs personalizadas y temas visuales"
     ]
   }
 ]
+
