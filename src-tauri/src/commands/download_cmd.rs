@@ -936,6 +936,35 @@ pub async fn download_and_run_installer(
     use futures::StreamExt;
     use tokio::io::AsyncWriteExt;
 
+    let repo = crate::storage::database::get_setting("github_repo")
+        .unwrap_or_default()
+        .unwrap_or_else(|| "SteveenR-A/AniCS".to_string());
+
+    let parsed_url = match url::Url::parse(&url) {
+        Ok(parsed) => parsed,
+        Err(_) => return Err("URL inválida".to_string()),
+    };
+
+    if parsed_url.host_str() != Some("github.com") {
+        return Err("URL de descarga no autorizada (dominio inválido)".to_string());
+    }
+
+    let expected_path_prefix = format!("/{}/releases/download/", repo);
+    if !parsed_url.path().starts_with(&expected_path_prefix) {
+        return Err("URL de descarga no autorizada (ruta inválida)".to_string());
+    }
+
+    let safe_filename = match std::path::Path::new(&filename).file_name() {
+        Some(name) => name.to_string_lossy().into_owned(),
+        None => return Err("Nombre de archivo inválido".to_string()),
+    };
+
+    if !safe_filename.ends_with(".exe") && !safe_filename.ends_with(".apk") {
+        return Err("Extensión de archivo no permitida".to_string());
+    }
+
+    let filename = safe_filename;
+
     let dest_path = {
         #[cfg(target_os = "android")]
         {
@@ -1036,3 +1065,37 @@ pub fn get_local_media_url(file_path: String) -> String {
     crate::downloader::media_server::get_media_stream_url(&file_path)
 }
 
+
+#[cfg(test)]
+mod tests {
+    // use super::*;
+
+    #[test]
+    fn test_filename_validation() {
+        let repo = "SteveenR-A/AniCS";
+
+        let valid_url_str = format!("https://github.com/{}/releases/download/v1.0.0/installer.exe", repo);
+        let valid_url = url::Url::parse(&valid_url_str).unwrap();
+        assert_eq!(valid_url.host_str(), Some("github.com"));
+        assert!(valid_url.path().starts_with(&format!("/{}/releases/download/", repo)));
+
+        let malicious_url_str = format!("https://github.com/{}/releases/download/../../../malicious/releases/download/v1.0/malware.exe", repo);
+        let malicious_url = url::Url::parse(&malicious_url_str).unwrap();
+        assert_eq!(malicious_url.host_str(), Some("github.com"));
+        // The path should be normalized and won't start with the repo anymore
+        assert!(!malicious_url.path().starts_with(&format!("/{}/releases/download/", repo)));
+
+        let filename1 = "installer.exe";
+        let safe1 = std::path::Path::new(filename1).file_name().unwrap().to_string_lossy();
+        assert_eq!(safe1, "installer.exe");
+        assert!(safe1.ends_with(".exe"));
+
+        let filename2 = "../malicious.exe";
+        let safe2 = std::path::Path::new(filename2).file_name().unwrap().to_string_lossy();
+        assert_eq!(safe2, "malicious.exe");
+
+        let filename3 = "installer.txt";
+        let safe3 = std::path::Path::new(filename3).file_name().unwrap().to_string_lossy();
+        assert!(!safe3.ends_with(".exe") && !safe3.ends_with(".apk"));
+    }
+}
