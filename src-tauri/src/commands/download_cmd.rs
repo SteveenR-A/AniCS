@@ -404,10 +404,20 @@ pub fn get_default_download_dir(app_handle: AppHandle) -> Result<String, String>
     // 2. Selección por plataforma en tiempo de compilación
     #[cfg(target_os = "android")]
     {
-        let _ = &app_handle;
-        let android_path = PathBuf::from("/storage/emulated/0/Anime");
-        let _ = fs::create_dir_all(&android_path);
-        let path_str = android_path.to_string_lossy().to_string();
+        // Probar si /storage/emulated/0/Anime es accesible; si no, usar la carpeta de datos de la app
+        let shared_path = PathBuf::from("/storage/emulated/0/Anime");
+        let path = if fs::create_dir_all(&shared_path).is_ok() && shared_path.exists() {
+            shared_path
+        } else if let Ok(app_dir) = app_handle.path().app_data_dir() {
+            let p = app_dir.join("Anime");
+            let _ = fs::create_dir_all(&p);
+            p
+        } else {
+            let p = PathBuf::from("/storage/emulated/0/Android/data/com.anics.app/files/Anime");
+            let _ = fs::create_dir_all(&p);
+            p
+        };
+        let path_str = path.to_string_lossy().to_string();
         let _ = storage::set_setting("download_dir", &path_str);
         return Ok(path_str);
     }
@@ -547,6 +557,29 @@ pub async fn scan_local_downloads(
 
                         let entry = groups.entry(anime_title.clone()).or_insert_with(|| (base_dir.clone(), vec![]));
                         entry.1.push(item);
+                    }
+                }
+            }
+        }
+    }
+
+    // Si estamos en Android, también escanear /storage/emulated/0/Anime si existe y es diferente de base_dir
+    #[cfg(target_os = "android")]
+    {
+        let shared_anime = PathBuf::from("/storage/emulated/0/Anime");
+        if shared_anime.exists() && shared_anime != base_dir {
+            if let Ok(entries) = fs::read_dir(&shared_anime) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        let folder_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("Anime").to_string();
+                        let clean_title = folder_name.replace('_', " ").trim().to_string();
+                        let mut episodes = vec![];
+                        scan_episodes_in_dir(&path, &clean_title, &mut episodes, &path_history_map, &title_history_map);
+                        if !episodes.is_empty() {
+                            episodes.sort_by_key(|e| e.episode_number);
+                            groups.insert(clean_title, (path, episodes));
+                        }
                     }
                 }
             }
@@ -878,15 +911,9 @@ pub async fn download_and_run_installer(
     let dest_path = {
         #[cfg(target_os = "android")]
         {
-            let download_dir = PathBuf::from("/storage/emulated/0/Download");
-            let _ = fs::create_dir_all(&download_dir);
-            if download_dir.exists() {
-                download_dir.join(&filename)
-            } else {
-                let anime_dir = PathBuf::from("/storage/emulated/0/Anime");
-                let _ = fs::create_dir_all(&anime_dir);
-                anime_dir.join(&filename)
-            }
+            let cache_dir = app_handle.path().app_cache_dir().unwrap_or_else(|_| PathBuf::from("/data/user/0/com.anics.app/cache"));
+            let _ = fs::create_dir_all(&cache_dir);
+            cache_dir.join(&filename)
         }
         #[cfg(not(target_os = "android"))]
         {

@@ -2,10 +2,8 @@ package com.anics.app
 
 import android.os.Bundle
 import android.os.Build
-import android.os.Environment
 import android.content.Intent
 import android.net.Uri
-import android.provider.Settings
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -98,20 +96,7 @@ class MainActivity : TauriActivity() {
   }
 
   private fun requestStoragePermissions() {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-      if (!Environment.isExternalStorageManager()) {
-        try {
-          val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
-          intent.data = Uri.parse("package:$packageName")
-          startActivity(intent)
-        } catch (e: Exception) {
-          try {
-            val intent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
-            startActivity(intent)
-          } catch (e2: Exception) {}
-        }
-      }
-    } else {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
       val permissions = arrayOf(
         Manifest.permission.READ_EXTERNAL_STORAGE,
         Manifest.permission.WRITE_EXTERNAL_STORAGE

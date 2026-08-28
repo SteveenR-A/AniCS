@@ -302,17 +302,15 @@ export function PlayerPage() {
     if (!video || !resolvedMedia || !resolvedMedia.directUrl) return;
 
     let sourceUrl = resolvedMedia.directUrl;
-    let isHls = resolvedMedia.mediaType === 'hls';
+    let isHls = resolvedMedia.mediaType === 'hls' || sourceUrl.includes('.m3u8');
     let blobUrlToRevoke: string | null = null;
 
-    // Si es un archivo local de extensión .ts o MPEG-TS, envolver en playlist M3U8 para HLS.js
-    if (sourceUrl.toLowerCase().includes('.ts') || resolvedMedia.mediaType === 'hls') {
+    // Solo para archivos locales sin playlist que terminen exactamente en .ts
+    if (sourceUrl.toLowerCase().endsWith('.ts') && !sourceUrl.includes('.m3u8')) {
       isHls = true;
-      if (!sourceUrl.includes('.m3u8')) {
-        const m3u8Content = `#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:7200\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:7200.0,\n${sourceUrl}\n#EXT-X-ENDLIST`;
-        sourceUrl = URL.createObjectURL(new Blob([m3u8Content], { type: 'application/vnd.apple.mpegurl' }));
-        blobUrlToRevoke = sourceUrl;
-      }
+      const m3u8Content = `#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:7200\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:7200.0,\n${sourceUrl}\n#EXT-X-ENDLIST`;
+      sourceUrl = URL.createObjectURL(new Blob([m3u8Content], { type: 'application/vnd.apple.mpegurl' }));
+      blobUrlToRevoke = sourceUrl;
     }
 
     if (isHls && Hls.isSupported()) {
@@ -321,9 +319,6 @@ export function PlayerPage() {
         enableWorker: true,
         maxBufferLength: 30,
         maxMaxBufferLength: 60,
-        xhrSetup: (xhr) => {
-          xhr.withCredentials = false;
-        },
       });
       hlsRef.current = hls;
       hls.loadSource(sourceUrl);
@@ -337,9 +332,11 @@ export function PlayerPage() {
           tryFallbackServer();
         }
       });
+    } else if (isHls && video.canPlayType('application/vnd.apple.mpegurl')) {
+      video.src = sourceUrl;
+      video.play().catch(e => console.warn('Autoplay caught:', e));
     } else {
       video.src = sourceUrl;
-      video.load();
       video.play().catch(e => console.warn('Autoplay caught:', e));
     }
 

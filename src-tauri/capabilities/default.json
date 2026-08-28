@@ -2,7 +2,7 @@
   "$schema": "https://schemas.tauri.app/capabilities/2",
   "identifier": "default",
   "description": "Capability por defecto de AniCS",
-  "windows": ["main"],
+  "windows": ["*"],
   "permissions": [
     "core:default",
     "shell:default",
@@ -11,6 +11,8 @@
     "http:default",
     "notification:default",
     "process:allow-exit",
-    "opener:default"
+    "opener:default",
+    "opener:allow-open-url",
+    "opener:allow-open-path"
   ]
 }
