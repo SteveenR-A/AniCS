@@ -109,8 +109,29 @@ pub async fn start_download(
 
     let handle = tokio::spawn(async move {
         if is_mp4 {
+            // Si es un enlace de MediaFire, resolver la página HTML primero para obtener el link directo
+            let actual_url = if stream_url_clone.contains("mediafire.com") {
+                match resolve_mediafire_url(&stream_url_clone).await {
+                    Some(direct) => direct,
+                    None => {
+                        let _ = progress_tx.send(DownloadProgress {
+                            id: dl_id_for_task,
+                            progress: 0.0,
+                            speed_kbps: 0.0,
+                            downloaded_bytes: 0,
+                            total_bytes: None,
+                            status: DownloadStatus::Failed,
+                            error: Some("No se pudo resolver el enlace de MediaFire. Intenta con otro servidor.".to_string()),
+                        });
+                        return;
+                    }
+                }
+            } else {
+                stream_url_clone.clone()
+            };
+
             // Descarga directa MP4
-            match download_direct_mp4(&dl_id_for_task, &stream_url_clone, referer_clone.as_deref(), &output_path, &progress_tx).await {
+            match download_direct_mp4(&dl_id_for_task, &actual_url, referer_clone.as_deref(), &output_path, &progress_tx).await {
                 Ok(_) => {
                     let _ = app_handle_finish.emit("download-completed", serde_json::json!({
                         "id": dl_id_for_task,
@@ -200,6 +221,47 @@ pub async fn start_download(
     Ok(download_id)
 }
 
+
+
+/// Resuelve un enlace de MediaFire obteniendo el URL de descarga directa del archivo
+async fn resolve_mediafire_url(page_url: &str) -> Option<String> {
+    use regex::Regex;
+
+    let html = crate::scrapers::HTTP_CLIENT
+        .get(page_url)
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+        .send()
+        .await
+        .ok()?
+        .text()
+        .await
+        .ok()?;
+
+    // Patrón 1: href con download subdomain
+    let re1 = Regex::new(r#"href=["'](https?://download\d*\.mediafire\.com/[^"']+)["']"#).ok()?;
+    if let Some(cap) = re1.captures(&html) {
+        return cap.get(1).map(|m| m.as_str().to_string());
+    }
+
+    // Patrón 2: botón de descarga con aria-label
+    let re2 = Regex::new(r#"aria-label=["']Download file["']\s+href=["']([^"']+)["']"#).ok();
+    if let Some(re) = re2 {
+        if let Some(cap) = re.captures(&html) {
+            return cap.get(1).map(|m| m.as_str().to_string());
+        }
+    }
+
+    // Patrón 3: id="downloadButton"
+    let re3 = Regex::new(r#"id=["']downloadButton["'][^>]+href=["']([^"']+)["']"#).ok();
+    if let Some(re) = re3 {
+        if let Some(cap) = re.captures(&html) {
+            return cap.get(1).map(|m| m.as_str().to_string());
+        }
+    }
+
+    None
+}
+
 async fn download_direct_mp4(
     download_id: &str,
     url: &str,
@@ -223,6 +285,19 @@ async fn download_direct_mp4(
     let resp = req.send().await.map_err(AppError::Network)?;
     if !resp.status().is_success() {
         return Err(AppError::Download(format!("HTTP error {}", resp.status())));
+    }
+
+    // Verificar que la respuesta sea un video, no HTML
+    let content_type = resp.headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_lowercase();
+
+    if content_type.contains("text/html") {
+        return Err(AppError::Download(
+            "El servidor devolvió HTML en vez del archivo. La URL no es directa.".to_string()
+        ));
     }
 
     let total_bytes = resp.content_length();

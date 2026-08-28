@@ -181,18 +181,26 @@ pub fn get_history(limit: u32, offset: u32) -> AppResult<Vec<HistoryEntry>> {
 
 pub fn get_episode_progress(episode_url: &str) -> AppResult<Option<f64>> {
     with_db(|conn| {
-        // Normalizar separadores de ruta para tolerancia Windows (\) vs Unix (/)
-        let normalized = episode_url.replace('\\', "/");
-        let alt = episode_url.replace('/', "\\");
+        // Generar todas las variantes de la ruta para máxima compatibilidad Windows
+        let fwd = episode_url.replace('\\', "/");          // forward slashes
+        let bwd = episode_url.replace('/', "\\");          // backward slashes
+        let fwd_lower = fwd.to_lowercase();                // minúsculas + forward
+        let bwd_lower = bwd.to_lowercase();                // minúsculas + backward
+        let original_lower = episode_url.to_lowercase();  // minúsculas original
 
         let mut stmt = conn.prepare(
             "SELECT watch_progress FROM watch_history
-             WHERE episode_url = ?1 OR episode_url = ?2 OR episode_url = ?3
+             WHERE episode_url = ?1
+                OR episode_url = ?2
+                OR episode_url = ?3
+                OR episode_url = ?4
+                OR episode_url = ?5
+                OR episode_url = ?6
              ORDER BY watched_at DESC
              LIMIT 1"
         )?;
         let progress = stmt.query_row(
-            params![episode_url, normalized, alt],
+            params![episode_url, fwd, bwd, fwd_lower, bwd_lower, original_lower],
             |row| row.get(0)
         ).optional()?;
         Ok(progress)
