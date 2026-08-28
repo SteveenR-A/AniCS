@@ -9,7 +9,7 @@ use crate::scrapers::{fetch_html, AnimeExtractor};
 const DEFAULT_MUNDODONGHUA_URL: &str = "https://www.mundodonghua.com";
 
 static IFRAME_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"<iframe[^>]+src=\\?["']([^"'\\]+)\\?["']"#).unwrap()
+    Regex::new(r#"<iframe[^>]+src=\\?["']([^"'\\]+)\\?["']"#).expect("Invalid CSS selector")
 });
 
 pub struct MundoDonghuaExtractor {
@@ -50,10 +50,10 @@ impl AnimeExtractor for MundoDonghuaExtractor {
         let doc = Html::parse_document(&html);
         let mut results = vec![];
 
-        let card_sel = Selector::parse("div.md-card, div[class*='md-card']").unwrap();
-        let link_sel = Selector::parse("a").unwrap();
-        let title_sel = Selector::parse("h3.md-card-title, .md-card-title, h3, h5").unwrap();
-        let img_sel = Selector::parse("img").unwrap();
+        let card_sel = Selector::parse("div.md-card, div[class*='md-card']").expect("Invalid CSS selector");
+        let link_sel = Selector::parse("a").expect("Invalid CSS selector");
+        let title_sel = Selector::parse("h3.md-card-title, .md-card-title, h3, h5").expect("Invalid CSS selector");
+        let img_sel = Selector::parse("img").expect("Invalid CSS selector");
 
         for card in doc.select(&card_sel) {
             if let Some(a) = card.select(&link_sel).next() {
@@ -93,11 +93,11 @@ impl AnimeExtractor for MundoDonghuaExtractor {
         let doc = Html::parse_document(&html);
         let mut results = vec![];
 
-        let card_sel = Selector::parse("div.md-card, div[class*='md-card']").unwrap();
-        let link_sel = Selector::parse("a").unwrap();
-        let title_sel = Selector::parse("h3.md-card-title, .md-card-title, h3, h5").unwrap();
-        let img_sel = Selector::parse("img").unwrap();
-        let badge_sel = Selector::parse("span.md-card-badge, .md-card-badge").unwrap();
+        let card_sel = Selector::parse("div.md-card, div[class*='md-card']").expect("Invalid CSS selector");
+        let link_sel = Selector::parse("a").expect("Invalid CSS selector");
+        let title_sel = Selector::parse("h3.md-card-title, .md-card-title, h3, h5").expect("Invalid CSS selector");
+        let img_sel = Selector::parse("img").expect("Invalid CSS selector");
+        let badge_sel = Selector::parse("span.md-card-badge, .md-card-badge").expect("Invalid CSS selector");
 
         for card in doc.select(&card_sel) {
             if let Some(a) = card.select(&link_sel).next() {
@@ -224,13 +224,13 @@ impl AnimeExtractor for MundoDonghuaExtractor {
 
         let doc = Html::parse_document(&html);
 
-        let title_sel = Selector::parse("h1.md-donghua-title, h1, .title").unwrap();
+        let title_sel = Selector::parse("h1.md-donghua-title, h1, .title").expect("Invalid CSS selector");
         let title = doc.select(&title_sel).next()
             .map(|n| inner_text(&n))
             .unwrap_or_default();
 
-        let og_img_sel = Selector::parse("meta[property='og:image'], meta[name='twitter:image']").unwrap();
-        let pic_sel = Selector::parse("div.md-donghua-img img, img.cover, .cover-img").unwrap();
+        let og_img_sel = Selector::parse("meta[property='og:image'], meta[name='twitter:image']").expect("Invalid CSS selector");
+        let pic_sel = Selector::parse("div.md-donghua-img img, img.cover, .cover-img").expect("Invalid CSS selector");
         let thumbnail = doc.select(&og_img_sel).next()
             .map(|m| attr(&m, "content"))
             .filter(|c| !c.is_empty() && c.starts_with("http") && !c.contains("logo"))
@@ -246,12 +246,12 @@ impl AnimeExtractor for MundoDonghuaExtractor {
             })
             .unwrap_or_default();
 
-        let syn_sel = Selector::parse("div.md-donghua-sinopsis p, div.sinopsis p, p").unwrap();
+        let syn_sel = Selector::parse("div.md-donghua-sinopsis p, div.sinopsis p, p").expect("Invalid CSS selector");
         let synopsis = doc.select(&syn_sel).next()
             .map(|n| inner_text(&n))
             .unwrap_or_default();
 
-        let genre_sel = Selector::parse("a.md-genre-tag, a[href*='/genero/']").unwrap();
+        let genre_sel = Selector::parse("a.md-genre-tag, a[href*='/genero/']").expect("Invalid CSS selector");
         let genres: Vec<String> = doc.select(&genre_sel)
             .map(|a| inner_text(&a))
             .filter(|g| !g.is_empty())
@@ -261,7 +261,7 @@ impl AnimeExtractor for MundoDonghuaExtractor {
         let mut status = None;
         let mut total_ep_str = None;
 
-        let info_sel = Selector::parse("div.md-donghua-info p, p").unwrap();
+        let info_sel = Selector::parse("div.md-donghua-info p, p").expect("Invalid CSS selector");
         for p in doc.select(&info_sel) {
             let t = inner_text(&p);
             if t.to_lowercase().contains("estado:") {
@@ -273,7 +273,7 @@ impl AnimeExtractor for MundoDonghuaExtractor {
 
         // Episodios
         let mut episodes = vec![];
-        let ep_sel = Selector::parse("ul.md-donghua-episodes li a, div.episodes-list a, a[href*='/ver/']").unwrap();
+        let ep_sel = Selector::parse("ul.md-donghua-episodes li a, div.episodes-list a, a[href*='/ver/']").expect("Invalid CSS selector");
 
         for (idx, a) in doc.select(&ep_sel).enumerate() {
             let href = attr(&a, "href");
@@ -374,7 +374,7 @@ impl AnimeExtractor for MundoDonghuaExtractor {
         // 2. Si no se encontraron por JS, fallback a iframes HTML estándar
         if servers.is_empty() {
             let doc = Html::parse_document(&html);
-            let iframe_sel = Selector::parse("div.md-player-container iframe, iframe").unwrap();
+            let iframe_sel = Selector::parse("div.md-player-container iframe, iframe").expect("Invalid CSS selector");
             for (idx, iframe) in doc.select(&iframe_sel).enumerate() {
                 let src = attr(&iframe, "src");
                 if !src.is_empty() && !servers.iter().any(|s: &VideoServer| s.url == src) {
@@ -456,7 +456,7 @@ impl AnimeExtractor for MundoDonghuaExtractor {
         if let Ok(html) = fetch_html(&url, Some(&self.base_url)).await {
             if !html.is_empty() {
                 let doc = Html::parse_document(&html);
-                let genre_sel = Selector::parse("a.md-genre-tag, a[href*='/genero/']").unwrap();
+                let genre_sel = Selector::parse("a.md-genre-tag, a[href*='/genero/']").expect("Invalid CSS selector");
                 let mut genres = vec![];
 
                 for a in doc.select(&genre_sel) {
@@ -540,9 +540,9 @@ fn parse_donghua_cards(html: &str, base_url: &str, source_id: &str) -> Vec<Anime
     let mut results = vec![];
     let mut seen = std::collections::HashSet::new();
 
-    let a_sel = Selector::parse("a[href*='/donghua/'], div.md-card a, div.col-6 a, div.col-md-4 a").unwrap();
-    let title_sel = Selector::parse("h3.md-card-title, h5.md-card-title, h3, h5, .title, a.title").unwrap();
-    let img_sel = Selector::parse("img").unwrap();
+    let a_sel = Selector::parse("a[href*='/donghua/'], div.md-card a, div.col-6 a, div.col-md-4 a").expect("Invalid CSS selector");
+    let title_sel = Selector::parse("h3.md-card-title, h5.md-card-title, h3, h5, .title, a.title").expect("Invalid CSS selector");
+    let img_sel = Selector::parse("img").expect("Invalid CSS selector");
 
     for a in doc.select(&a_sel) {
         let href = attr(&a, "href");
