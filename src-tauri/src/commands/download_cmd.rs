@@ -510,15 +510,15 @@ pub async fn scan_local_downloads(
     }
 
     // 1. Escanear subdirectorios (cada subdirectorio representa un Anime)
-    if let Ok(entries) = fs::read_dir(&base_dir) {
-        for entry in entries.flatten() {
+    if let Ok(mut entries) = tokio::fs::read_dir(&base_dir).await {
+        while let Ok(Some(entry)) = entries.next_entry().await {
             let path = entry.path();
             if path.is_dir() {
                 let folder_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("Anime").to_string();
                 let clean_title = folder_name.replace('_', " ").trim().to_string();
 
                 let mut episodes = vec![];
-                scan_episodes_in_dir(&path, &clean_title, &mut episodes, &path_history_map, &title_history_map);
+                scan_episodes_in_dir(&path, &clean_title, &mut episodes, &path_history_map, &title_history_map).await;
 
                 if !episodes.is_empty() {
                     // Ordenar episodios ascendentemente por número
@@ -533,8 +533,8 @@ pub async fn scan_local_downloads(
                         let (anime_title, ep_num) = parse_anime_from_filename(&file_name, None);
                         let ep_number = ep_num.unwrap_or(1);
 
-                        let file_size = path.metadata().map(|m| m.len()).unwrap_or(0);
-                        let modified_at = path.metadata().ok()
+                        let file_size = tokio::fs::metadata(&path).await.map(|m| m.len()).unwrap_or(0);
+                        let modified_at = tokio::fs::metadata(&path).await.ok()
                             .and_then(|m| m.modified().ok())
                             .and_then(|m| {
                                 let dt: DateTime<Utc> = m.into();
@@ -568,14 +568,14 @@ pub async fn scan_local_downloads(
     {
         let shared_anime = PathBuf::from("/storage/emulated/0/Anime");
         if shared_anime.exists() && shared_anime != base_dir {
-            if let Ok(entries) = fs::read_dir(&shared_anime) {
-                for entry in entries.flatten() {
+            if let Ok(mut entries) = tokio::fs::read_dir(&shared_anime).await {
+                while let Ok(Some(entry)) = entries.next_entry().await {
                     let path = entry.path();
                     if path.is_dir() {
                         let folder_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("Anime").to_string();
                         let clean_title = folder_name.replace('_', " ").trim().to_string();
                         let mut episodes = vec![];
-                        scan_episodes_in_dir(&path, &clean_title, &mut episodes, &path_history_map, &title_history_map);
+                        scan_episodes_in_dir(&path, &clean_title, &mut episodes, &path_history_map, &title_history_map).await;
                         if !episodes.is_empty() {
                             episodes.sort_by_key(|e| e.episode_number);
                             groups.insert(clean_title, (path, episodes));
@@ -795,20 +795,20 @@ fn get_watch_info(
     (progress, watch_status)
 }
 
-fn scan_episodes_in_dir(
+async fn scan_episodes_in_dir(
     dir: &Path,
     anime_title: &str,
     episodes: &mut Vec<LocalEpisodeItem>,
     path_history_map: &HashMap<String, f64>,
     title_history_map: &HashMap<String, f64>,
 ) {
-    if let Ok(entries) = fs::read_dir(dir) {
-        for entry in entries.flatten() {
+    if let Ok(mut entries) = tokio::fs::read_dir(dir).await {
+        while let Ok(Some(entry)) = entries.next_entry().await {
             let path = entry.path();
             if path.is_file() {
                 if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
                     if ["mp4", "mkv", "ts", "webm", "avi"].contains(&ext.to_lowercase().as_str()) {
-                        if let Ok(meta) = entry.metadata() {
+                        if let Ok(meta) = tokio::fs::metadata(&path).await {
                             let file_size = meta.len();
                             if file_size > 10240 {
                                 let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("video").to_string();
