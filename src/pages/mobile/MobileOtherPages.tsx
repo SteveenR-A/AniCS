@@ -295,6 +295,7 @@ export function MobileDownloadsPage() {
         title: e.fileName,
         url: e.filePath,
         watched: e.watchStatus === 'completed',
+        watchProgress: e.watchProgress,
       })),
       source: 'local',
     });
@@ -303,6 +304,7 @@ export function MobileDownloadsPage() {
       title: ep.fileName,
       url: ep.filePath,
       watched: ep.watchStatus === 'completed',
+      watchProgress: ep.watchProgress,
     });
     setResolvedMedia({
       directUrl: assetUrl,
@@ -585,11 +587,31 @@ export function MobileDownloadsPage() {
                   </div>
 
                   {isDownloading && (
-                    <div style={{ height: 4, background: 'var(--bg-elevated)', borderRadius: 2, overflow: 'hidden' }}>
-                      <div style={{
-                        width: `${task.progress > 1 ? Math.min(100, Math.round(task.progress)) : Math.min(100, Math.round(task.progress * 100))}%`,
-                        height: '100%', background: 'var(--accent-primary)',
-                      }} />
+                    <div>
+                      {(() => {
+                        const pct = task.progress > 1 ? Math.min(100, Math.round(task.progress)) : Math.min(100, Math.round(task.progress * 100));
+                        const dlMB = (task.downloadedBytes / (1024 * 1024)).toFixed(1);
+                        const totalMB = task.totalBytes ? (task.totalBytes / (1024 * 1024)).toFixed(1) : null;
+                        return (
+                          <>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
+                              <span style={{ fontWeight: 600 }}>
+                                {totalMB ? `${dlMB} / ${totalMB} MB` : `${dlMB} MB`}
+                                {' · '}{formatSpeed(task.speedKbps)}
+                              </span>
+                              <span style={{ color: 'var(--accent-primary)', fontWeight: 700 }}>{pct}%</span>
+                            </div>
+                            <div style={{ height: 5, background: 'var(--bg-elevated)', borderRadius: 3, overflow: 'hidden' }}>
+                              <div style={{
+                                width: `${pct}%`,
+                                height: '100%',
+                                background: 'linear-gradient(90deg, var(--accent-primary), var(--accent-secondary))',
+                                transition: 'width 0.3s ease',
+                              }} />
+                            </div>
+                          </>
+                        );
+                      })()}
                     </div>
                   )}
                 </div>

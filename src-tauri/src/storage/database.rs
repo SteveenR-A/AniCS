@@ -181,10 +181,20 @@ pub fn get_history(limit: u32, offset: u32) -> AppResult<Vec<HistoryEntry>> {
 
 pub fn get_episode_progress(episode_url: &str) -> AppResult<Option<f64>> {
     with_db(|conn| {
+        // Normalizar separadores de ruta para tolerancia Windows (\) vs Unix (/)
+        let normalized = episode_url.replace('\\', "/");
+        let alt = episode_url.replace('/', "\\");
+
         let mut stmt = conn.prepare(
-            "SELECT watch_progress FROM watch_history WHERE episode_url = ?1 LIMIT 1"
+            "SELECT watch_progress FROM watch_history
+             WHERE episode_url = ?1 OR episode_url = ?2 OR episode_url = ?3
+             ORDER BY watched_at DESC
+             LIMIT 1"
         )?;
-        let progress = stmt.query_row(params![episode_url], |row| row.get(0)).optional()?;
+        let progress = stmt.query_row(
+            params![episode_url, normalized, alt],
+            |row| row.get(0)
+        ).optional()?;
         Ok(progress)
     })
 }

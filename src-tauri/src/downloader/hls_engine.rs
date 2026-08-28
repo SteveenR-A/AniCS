@@ -193,24 +193,32 @@ impl HlsEngine {
                                 {
                                     let mut cs = comp_segs.lock().await;
                                     *cs += 1;
-                                    let progress = (*cs as f32 / total_segments as f32) * 100.0;
+                                    let completed = *cs;
+                                    let progress = (completed as f32 / total_segments as f32) * 100.0;
 
                                     let mut le = last_e.lock().await;
                                     if le.elapsed().as_millis() >= 300 {
                                         let elapsed_secs = start_time.elapsed().as_secs_f64();
+                                        let current_bytes = *dl_bytes.lock().await;
                                         let speed = if elapsed_secs > 0.0 {
-                                            let current_bytes = *dl_bytes.lock().await;
                                             (current_bytes as f64 / 1024.0) / elapsed_secs
                                         } else {
                                             0.0
+                                        };
+
+                                        // Estimar el peso total del episodio basado en el promedio de bytes por segmento
+                                        let estimated_total = if completed > 0 {
+                                            Some((current_bytes / completed as u64) * total_segments as u64)
+                                        } else {
+                                            None
                                         };
 
                                         let _ = tx.send(DownloadProgress {
                                             id: dl_id.clone(),
                                             progress,
                                             speed_kbps: speed,
-                                            downloaded_bytes: *dl_bytes.lock().await,
-                                            total_bytes: None,
+                                            downloaded_bytes: current_bytes,
+                                            total_bytes: estimated_total,
                                             status: DownloadStatus::Downloading,
                                             error: None,
                                         });

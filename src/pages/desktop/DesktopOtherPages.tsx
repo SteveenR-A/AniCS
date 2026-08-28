@@ -354,6 +354,7 @@ export function DesktopDownloadsPage() {
         title: e.fileName,
         url: e.filePath,
         watched: e.watchStatus === 'completed',
+        watchProgress: e.watchProgress,
       })),
       source: 'local',
     });
@@ -362,6 +363,7 @@ export function DesktopDownloadsPage() {
       title: ep.fileName,
       url: ep.filePath,
       watched: ep.watchStatus === 'completed',
+      watchProgress: ep.watchProgress,
     });
     setResolvedMedia({
       directUrl: assetUrl,
@@ -799,16 +801,24 @@ export function DesktopDownloadsPage() {
                     <div>
                       {(() => {
                         const pct = task.progress > 1 ? Math.min(100, Math.round(task.progress)) : Math.min(100, Math.round(task.progress * 100));
+                        const dlMB = (task.downloadedBytes / (1024 * 1024)).toFixed(1);
+                        const totalMB = task.totalBytes ? (task.totalBytes / (1024 * 1024)).toFixed(1) : null;
                         return (
                           <>
                             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>
-                              <span>Progreso</span>
+                              <span>
+                                {totalMB
+                                  ? <>{dlMB} <span style={{ color: 'var(--text-secondary)' }}>MB</span> / {totalMB} <span style={{ color: 'var(--text-secondary)' }}>MB</span> · {formatSpeed(task.speedKbps)}</>
+                                  : <>{dlMB} <span style={{ color: 'var(--text-secondary)' }}>MB descargados</span> · {formatSpeed(task.speedKbps)}</>
+                                }
+                              </span>
                               <span style={{ color: 'var(--accent-secondary)', fontWeight: 700 }}>{pct}%</span>
                             </div>
                             <div style={{ height: 8, background: 'var(--bg-elevated)', borderRadius: 4, overflow: 'hidden' }}>
                               <div style={{
                                 width: `${pct}%`, height: '100%',
                                 background: 'linear-gradient(90deg, var(--accent-primary), var(--accent-secondary))',
+                                transition: 'width 0.3s ease',
                               }} />
                             </div>
                           </>

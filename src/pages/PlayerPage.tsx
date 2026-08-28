@@ -273,6 +273,8 @@ export function PlayerPage() {
   const currentAnimeRef = useRef(currentAnime);
   const currentEpisodeRef = useRef(currentEpisode);
   const hasResumedProgressRef = useRef(false);
+  // Protección: no guardar en los primeros instantes (antes de que el seek de reanudación se aplique)
+  const readyToSaveRef = useRef(false);
 
   useEffect(() => {
     playbackTimeRef.current = playbackTime;
@@ -289,6 +291,7 @@ export function PlayerPage() {
   useEffect(() => {
     currentEpisodeRef.current = currentEpisode;
     hasResumedProgressRef.current = false;
+    readyToSaveRef.current = false;
   }, [currentEpisode]);
 
   const tryFallbackServer = () => {
@@ -307,14 +310,21 @@ export function PlayerPage() {
     const ep = currentEpisodeRef.current;
     if (!anime || !ep) return;
 
+    // No guardar si aún no hemos superado el inicio de reproducción.
+    // Esto evita sobrescribir el progreso previo con 0:00 cuando onPlay se
+    // dispara antes de que el seek de reanudación se aplique.
+    if (!readyToSaveRef.current && typeof overrideProgress !== 'number') return;
+
     const dur = durationRef.current;
     const time = playbackTimeRef.current;
 
-    let prog = 0.01; // Progreso inicial al comenzar a reproducir
+    let prog: number;
     if (typeof overrideProgress === 'number') {
       prog = overrideProgress;
     } else if (dur && dur > 0) {
       prog = Math.max(0.01, Math.min(1.0, time / dur));
+    } else {
+      return; // Sin duración, no guardar
     }
 
     upsertHistory({
@@ -683,7 +693,10 @@ export function PlayerPage() {
           }}
           onPlay={() => {
             setIsPlaying(true);
-            saveProgress();
+            // Solo guardar si ya estamos listos (evitar sobrescribir antes del seek de reanudación)
+            if (readyToSaveRef.current) {
+              saveProgress();
+            }
           }}
           onPause={() => {
             setIsPlaying(false);
@@ -697,14 +710,23 @@ export function PlayerPage() {
               if (!hasResumedProgressRef.current && currentEpisodeRef.current) {
                 try {
                   const savedProg = await getEpisodeProgress(currentEpisodeRef.current.url);
-                  if (savedProg && savedProg > 0.01 && savedProg < 0.90 && v.duration > 0) {
-                    v.currentTime = savedProg * v.duration;
+                  if (savedProg && savedProg > 0.01 && savedProg < 0.95 && v.duration > 0) {
+                    const targetTime = savedProg * v.duration;
+                    v.currentTime = targetTime;
                     hasResumedProgressRef.current = true;
+                    // Dar tiempo al seek antes de habilitar guardado
+                    setTimeout(() => { readyToSaveRef.current = true; }, 1500);
                     showToast({ icon: 'seek', text: `Reanudado al ${Math.round(savedProg * 100)}%` });
+                  } else {
+                    // Sin progreso previo o episodio nuevo: habilitar guardado de inmediato
+                    readyToSaveRef.current = true;
                   }
                 } catch (e) {
                   console.error('Error resuming progress:', e);
+                  readyToSaveRef.current = true;
                 }
+              } else {
+                readyToSaveRef.current = true;
               }
             }
           }}
