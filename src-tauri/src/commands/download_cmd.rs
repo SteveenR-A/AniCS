@@ -404,6 +404,7 @@ pub fn get_default_download_dir(app_handle: AppHandle) -> Result<String, String>
     // 2. Selección por plataforma en tiempo de compilación
     #[cfg(target_os = "android")]
     {
+        let _ = &app_handle;
         let android_path = PathBuf::from("/storage/emulated/0/Anime");
         let _ = fs::create_dir_all(&android_path);
         let path_str = android_path.to_string_lossy().to_string();
