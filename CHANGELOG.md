@@ -5,7 +5,7 @@ El formato está basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1
 
 ---
 
-## [0.1.1] - 2026-08-27
+## [0.1.2] - 2026-08-27
 
 ### ⚡ Sincronización Offline y Detección Local
 - **Sincronización Catálogo Online - Descargas Locales:**
