@@ -7,7 +7,9 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
 import android.view.View
+import android.view.ViewGroup
 import android.view.WindowManager
+import android.webkit.WebView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -29,6 +31,9 @@ class MainActivity : TauriActivity() {
     // Ocultar barra superior (estado) y barra inferior (navegación/botones)
     hideSystemBars()
 
+    // Habilitar acceso directo a archivos locales para el reproductor de video
+    configureWebViewSettings()
+
     requestStoragePermissions()
   }
 
@@ -42,6 +47,7 @@ class MainActivity : TauriActivity() {
   override fun onResume() {
     super.onResume()
     hideSystemBars()
+    configureWebViewSettings()
   }
 
   private fun hideSystemBars() {
@@ -63,6 +69,31 @@ class MainActivity : TauriActivity() {
         or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
         or View.SYSTEM_UI_FLAG_FULLSCREEN
       )
+    }
+  }
+
+  private fun configureWebViewSettings() {
+    try {
+      val root = window.decorView as? ViewGroup
+      root?.let { enableWebViewFileAccess(it) }
+    } catch (e: Exception) {}
+  }
+
+  private fun enableWebViewFileAccess(viewGroup: ViewGroup) {
+    for (i in 0 until viewGroup.childCount) {
+      val child = viewGroup.getChildAt(i)
+      if (child is WebView) {
+        child.settings.apply {
+          allowFileAccess = true
+          allowContentAccess = true
+          allowFileAccessFromFileURLs = true
+          allowUniversalAccessFromFileURLs = true
+          mediaPlaybackRequiresUserGesture = false
+          domStorageEnabled = true
+        }
+      } else if (child is ViewGroup) {
+        enableWebViewFileAccess(child)
+      }
     }
   }
 

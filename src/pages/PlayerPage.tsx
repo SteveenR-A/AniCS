@@ -7,7 +7,7 @@ import {
   Maximize, Minimize, Settings, ChevronLeft, ChevronRight,
   Loader2, FastForward, SkipForward, RotateCcw,
   Sparkles, Check, Sun, ListVideo, Zap, Server, AlertCircle,
-  Eye, EyeOff, ChevronDown, ChevronUp
+  Eye, EyeOff, ChevronDown, ChevronUp, Scaling, Tv
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { usePlayerStore } from '@/stores/usePlayerStore';
@@ -80,15 +80,23 @@ export function PlayerPage() {
   const [showServerDropdown, setShowServerDropdown] = useState(false);
 
   // Gestos & HUD Toasts
-  const [hudToast, setHudToast] = useState<{ icon: 'volume' | 'brightness' | 'seek'; text: string; value?: number } | null>(null);
+  const [hudToast, setHudToast] = useState<{ icon: 'volume' | 'brightness' | 'seek' | 'aspect'; text: string; value?: number } | null>(null);
   const [brightness, setBrightness] = useState(1.0);
   const [doubleTapSide, setDoubleTapSide] = useState<'left' | 'right' | null>(null);
   const [centerPlayPulse, setCenterPlayPulse] = useState<'play' | 'pause' | null>(null);
 
-  const showToast = (toast: { icon: 'volume' | 'brightness' | 'seek'; text: string; value?: number }) => {
+  const showToast = (toast: { icon: 'volume' | 'brightness' | 'seek' | 'aspect'; text: string; value?: number }) => {
     setHudToast(toast);
     if (toastTimeout.current) clearTimeout(toastTimeout.current);
     toastTimeout.current = setTimeout(() => setHudToast(null), 1500);
+  };
+
+  const cycleAspectRatio = () => {
+    const nextAspect: 'contain' | 'cover' | 'fill' =
+      aspectRatio === 'contain' ? 'cover' : aspectRatio === 'cover' ? 'fill' : 'contain';
+    setAspectRatio(nextAspect);
+    const label = nextAspect === 'contain' ? 'Original (Ajustar 16:9)' : nextAspect === 'cover' ? 'Zoom (Llenar pantalla)' : 'Estirar imagen';
+    showToast({ icon: 'aspect', text: `Aspecto: ${label}` });
   };
 
   const triggerCenterPulse = (type: 'play' | 'pause') => {
@@ -313,6 +321,9 @@ export function PlayerPage() {
         enableWorker: true,
         maxBufferLength: 30,
         maxMaxBufferLength: 60,
+        xhrSetup: (xhr) => {
+          xhr.withCredentials = false;
+        },
       });
       hlsRef.current = hls;
       hls.loadSource(sourceUrl);
@@ -328,6 +339,7 @@ export function PlayerPage() {
       });
     } else {
       video.src = sourceUrl;
+      video.load();
       video.play().catch(e => console.warn('Autoplay caught:', e));
     }
 
@@ -765,8 +777,11 @@ export function PlayerPage() {
       >
         <video
           ref={videoRef}
+          playsInline
+          webkit-playsinline="true"
           style={{
             width: '100%', height: '100%',
+            maxWidth: '100%', maxHeight: '100%',
             objectFit: aspectRatio,
             filter: brightness > 1 ? `brightness(${brightness})` : undefined,
           }}
@@ -911,6 +926,7 @@ export function PlayerPage() {
             {hudToast.icon === 'volume' && <Volume2 size={16} color="var(--accent-primary)" />}
             {hudToast.icon === 'brightness' && <Sun size={16} color="#fbbf24" />}
             {hudToast.icon === 'seek' && <Zap size={16} color="var(--accent-secondary)" />}
+            {hudToast.icon === 'aspect' && <Scaling size={16} color="var(--accent-primary)" />}
             <span>{hudToast.text}</span>
           </motion.div>
         )}
@@ -1060,6 +1076,24 @@ export function PlayerPage() {
                     )}
                   </AnimatePresence>
                 </div>
+
+                {/* Botón de Relación de Aspecto (16:9 Original / Zoom / Estirar) */}
+                <button
+                  onClick={cycleAspectRatio}
+                  title={`Relación de aspecto actual: ${aspectRatio === 'contain' ? 'Original (16:9)' : aspectRatio === 'cover' ? 'Zoom (Llenar)' : 'Estirar'}`}
+                  style={{
+                    background: aspectRatio !== 'contain' ? 'var(--accent-primary)' : 'rgba(255,255,255,0.1)',
+                    border: '1px solid rgba(255,255,255,0.15)',
+                    borderRadius: 'var(--radius-full)', padding: '6px 10px',
+                    display: 'flex', alignItems: 'center', gap: 5,
+                    color: 'white', fontSize: 11, fontWeight: 700, cursor: 'pointer', backdropFilter: 'blur(10px)',
+                  }}
+                >
+                  <Scaling size={14} />
+                  <span style={{ textTransform: 'capitalize' }}>
+                    {aspectRatio === 'contain' ? '16:9' : aspectRatio === 'cover' ? 'Zoom' : 'Estirar'}
+                  </span>
+                </button>
 
                 {/* Botón Ocultar Controles Manualmente */}
                 <button
