@@ -35,7 +35,7 @@ const ASPECT_OPTIONS = [
 export function PlayerPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { isMobile } = useResponsive();
+  const { isMobile, isDesktop } = useResponsive();
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -293,7 +293,6 @@ export function PlayerPage() {
         hlsRef.current.destroy();
         hlsRef.current = null;
       }
-      resetPlayback();
     };
   }, [queryUrl, queryEp, querySource]);
 
@@ -479,7 +478,7 @@ export function PlayerPage() {
     }
   };
 
-  const togglePlay = () => {
+  const togglePlay = (showHud: boolean | React.SyntheticEvent = true) => {
     const v = videoRef.current;
     if (!v) return;
     if (isPlaying) {
@@ -489,7 +488,9 @@ export function PlayerPage() {
       v.play().catch(() => {});
       triggerCenterPulse('play');
     }
-    showControlsTemp();
+    if (typeof showHud === 'boolean' ? showHud : true) {
+      showControlsTemp();
+    }
   };
 
   const handleEnded = () => {
@@ -563,7 +564,7 @@ export function PlayerPage() {
     }
   };
 
-  const seekRelative = (seconds: number) => {
+  const seekRelative = (seconds: number, showHud: boolean | React.SyntheticEvent = true) => {
     const v = videoRef.current;
     if (!v) return;
     v.currentTime = Math.max(0, Math.min(v.duration || 0, v.currentTime + seconds));
@@ -571,10 +572,12 @@ export function PlayerPage() {
       icon: 'seek',
       text: seconds > 0 ? `+${seconds}s` : `${seconds}s`,
     });
-    showControlsTemp();
+    if (typeof showHud === 'boolean' ? showHud : true) {
+      showControlsTemp();
+    }
   };
 
-  // Manejo de Clics en Pantalla (1 clic = HUD on/off, 2 clics = seek / pause)
+  // Manejo de Clics en Pantalla (1 clic = HUD on/off, 2 clics = seek / pause sin HUD)
   const handleScreenClick = (e: React.MouseEvent<HTMLDivElement>) => {
     const target = e.target as HTMLElement;
     if (
@@ -594,26 +597,29 @@ export function PlayerPage() {
     const doubleTapDiff = now - lastTapTime.current;
 
     if (doubleTapDiff < 300) {
-      // It's a double click
+      // Doble clic confirmado: cancelar acción de 1 clic (no alterar HUD)
       if (clickTimeoutRef.current) {
         clearTimeout(clickTimeoutRef.current);
         clickTimeoutRef.current = null;
       }
 
-      if (x < screenWidth * 0.35) {
-        seekRelative(-10);
+      if (x < screenWidth * 0.33) {
+        // Doble clic izquierda: -10s sin HUD
+        seekRelative(-10, false);
         setDoubleTapSide('left');
         setTimeout(() => setDoubleTapSide(null), 600);
-      } else if (x > screenWidth * 0.65) {
-        seekRelative(10);
+      } else if (x > screenWidth * 0.66) {
+        // Doble clic derecha: +10s sin HUD
+        seekRelative(10, false);
         setDoubleTapSide('right');
         setTimeout(() => setDoubleTapSide(null), 600);
       } else {
-        togglePlay();
+        // Doble clic centro: Pausar/Reanudar sin HUD
+        togglePlay(false);
       }
       lastTapTime.current = 0;
     } else {
-      // First click
+      // Primer clic: esperar 300ms para confirmar si es un solo clic
       lastTapTime.current = now;
       if (clickTimeoutRef.current) {
         clearTimeout(clickTimeoutRef.current);
@@ -689,44 +695,6 @@ export function PlayerPage() {
   };
 
   const handleTouchEnd = () => {
-    const now = Date.now();
-    const timeDiff = now - touchStartTime.current;
-
-    if (timeDiff < 280 && touchStartX.current !== null && touchStartY.current !== null) {
-      const doubleTapDiff = now - lastTapTime.current;
-      const x = touchStartX.current;
-      const screenWidth = window.innerWidth;
-
-      if (doubleTapDiff < 300) {
-        if (clickTimeoutRef.current) {
-          clearTimeout(clickTimeoutRef.current);
-          clickTimeoutRef.current = null;
-        }
-
-        if (x < screenWidth * 0.35) {
-          seekRelative(-10);
-          setDoubleTapSide('left');
-          setTimeout(() => setDoubleTapSide(null), 600);
-        } else if (x > screenWidth * 0.65) {
-          seekRelative(10);
-          setDoubleTapSide('right');
-          setTimeout(() => setDoubleTapSide(null), 600);
-        } else {
-          togglePlay();
-        }
-        lastTapTime.current = 0;
-      } else {
-        lastTapTime.current = now;
-        if (clickTimeoutRef.current) {
-          clearTimeout(clickTimeoutRef.current);
-        }
-        clickTimeoutRef.current = setTimeout(() => {
-          toggleControlsManual();
-          clickTimeoutRef.current = null;
-        }, 300);
-      }
-    }
-
     touchStartY.current = null;
     touchStartX.current = null;
     touchActionSide.current = null;
@@ -1059,7 +1027,6 @@ export function PlayerPage() {
               paddingRight: isMobile ? 'calc(16px + env(safe-area-inset-right, 0px))' : '24px',
               zIndex: 20, pointerEvents: 'auto',
             }}
-            onClick={handleScreenClick}
             onWheel={e => e.stopPropagation()}
             onTouchStart={e => e.stopPropagation()}
             onTouchMove={e => e.stopPropagation()}

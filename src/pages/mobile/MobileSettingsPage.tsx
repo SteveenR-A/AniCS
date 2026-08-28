@@ -112,7 +112,7 @@ export function MobileSettingsPage() {
           try {
             const defDir: string = await invoke('get_default_download_dir');
             if (defDir) setDownloadDir(defDir);
-          } catch {}
+          } catch { }
         }
         if (settings.max_concurrent_downloads) setMaxConcurrent(settings.max_concurrent_downloads);
         if (settings.max_image_cache_mb) setMaxCacheMb(settings.max_image_cache_mb);
@@ -629,21 +629,34 @@ export function MobileSettingsPage() {
                             url: asset.browser_download_url,
                             filename: asset.name,
                           });
-                          setDownloadStatusText('¡Descargado! Abriendo instalador...');
+                          setDownloadStatusText('¡Descarga completada!');
 
-                          if (typeof (window as any).AndroidBridge !== 'undefined' && typeof (window as any).AndroidBridge?.installApk === 'function') {
-                            (window as any).AndroidBridge.installApk(savedPath);
+                          if ((window as any).AndroidBridge && (window as any).AndroidBridge.installApk) {
+                            if (window.confirm('La descarga ha finalizado. ¿Deseas instalar la actualización ahora?')) {
+                              try {
+                                (window as any).AndroidBridge.installApk(savedPath);
+                              } catch (bridgeErr: any) {
+                                console.error('Error invocando AndroidBridge.installApk:', bridgeErr);
+                                alert(`Error al iniciar instalación nativa: ${bridgeErr?.message || bridgeErr}`);
+                              }
+                            }
                           } else {
-                            try {
-                              await openPath(savedPath);
-                            } catch (openErr) {
-                              console.warn('Error abriendo paquete con openPath, descargando desde navegador...', openErr);
-                              await openUrl(asset.browser_download_url);
+                            const bridgeMissingMsg = 'Puente AndroidBridge no disponible. ¿Deseas abrir el instalador con el sistema?';
+                            if (window.confirm(bridgeMissingMsg)) {
+                              try {
+                                await openPath(savedPath);
+                              } catch (openErr: any) {
+                                console.warn('Error abriendo paquete con openPath:', openErr);
+                                alert(`No se pudo abrir el instalador (${openErr?.message || openErr}). Abriendo enlace en navegador...`);
+                                await openUrl(asset.browser_download_url);
+                              }
                             }
                           }
                         } catch (err: any) {
-                          console.error('Error al descargar APK internamente', err);
-                          setDownloadStatusText(`Error: ${err?.message || err}`);
+                          console.error('Error durante la descarga o instalación del APK:', err);
+                          const errorMessage = err?.message || String(err);
+                          setDownloadStatusText(`Error: ${errorMessage}`);
+                          alert(`Error al actualizar: ${errorMessage}`);
                         } finally {
                           setTimeout(() => setDownloadingAsset(null), 8000);
                         }

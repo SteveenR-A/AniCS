@@ -17,6 +17,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.app.ActivityCompat
 import androidx.core.content.FileProvider
 import android.Manifest
+import android.provider.Settings
 import java.io.File
 
 class AndroidNativeBridge(private val activity: android.app.Activity) {
@@ -26,9 +27,29 @@ class AndroidNativeBridge(private val activity: android.app.Activity) {
       try {
         val apkFile = File(filePath)
         if (!apkFile.exists()) {
-          Toast.makeText(activity, "El archivo de actualización no se encontró.", Toast.LENGTH_LONG).show()
+          val msg = "El archivo de actualización no se encontró en: $filePath"
+          Toast.makeText(activity, msg, Toast.LENGTH_LONG).show()
+          Log.e("AniCS", msg)
           return@runOnUiThread
         }
+
+        // Android 8.0+ (API 26+): verificar permiso de instalación de fuentes desconocidas
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+          if (!activity.packageManager.canRequestPackageInstalls()) {
+            val manageIntent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
+              data = Uri.parse("package:${activity.packageName}")
+              addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            activity.startActivity(manageIntent)
+            Toast.makeText(
+              activity,
+              "Activa el permiso 'Instalar aplicaciones desconocidas' y vuelve a presionar Instalar",
+              Toast.LENGTH_LONG
+            ).show()
+            return@runOnUiThread
+          }
+        }
+
         val uri: Uri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
           FileProvider.getUriForFile(
             activity,
@@ -46,8 +67,9 @@ class AndroidNativeBridge(private val activity: android.app.Activity) {
         }
         activity.startActivity(intent)
       } catch (e: Exception) {
-        Log.e("AniCS", "Error al iniciar instalador APK", e)
-        Toast.makeText(activity, "Error al abrir el instalador: ${e.message}", Toast.LENGTH_LONG).show()
+        Log.e("AniCS", "Error al iniciar instalador APK: ${e.message}", e)
+        val errDetail = "${e.javaClass.simpleName}: ${e.message ?: "Sin mensaje"}"
+        Toast.makeText(activity, "Error instalando APK ($errDetail)", Toast.LENGTH_LONG).show()
       }
     }
   }
@@ -81,7 +103,7 @@ class MainActivity : TauriActivity() {
       }
     }
 
-    configureWebViewSettings()
+    startWebViewObserver()
     requestStoragePermissions()
   }
 
@@ -125,6 +147,12 @@ class MainActivity : TauriActivity() {
       val root = window.decorView as? ViewGroup
       root?.let { enableWebViewFileAccess(it) }
     } catch (e: Exception) {}
+  }
+
+  private fun startWebViewObserver() {
+    window.decorView.viewTreeObserver.addOnGlobalLayoutListener {
+      configureWebViewSettings()
+    }
   }
 
   private fun enableWebViewFileAccess(viewGroup: ViewGroup) {
