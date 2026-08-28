@@ -2,8 +2,6 @@ package com.anics.app
 
 import android.os.Bundle
 import android.os.Build
-import android.content.Intent
-import android.net.Uri
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -19,19 +17,31 @@ class MainActivity : TauriActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
 
-    // Extender la ventana de borde a borde y a través de notch/recortes de pantalla
+    // Pantalla completa inmersiva de borde a borde y a través de notch/recortes de pantalla
     WindowCompat.setDecorFitsSystemWindows(window, false)
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
       window.attributes.layoutInDisplayCutoutMode =
         WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
     }
 
-    // Ocultar barra superior (estado) y barra inferior (navegación/botones)
+    @Suppress("DEPRECATION")
+    window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+    @Suppress("DEPRECATION")
+    window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
     hideSystemBars()
 
-    // Habilitar acceso directo a archivos locales para el reproductor de video
-    configureWebViewSettings()
+    window.decorView.post {
+      hideSystemBars()
+    }
 
+    window.decorView.setOnSystemUiVisibilityChangeListener { visibility ->
+      if ((visibility and View.SYSTEM_UI_FLAG_FULLSCREEN) == 0) {
+        window.decorView.postDelayed({ hideSystemBars() }, 1500)
+      }
+    }
+
+    configureWebViewSettings()
     requestStoragePermissions()
   }
 
@@ -39,12 +49,14 @@ class MainActivity : TauriActivity() {
     super.onWindowFocusChanged(hasFocus)
     if (hasFocus) {
       hideSystemBars()
+      window.decorView.postDelayed({ hideSystemBars() }, 200)
     }
   }
 
   override fun onResume() {
     super.onResume()
     hideSystemBars()
+    window.decorView.postDelayed({ hideSystemBars() }, 200)
     configureWebViewSettings()
   }
 
@@ -56,18 +68,16 @@ class MainActivity : TauriActivity() {
       controller.hide(WindowInsetsCompat.Type.systemBars())
     } catch (e: Exception) {}
 
-    // Soporte para versiones anteriores de Android
+    // Flags inmersivos universales (compatibles con todos los fabricantes: Samsung, Xiaomi, Motorola, etc.)
     @Suppress("DEPRECATION")
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
-      window.decorView.systemUiVisibility = (
-        View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-        or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-        or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-        or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-        or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-        or View.SYSTEM_UI_FLAG_FULLSCREEN
-      )
-    }
+    window.decorView.systemUiVisibility = (
+      View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+      or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+      or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+      or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+      or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+      or View.SYSTEM_UI_FLAG_FULLSCREEN
+    )
   }
 
   private fun configureWebViewSettings() {
