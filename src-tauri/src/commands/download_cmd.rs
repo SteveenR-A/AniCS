@@ -1,3 +1,5 @@
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -5,8 +7,6 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::{mpsc, Mutex};
 use uuid::Uuid;
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
 
 use crate::core::*;
 use crate::downloader::HlsEngine;
@@ -80,12 +80,22 @@ pub async fn start_download(
 
     let safe_title: String = anime_title
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == ' ' || c == '-' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == ' ' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
 
     let anime_folder = base_dir.join(&safe_title);
     if let Err(e) = fs::create_dir_all(&anime_folder) {
-        log::warn!("No se pudo crear la carpeta {}: {}", anime_folder.display(), e);
+        log::warn!(
+            "No se pudo crear la carpeta {}: {}",
+            anime_folder.display(),
+            e
+        );
     }
 
     let is_mp4 = stream_url.contains(".mp4")
@@ -152,18 +162,31 @@ pub async fn start_download(
                 && !stream_url_clone.ends_with(".mkv");
 
             let actual_url = if is_mediafire_page {
-                resolve_mediafire_url(&stream_url_clone).await.unwrap_or_else(|| stream_url_clone.clone())
+                resolve_mediafire_url(&stream_url_clone)
+                    .await
+                    .unwrap_or_else(|| stream_url_clone.clone())
             } else {
                 stream_url_clone.clone()
             };
 
             // Descarga directa MP4 con DOWNLOAD_CLIENT
-            match download_direct_mp4(&dl_id_for_task, &actual_url, referer_clone.as_deref(), &output_path, &progress_tx).await {
+            match download_direct_mp4(
+                &dl_id_for_task,
+                &actual_url,
+                referer_clone.as_deref(),
+                &output_path,
+                &progress_tx,
+            )
+            .await
+            {
                 Ok(_) => {
-                    let _ = app_handle_finish.emit("download-completed", serde_json::json!({
-                        "id": dl_id_for_task,
-                        "path": output_path.to_string_lossy(),
-                    }));
+                    let _ = app_handle_finish.emit(
+                        "download-completed",
+                        serde_json::json!({
+                            "id": dl_id_for_task,
+                            "path": output_path.to_string_lossy(),
+                        }),
+                    );
                     let _ = progress_tx.send(DownloadProgress {
                         id: dl_id_for_task,
                         progress: 100.0,
@@ -197,36 +220,37 @@ pub async fn start_download(
             );
 
             match engine.parse_playlist().await {
-                Ok(playlist) => {
-                    match engine.download(&playlist).await {
-                        Ok(path) => {
-                            let _ = app_handle_finish.emit("download-completed", serde_json::json!({
+                Ok(playlist) => match engine.download(&playlist).await {
+                    Ok(path) => {
+                        let _ = app_handle_finish.emit(
+                            "download-completed",
+                            serde_json::json!({
                                 "id": dl_id_for_task,
                                 "path": path.to_string_lossy(),
-                            }));
-                            let _ = progress_tx.send(DownloadProgress {
-                                id: dl_id_for_task,
-                                progress: 100.0,
-                                speed_kbps: 0.0,
-                                downloaded_bytes: 0,
-                                total_bytes: None,
-                                status: DownloadStatus::Completed,
-                                error: None,
-                            });
-                        }
-                        Err(e) => {
-                            let _ = progress_tx.send(DownloadProgress {
-                                id: dl_id_for_task.clone(),
-                                progress: 0.0,
-                                speed_kbps: 0.0,
-                                downloaded_bytes: 0,
-                                total_bytes: None,
-                                status: DownloadStatus::Failed,
-                                error: Some(e.to_string()),
-                            });
-                        }
+                            }),
+                        );
+                        let _ = progress_tx.send(DownloadProgress {
+                            id: dl_id_for_task,
+                            progress: 100.0,
+                            speed_kbps: 0.0,
+                            downloaded_bytes: 0,
+                            total_bytes: None,
+                            status: DownloadStatus::Completed,
+                            error: None,
+                        });
                     }
-                }
+                    Err(e) => {
+                        let _ = progress_tx.send(DownloadProgress {
+                            id: dl_id_for_task.clone(),
+                            progress: 0.0,
+                            speed_kbps: 0.0,
+                            downloaded_bytes: 0,
+                            total_bytes: None,
+                            status: DownloadStatus::Failed,
+                            error: Some(e.to_string()),
+                        });
+                    }
+                },
                 Err(e) => {
                     let _ = progress_tx.send(DownloadProgress {
                         id: dl_id_for_task.clone(),
@@ -243,12 +267,15 @@ pub async fn start_download(
     });
 
     // Guardar handle para permitir cancelación
-    state.download_manager.tasks.lock().await.insert(dl_id_clone, handle);
+    state
+        .download_manager
+        .tasks
+        .lock()
+        .await
+        .insert(dl_id_clone, handle);
 
     Ok(download_id)
 }
-
-
 
 /// Resuelve un enlace de MediaFire obteniendo el URL de descarga directa del archivo
 async fn resolve_mediafire_url(page_url: &str) -> Option<String> {
@@ -256,7 +283,10 @@ async fn resolve_mediafire_url(page_url: &str) -> Option<String> {
 
     let html = crate::scrapers::HTTP_CLIENT
         .get(page_url)
-        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+        .header(
+            "User-Agent",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        )
         .send()
         .await
         .ok()?
@@ -296,11 +326,11 @@ async fn download_direct_mp4(
     output_path: &Path,
     progress_tx: &mpsc::UnboundedSender<DownloadProgress>,
 ) -> AppResult<()> {
+    use futures::StreamExt;
     use reqwest::header;
+    use std::time::Instant;
     use tokio::fs::File;
     use tokio::io::AsyncWriteExt;
-    use futures::StreamExt;
-    use std::time::Instant;
 
     let mut req = crate::scrapers::DOWNLOAD_CLIENT.get(url);
     if let Some(r) = referer {
@@ -315,7 +345,8 @@ async fn download_direct_mp4(
     }
 
     // Verificar que la respuesta sea un video, no HTML
-    let content_type = resp.headers()
+    let content_type = resp
+        .headers()
         .get("content-type")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("")
@@ -323,7 +354,7 @@ async fn download_direct_mp4(
 
     if content_type.contains("text/html") {
         return Err(AppError::Download(
-            "El servidor devolvió HTML en vez del archivo. La URL no es directa.".to_string()
+            "El servidor devolvió HTML en vez del archivo. La URL no es directa.".to_string(),
         ));
     }
 
@@ -351,7 +382,11 @@ async fn download_direct_mp4(
             };
 
             let progress = if let Some(tot) = total_bytes {
-                if tot > 0 { (downloaded as f32 / tot as f32) * 100.0 } else { 0.0 }
+                if tot > 0 {
+                    (downloaded as f32 / tot as f32) * 100.0
+                } else {
+                    0.0
+                }
             } else {
                 0.0
             };
@@ -472,8 +507,7 @@ pub fn get_default_download_dir(app_handle: AppHandle) -> Result<String, String>
 /// Guarda la carpeta de descargas personalizada en ajustes
 #[tauri::command]
 pub fn set_download_dir(folder_path: String) -> Result<(), String> {
-    storage::set_setting("download_dir", &folder_path)
-        .map_err(|e| e.to_string())
+    storage::set_setting("download_dir", &folder_path).map_err(|e| e.to_string())
 }
 
 /// Escanea la carpeta de descargas buscando subcarpetas de animes y agrupando sus episodios
@@ -503,9 +537,15 @@ pub async fn scan_local_downloads(
 
     for h in &history_list {
         let norm_path = h.episode_url.replace('\\', "/").to_lowercase();
-        path_history_map.entry(norm_path).or_insert(h.watch_progress);
+        path_history_map
+            .entry(norm_path)
+            .or_insert(h.watch_progress);
 
-        let key = format!("{}-{}", h.anime_title.to_lowercase().trim(), h.episode_number);
+        let key = format!(
+            "{}-{}",
+            h.anime_title.to_lowercase().trim(),
+            h.episode_number
+        );
         title_history_map.entry(key).or_insert(h.watch_progress);
     }
 
@@ -514,11 +554,21 @@ pub async fn scan_local_downloads(
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
-                let folder_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("Anime").to_string();
+                let folder_name = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("Anime")
+                    .to_string();
                 let clean_title = folder_name.replace('_', " ").trim().to_string();
 
                 let mut episodes = vec![];
-                scan_episodes_in_dir(&path, &clean_title, &mut episodes, &path_history_map, &title_history_map);
+                scan_episodes_in_dir(
+                    &path,
+                    &clean_title,
+                    &mut episodes,
+                    &path_history_map,
+                    &title_history_map,
+                );
 
                 if !episodes.is_empty() {
                     // Ordenar episodios ascendentemente por número
@@ -529,12 +579,18 @@ pub async fn scan_local_downloads(
                 // Archivo suelto en raíz
                 if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
                     if ["mp4", "mkv", "ts", "webm", "avi"].contains(&ext.to_lowercase().as_str()) {
-                        let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("video").to_string();
+                        let file_name = path
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("video")
+                            .to_string();
                         let (anime_title, ep_num) = parse_anime_from_filename(&file_name, None);
                         let ep_number = ep_num.unwrap_or(1);
 
                         let file_size = path.metadata().map(|m| m.len()).unwrap_or(0);
-                        let modified_at = path.metadata().ok()
+                        let modified_at = path
+                            .metadata()
+                            .ok()
                             .and_then(|m| m.modified().ok())
                             .and_then(|m| {
                                 let dt: DateTime<Utc> = m.into();
@@ -542,7 +598,13 @@ pub async fn scan_local_downloads(
                             })
                             .unwrap_or_else(|| "Reciente".to_string());
 
-                        let (progress, watch_status) = get_watch_info(&path, &anime_title, ep_number, &path_history_map, &title_history_map);
+                        let (progress, watch_status) = get_watch_info(
+                            &path,
+                            &anime_title,
+                            ep_number,
+                            &path_history_map,
+                            &title_history_map,
+                        );
 
                         let item = LocalEpisodeItem {
                             file_path: path.to_string_lossy().to_string(),
@@ -555,7 +617,9 @@ pub async fn scan_local_downloads(
                             watch_status,
                         };
 
-                        let entry = groups.entry(anime_title.clone()).or_insert_with(|| (base_dir.clone(), vec![]));
+                        let entry = groups
+                            .entry(anime_title.clone())
+                            .or_insert_with(|| (base_dir.clone(), vec![]));
                         entry.1.push(item);
                     }
                 }
@@ -572,10 +636,20 @@ pub async fn scan_local_downloads(
                 for entry in entries.flatten() {
                     let path = entry.path();
                     if path.is_dir() {
-                        let folder_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("Anime").to_string();
+                        let folder_name = path
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("Anime")
+                            .to_string();
                         let clean_title = folder_name.replace('_', " ").trim().to_string();
                         let mut episodes = vec![];
-                        scan_episodes_in_dir(&path, &clean_title, &mut episodes, &path_history_map, &title_history_map);
+                        scan_episodes_in_dir(
+                            &path,
+                            &clean_title,
+                            &mut episodes,
+                            &path_history_map,
+                            &title_history_map,
+                        );
                         if !episodes.is_empty() {
                             episodes.sort_by_key(|e| e.episode_number);
                             groups.insert(clean_title, (path, episodes));
@@ -601,17 +675,28 @@ pub async fn scan_local_downloads(
             folder_path.join("cover.jpg"),
             folder_path.join("poster.png"),
             folder_path.join("cover.png"),
-        ].iter().find(|p| {
-            p.exists() && p.metadata().map(|m| m.len() > 100).unwrap_or(false)
-        }).map(|p| p.to_string_lossy().to_string());
+        ]
+        .iter()
+        .find(|p| p.exists() && p.metadata().map(|m| m.len() > 100).unwrap_or(false))
+        .map(|p| p.to_string_lossy().to_string());
 
         // 2. Buscar en historial o favoritos de SQLite
-        let db_cover = history_list.iter()
-            .find(|h| h.anime_title.eq_ignore_ascii_case(&anime_title) || h.anime_title.to_lowercase().contains(&anime_title.to_lowercase()))
+        let db_cover = history_list
+            .iter()
+            .find(|h| {
+                h.anime_title.eq_ignore_ascii_case(&anime_title)
+                    || h.anime_title
+                        .to_lowercase()
+                        .contains(&anime_title.to_lowercase())
+            })
             .map(|h| h.thumbnail_url.clone())
             .or_else(|| {
-                favorites_list.iter()
-                    .find(|f| f.title.eq_ignore_ascii_case(&anime_title) || f.title.to_lowercase().contains(&anime_title.to_lowercase()))
+                favorites_list
+                    .iter()
+                    .find(|f| {
+                        f.title.eq_ignore_ascii_case(&anime_title)
+                            || f.title.to_lowercase().contains(&anime_title.to_lowercase())
+                    })
                     .map(|f| f.thumbnail_url.clone())
             });
 
@@ -619,14 +704,23 @@ pub async fn scan_local_downloads(
         let slug = anime_title
             .to_lowercase()
             .chars()
-            .map(|c| if c.is_alphanumeric() || c == '-' || c == ' ' { c } else { ' ' })
+            .map(|c| {
+                if c.is_alphanumeric() || c == '-' || c == ' ' {
+                    c
+                } else {
+                    ' '
+                }
+            })
             .collect::<String>()
             .split_whitespace()
             .collect::<Vec<_>>()
             .join("-");
 
         let fallback_cover = if !slug.is_empty() {
-            Some(format!("https://cdn.jkdesa.com/assets/images/animes/image/{}.jpg", slug))
+            Some(format!(
+                "https://cdn.jkdesa.com/assets/images/animes/image/{}.jpg",
+                slug
+            ))
         } else {
             None
         };
@@ -701,8 +795,7 @@ pub async fn save_local_anime_cover(
         .map_err(|e| e.to_string())?;
 
     // 2. Localizar el archivo en el directorio de caché de imágenes
-    let cache_dir = crate::storage::get_image_cache_dir(&app_handle)
-        .map_err(|e| e.to_string())?;
+    let cache_dir = crate::storage::get_image_cache_dir(&app_handle).map_err(|e| e.to_string())?;
     let filename = crate::storage::hash_image_url(&cover_url);
     let cached_file = cache_dir.join(&filename);
 
@@ -719,7 +812,9 @@ pub async fn save_local_anime_cover(
 
     // 4. Si ya existe un poster válido e idéntico (> 100 bytes y mismo tamaño), no re-copiar
     if poster_path.exists() {
-        if let (Ok(src_meta), Ok(dst_meta)) = (fs::metadata(&cached_file), fs::metadata(&poster_path)) {
+        if let (Ok(src_meta), Ok(dst_meta)) =
+            (fs::metadata(&cached_file), fs::metadata(&poster_path))
+        {
             if src_meta.len() == dst_meta.len() && dst_meta.len() > 100 {
                 return Ok(poster_path.to_string_lossy().to_string());
             }
@@ -727,9 +822,7 @@ pub async fn save_local_anime_cover(
     }
 
     // 5. Copiar desde la caché al directorio del anime (sobrescribe archivos dañados/vacíos)
-    fs::copy(&cached_file, &poster_path)
-        .map_err(|e| format!("Error copiando portada: {}", e))?;
-
+    fs::copy(&cached_file, &poster_path).map_err(|e| format!("Error copiando portada: {}", e))?;
 
     Ok(poster_path.to_string_lossy().to_string())
 }
@@ -737,9 +830,9 @@ pub async fn save_local_anime_cover(
 /// Obtiene estadísticas del tamaño de la caché de imágenes
 #[tauri::command]
 pub fn get_cache_stats(app_handle: AppHandle) -> Result<serde_json::Value, String> {
-    let (total_bytes, file_count) = crate::storage::get_cache_stats(&app_handle)
-        .map_err(|e| e.to_string())?;
-    
+    let (total_bytes, file_count) =
+        crate::storage::get_cache_stats(&app_handle).map_err(|e| e.to_string())?;
+
     Ok(serde_json::json!({
         "totalBytes": total_bytes,
         "totalFormatted": format_bytes(total_bytes),
@@ -750,9 +843,8 @@ pub fn get_cache_stats(app_handle: AppHandle) -> Result<serde_json::Value, Strin
 /// Limpia la caché de imágenes en disco y memoria
 #[tauri::command]
 pub fn clear_image_cache(app_handle: AppHandle) -> Result<serde_json::Value, String> {
-    let freed = crate::storage::clear_image_cache(&app_handle)
-        .map_err(|e| e.to_string())?;
-    
+    let freed = crate::storage::clear_image_cache(&app_handle).map_err(|e| e.to_string())?;
+
     Ok(serde_json::json!({
         "freedBytes": freed,
         "freedFormatted": format_bytes(freed),
@@ -768,7 +860,6 @@ pub async fn preload_images_batch(
     Ok(crate::storage::get_cached_images_batch(urls, &app_handle).await)
 }
 
-
 fn get_watch_info(
     file_path: &Path,
     anime_title: &str,
@@ -776,10 +867,14 @@ fn get_watch_info(
     path_history_map: &HashMap<String, f64>,
     title_history_map: &HashMap<String, f64>,
 ) -> (f64, String) {
-    let norm_path = file_path.to_string_lossy().replace('\\', "/").to_lowercase();
+    let norm_path = file_path
+        .to_string_lossy()
+        .replace('\\', "/")
+        .to_lowercase();
     let title_key = format!("{}-{}", anime_title.to_lowercase().trim(), ep_number);
 
-    let progress = path_history_map.get(&norm_path)
+    let progress = path_history_map
+        .get(&norm_path)
         .or_else(|| title_history_map.get(&title_key))
         .cloned()
         .unwrap_or(0.0);
@@ -790,7 +885,8 @@ fn get_watch_info(
         "in_progress"
     } else {
         "unseen"
-    }.to_string();
+    }
+    .to_string();
 
     (progress, watch_status)
 }
@@ -811,17 +907,29 @@ fn scan_episodes_in_dir(
                         if let Ok(meta) = entry.metadata() {
                             let file_size = meta.len();
                             if file_size > 10240 {
-                                let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("video").to_string();
+                                let file_name = path
+                                    .file_name()
+                                    .and_then(|n| n.to_str())
+                                    .unwrap_or("video")
+                                    .to_string();
                                 let ep_number = extract_episode_num(&file_name).unwrap_or(1);
 
-                                let modified_at = meta.modified().ok()
+                                let modified_at = meta
+                                    .modified()
+                                    .ok()
                                     .and_then(|m| {
                                         let dt: DateTime<Utc> = m.into();
                                         Some(dt.format("%Y-%m-%d %H:%M").to_string())
                                     })
                                     .unwrap_or_else(|| "Reciente".to_string());
 
-                                let (progress, watch_status) = get_watch_info(&path, anime_title, ep_number, path_history_map, title_history_map);
+                                let (progress, watch_status) = get_watch_info(
+                                    &path,
+                                    anime_title,
+                                    ep_number,
+                                    path_history_map,
+                                    title_history_map,
+                                );
 
                                 episodes.push(LocalEpisodeItem {
                                     file_path: path.to_string_lossy().to_string(),
@@ -853,18 +961,35 @@ fn parse_anime_from_filename(filename: &str, parent_dir: Option<&Path>) -> (Stri
         }
     }
 
-    let stem = Path::new(filename).file_stem().and_then(|s| s.to_str()).unwrap_or(filename);
+    let stem = Path::new(filename)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(filename);
     let ep_num = extract_episode_num(stem);
 
     let mut clean = stem.replace('_', " ");
-    for tag in &["[1080p]", "[720p]", "[480p]", "(Sub Español)", "(Sub)", "[HD]", ".mp4", ".ts", ".mkv"] {
+    for tag in &[
+        "[1080p]",
+        "[720p]",
+        "[480p]",
+        "(Sub Español)",
+        "(Sub)",
+        "[HD]",
+        ".mp4",
+        ".ts",
+        ".mkv",
+    ] {
         clean = clean.replace(tag, "");
     }
-    
+
     if let Some(pos) = clean.to_lowercase().find("ep") {
-        clean = clean[..pos].trim_end_matches(&['-', ' ', '_'][..]).to_string();
+        clean = clean[..pos]
+            .trim_end_matches(&['-', ' ', '_'][..])
+            .to_string();
     } else if let Some(pos) = clean.to_lowercase().find("cap") {
-        clean = clean[..pos].trim_end_matches(&['-', ' ', '_'][..]).to_string();
+        clean = clean[..pos]
+            .trim_end_matches(&['-', ' ', '_'][..])
+            .to_string();
     }
 
     let title = if clean.trim().is_empty() {
@@ -877,8 +1002,10 @@ fn parse_anime_from_filename(filename: &str, parent_dir: Option<&Path>) -> (Stri
 }
 
 fn extract_episode_num(text: &str) -> Option<u32> {
-    let re = regex::Regex::new(r#"(?:ep|cap|episodio|\b)(\d{1,4})\b"#).ok()?;
-    for cap in re.captures_iter(&text.to_lowercase()) {
+    static RE: once_cell::sync::Lazy<regex::Regex> = once_cell::sync::Lazy::new(|| {
+        regex::Regex::new(r#"(?:ep|cap|episodio|\b)(\d{1,4})\b"#).unwrap()
+    });
+    for cap in RE.captures_iter(&text.to_lowercase()) {
         if let Some(m) = cap.get(1) {
             if let Ok(num) = m.as_str().parse::<u32>() {
                 return Some(num);
@@ -889,7 +1016,9 @@ fn extract_episode_num(text: &str) -> Option<u32> {
 }
 
 fn format_bytes(bytes: u64) -> String {
-    if bytes == 0 { return "0 B".to_string(); }
+    if bytes == 0 {
+        return "0 B".to_string();
+    }
     let k = 1024f64;
     let sizes = ["B", "KB", "MB", "GB", "TB"];
     let i = (bytes as f64).log(k).floor() as usize;
@@ -904,14 +1033,17 @@ pub async fn download_and_run_installer(
     filename: String,
     app_handle: AppHandle,
 ) -> Result<String, String> {
-    use tauri::Emitter;
     use futures::StreamExt;
+    use tauri::Emitter;
     use tokio::io::AsyncWriteExt;
 
     let dest_path = {
         #[cfg(target_os = "android")]
         {
-            let cache_dir = app_handle.path().app_cache_dir().unwrap_or_else(|_| PathBuf::from("/data/user/0/com.anics.app/cache"));
+            let cache_dir = app_handle
+                .path()
+                .app_cache_dir()
+                .unwrap_or_else(|_| PathBuf::from("/data/user/0/com.anics.app/cache"));
             let _ = fs::create_dir_all(&cache_dir);
             cache_dir.join(&filename)
         }
@@ -931,7 +1063,10 @@ pub async fn download_and_run_installer(
         .map_err(|e| format!("Error conectando con servidor de actualización: {}", e))?;
 
     if !response.status().is_success() {
-        return Err(format!("Error HTTP al descargar instalador: {}", response.status()));
+        return Err(format!(
+            "Error HTTP al descargar instalador: {}",
+            response.status()
+        ));
     }
 
     let total_bytes = response.content_length().unwrap_or(0);
@@ -955,12 +1090,15 @@ pub async fn download_and_run_installer(
             0.0
         };
 
-        let _ = app_handle.emit("update-download-progress", serde_json::json!({
-            "downloaded": downloaded,
-            "total": total_bytes,
-            "progress": progress,
-            "filename": filename,
-        }));
+        let _ = app_handle.emit(
+            "update-download-progress",
+            serde_json::json!({
+                "downloaded": downloaded,
+                "total": total_bytes,
+                "progress": progress,
+                "filename": filename,
+            }),
+        );
     }
 
     file.flush().await.map_err(|e| e.to_string())?;
@@ -1007,4 +1145,3 @@ pub async fn download_and_run_installer(
 pub fn get_local_media_url(file_path: String) -> String {
     crate::downloader::media_server::get_media_stream_url(&file_path)
 }
-
