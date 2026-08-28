@@ -1,3 +1,7 @@
+---
+trigger: always_on
+---
+
 # Reglas y Estándares Multiplataforma (PC vs Móvil) — AniCS
 
 Este documento establece las reglas arquitectónicas y directrices obligatorias para asegurar que los cambios y soluciones a problemas en la versión móvil (Android) no afecten negativamente a la versión de escritorio (Windows/PC), y viceversa.

@@ -223,8 +223,12 @@ fn extract_query_param(uri: &str, key: &str) -> Option<String> {
 }
 
 fn parse_range(range_str: &str, total_size: u64) -> Option<(u64, u64)> {
-    let prefix = "bytes=";
-    let s = range_str.strip_prefix(prefix)?.trim();
+    let trimmed = range_str.trim();
+    let s = if trimmed.to_ascii_lowercase().starts_with("bytes=") {
+        &trimmed[6..].trim()
+    } else {
+        trimmed
+    };
     let parts: Vec<&str> = s.split('-').collect();
     if parts.len() != 2 {
         return None;

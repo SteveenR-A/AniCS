@@ -14,6 +14,7 @@ import { usePlayerStore } from '@/stores/usePlayerStore';
 import { useAnimeStore } from '@/stores/useAnimeStore';
 import { resolveStream, getServers, getDetails } from '@/services/animeService';
 import { upsertHistory, getEpisodeProgress } from '@/services/storageService';
+import { getLocalMediaUrl } from '@/services/downloadService';
 import { useResponsive } from '@/hooks/useResponsive';
 import type { VideoServer } from '@/types';
 
@@ -478,6 +479,24 @@ export function PlayerPage() {
     setPlaybackTime(0);
     setDuration(0);
     setIsResolving(true);
+
+    // Si es un anime descargado localmente, resolver a través del servidor local de streaming
+    if (currentAnime.source === 'local' || (!ep.url.startsWith('http://') && !ep.url.startsWith('https://'))) {
+      try {
+        const streamUrl = await getLocalMediaUrl(ep.url);
+        const isTs = ep.url.toLowerCase().endsWith('.ts');
+        setResolvedMedia({
+          directUrl: streamUrl,
+          mediaType: isTs ? 'hls' : 'mp4',
+          qualities: [],
+        });
+      } catch (err) {
+        console.error('Failed to load local episode:', err);
+      } finally {
+        setIsResolving(false);
+      }
+      return;
+    }
 
     try {
       const srvs = await getServers(ep.url, querySource);
