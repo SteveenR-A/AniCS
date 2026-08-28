@@ -631,11 +631,6 @@ export function MobileSettingsPage() {
                           setDownloadStatusText('¡Descargado! Abriendo instalador...');
                           try {
                             await openPath(savedPath);
-                            setTimeout(async () => {
-                              try {
-                                await invoke('exit_app');
-                              } catch {}
-                            }, 1200);
                           } catch (openErr) {
                             console.warn('Error abriendo paquete con openPath', openErr);
                           }
