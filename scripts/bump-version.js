@@ -91,8 +91,9 @@ fs.writeFileSync(changelogPath, JSON.stringify(changelog, null, 2) + '\n', 'utf8
 console.log('  ✓ src/data/changelog.json actualizado');
 
 console.log(`\n\x1b[32m%s\x1b[0m`, `✅ Versión sincronizada exitosamente a ${targetVersion}!`);
-console.log(`\x1b[33m%s\x1b[0m`, `Para publicar en GitHub y crear el instalador MSI y APK:`);
+console.log(`\x1b[33m%s\x1b[0m`, `Para publicar en GitHub y crear el instalador EXE y APK:`);
 console.log(`  git add .`);
 console.log(`  git commit -m "chore: release v${targetVersion}"`);
 console.log(`  git tag v${targetVersion}`);
 console.log(`  git push origin main --tags`);
+

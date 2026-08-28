@@ -23,7 +23,7 @@
 - **Reproductor Adaptativo Integrado:** Soporte HLS (`Hls.js`), compensación para cámaras/notch en Android, salto de intro (+85s), selector de servidores en caliente y atajos de teclado completos.
 - **Base de Datos SQLite Embebida (WAL):** Historial de reproducción, favoritos y configuración almacenados de forma local y persistente.
 - **Diseño Limpio:** Interfaz oscura moderna con iconos vectoriales de Lucide React y los recursos gráficos oficiales.
-- **CI/CD Automatizado:** GitHub Actions compila automáticamente el instalador de Windows (`.msi`, `.exe`) y el paquete de Android (`.apk`).
+- **CI/CD Automatizado:** GitHub Actions compila automáticamente el instalador de Windows (`.exe`) y el paquete de Android (`.apk`).
 
 ---
 
@@ -32,7 +32,7 @@
 ```
 AniCS/
 ├── .github/workflows/
-│   └── release.yml            # CI/CD: Compilación de MSI, EXE y APK en GitHub
+│   └── release.yml            # CI/CD: Compilación de EXE y APK en GitHub
 ├── scripts/
 │   └── bump-version.js        # Script de sincronización automática de versiones
 ├── src/                       # Frontend (React + TS + TailwindCSS v4)
@@ -76,7 +76,7 @@ Para sincronizar la versión en todos los archivos (`package.json`, `Cargo.toml`
 npm run bump -- 0.1.1 "Mejoras de estabilidad" "Arreglo en selector de servidor|Optimización de descargas HLS"
 ```
 
-Luego publica en GitHub para que el flujo de CI/CD cree automáticamente el MSI y APK:
+Luego publica en GitHub para que el flujo de CI/CD cree automáticamente el instalador EXE y APK:
 ```bash
 git add .
 git commit -m "chore: release v0.1.1"

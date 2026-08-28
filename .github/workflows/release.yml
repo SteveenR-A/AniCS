@@ -209,16 +209,9 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           name: 'AniCS ${{ github.ref_name }}'
-          body: |
-            ## Novedades de AniCS ${{ github.ref_name }}
-            
-            Consulta el archivo `CHANGELOG.md` para ver el detalle de todos los cambios de esta versión.
-            
-            ### Descargas Disponibles:
-            - **Windows (Instalador MSI):** `AniCS.msi`
-            - **Windows (Ejecutable Setup):** `AniCS-setup.exe`
-            - **Android (APK Firmado):** `AniCS.apk`
+          body_path: CHANGELOG.md
           files: |
             final-assets/*
           draft: false
           prerelease: false
+
