@@ -913,14 +913,38 @@ pub async fn download_and_run_installer(
     }
 
     file.flush().await.map_err(|e| e.to_string())?;
+    // Liberar explícitamente el handle de archivo en el SO antes de ejecutar el instalador
+    drop(file);
 
     // Ejecutar el instalador en Windows
     #[cfg(target_os = "windows")]
     {
         if filename.ends_with(".exe") {
-            let _ = std::process::Command::new(&dest_path)
-                .spawn()
-                .map_err(|e| format!("Error ejecutando instalador: {}", e))?;
+            // Dar tiempo al sistema operativo y al antivirus para desbloquear el archivo recién escrito
+            let mut launched = false;
+            let mut last_err = None;
+
+            for attempt in 0..5 {
+                if attempt > 0 {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+                }
+
+                match std::process::Command::new(&dest_path).spawn() {
+                    Ok(_) => {
+                        launched = true;
+                        break;
+                    }
+                    Err(e) => {
+                        last_err = Some(e);
+                    }
+                }
+            }
+
+            if !launched {
+                if let Some(err) = last_err {
+                    return Err(format!("Error ejecutando instalador: {}", err));
+                }
+            }
         }
     }
 
