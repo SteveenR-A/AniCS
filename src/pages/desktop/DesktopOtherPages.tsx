@@ -740,6 +740,7 @@ export function DesktopDownloadsPage() {
           ) : (
             taskList.map((task) => {
               const isDownloading = task.status === 'downloading';
+              const isQueued = task.status === 'queued';
               const isCompleted = task.status === 'completed';
               const isCanceled = task.status === 'canceled';
               const isError = task.status === 'failed';
@@ -748,13 +749,16 @@ export function DesktopDownloadsPage() {
                 <div
                   key={task.id}
                   style={{
-                    background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)',
-                    padding: '18px 24px', border: '1px solid var(--border-subtle)',
-                    display: 'flex', flexDirection: 'column', gap: 14,
-                    boxShadow: 'var(--shadow-card)',
+                    background: 'var(--bg-surface)',
+                    borderRadius: 'var(--radius-lg)',
+                    padding: 20,
+                    border: '1px solid var(--border-color)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 14,
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div>
                       <h4 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>
                         {task.animeTitle} {task.episodeNumber > 0 && `· Ep. ${task.episodeNumber}`}
@@ -762,11 +766,19 @@ export function DesktopDownloadsPage() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 6 }}>
                         <span style={{
                           fontSize: 12, fontWeight: 800, textTransform: 'uppercase',
-                          color: isCompleted ? 'var(--accent-success)' : isDownloading ? 'var(--accent-secondary)' : 'var(--text-muted)',
+                          color: isCompleted
+                            ? 'var(--accent-success)'
+                            : isDownloading
+                              ? 'var(--accent-secondary)'
+                              : isQueued
+                                ? '#f59e0b'
+                                : isCanceled
+                                  ? 'var(--text-muted)'
+                                  : 'var(--accent-error)',
                         }}>
-                          {isCompleted ? 'Completado' : isDownloading ? 'Descargando' : isCanceled ? 'Cancelado' : 'Error'}
+                          {isCompleted ? 'Completado' : isDownloading ? 'Descargando' : isQueued ? 'En Cola' : isCanceled ? 'Cancelado' : 'Error'}
                         </span>
-                        {isDownloading && (
+                        {isDownloading && task.speedKbps > 0 && (
                           <span style={{ fontSize: 13, color: 'var(--text-secondary)', fontWeight: 600 }}>
                             • {formatSpeed(task.speedKbps)}
                           </span>
@@ -775,7 +787,7 @@ export function DesktopDownloadsPage() {
                     </div>
 
                     <div>
-                      {isDownloading ? (
+                      {isDownloading || isQueued ? (
                         <button
                           onClick={() => cancelTask(task.id)}
                           style={{
@@ -797,12 +809,24 @@ export function DesktopDownloadsPage() {
                     </div>
                   </div>
 
+                  {isQueued && (
+                    <div style={{ fontSize: 12, color: '#f59e0b', background: 'rgba(245, 158, 11, 0.1)', padding: '8px 12px', borderRadius: 'var(--radius-sm)' }}>
+                      ⏳ En cola de espera (máx. 2 descargas simultáneas). Iniciará automáticamente...
+                    </div>
+                  )}
+
                   {isDownloading && (
                     <div>
                       {(() => {
-                        const pct = task.progress > 1 ? Math.min(100, Math.round(task.progress)) : Math.min(100, Math.round(task.progress * 100));
-                        const dlMB = (task.downloadedBytes / (1024 * 1024)).toFixed(1);
-                        const totalMB = task.totalBytes ? (task.totalBytes / (1024 * 1024)).toFixed(1) : null;
+                        const totalBytes = task.totalBytes;
+                        const downloadedBytes = task.downloadedBytes;
+                        // Cálculo 100% exacto sincronizado con los bytes reales
+                        const pct = (totalBytes && totalBytes > 0)
+                          ? Math.min(100, Math.max(0, Math.round((downloadedBytes / totalBytes) * 100)))
+                          : Math.min(100, Math.max(0, Math.round(task.progress)));
+
+                        const dlMB = (downloadedBytes / (1024 * 1024)).toFixed(1);
+                        const totalMB = totalBytes ? (totalBytes / (1024 * 1024)).toFixed(1) : null;
                         return (
                           <>
                             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>

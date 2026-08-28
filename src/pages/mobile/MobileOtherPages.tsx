@@ -547,31 +547,64 @@ export function MobileDownloadsPage() {
           ) : (
             taskList.map((task) => {
               const isDownloading = task.status === 'downloading';
+              const isQueued = task.status === 'queued';
+              const isCompleted = task.status === 'completed';
+              const isCanceled = task.status === 'canceled';
+              const isError = task.status === 'failed';
               return (
                 <div
                   key={task.id}
                   style={{
-                    background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)',
-                    padding: '12px 14px', border: '1px solid var(--border-subtle)',
+                    background: 'var(--bg-surface)',
+                    borderRadius: 'var(--radius-md)',
+                    padding: 12,
+                    border: '1px solid var(--border-color)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 8,
                   }}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                    <div>
-                      <h5 style={{ fontSize: 13, fontWeight: 700, margin: 0 }}>
-                        {task.animeTitle} Ep. {task.episodeNumber}
-                      </h5>
-                      <span style={{ fontSize: 11, color: isDownloading ? 'var(--accent-secondary)' : 'var(--text-muted)' }}>
-                        {isDownloading ? `${formatSpeed(task.speedKbps)}` : task.status}
-                      </span>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {task.animeTitle} {task.episodeNumber > 0 && `· Ep. ${task.episodeNumber}`}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                        <span style={{
+                          fontSize: 10,
+                          fontWeight: 800,
+                          textTransform: 'uppercase',
+                          color: isCompleted
+                            ? 'var(--accent-success)'
+                            : isDownloading
+                              ? 'var(--accent-primary)'
+                              : isQueued
+                                ? '#f59e0b'
+                                : isCanceled
+                                  ? 'var(--text-muted)'
+                                  : 'var(--accent-error)',
+                        }}>
+                          {isCompleted ? 'Completado' : isDownloading ? 'Descargando' : isQueued ? 'En Cola' : isCanceled ? 'Cancelado' : 'Error'}
+                        </span>
+                        {isDownloading && task.speedKbps > 0 && (
+                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                            • {formatSpeed(task.speedKbps)}
+                          </span>
+                        )}
+                      </div>
                     </div>
 
-                    {isDownloading ? (
+                    {isDownloading || isQueued ? (
                       <button
                         onClick={() => cancelTask(task.id)}
                         style={{
-                          background: 'rgba(239, 68, 68, 0.15)', border: 'none',
-                          borderRadius: 'var(--radius-sm)', padding: '4px 8px',
-                          color: 'var(--accent-error)', fontSize: 11, fontWeight: 600,
+                          background: 'rgba(239, 68, 68, 0.15)',
+                          border: 'none',
+                          borderRadius: 'var(--radius-sm)',
+                          padding: '4px 10px',
+                          color: 'var(--accent-error)',
+                          fontSize: 11,
+                          fontWeight: 600,
                         }}
                       >
                         Cancelar
@@ -586,12 +619,23 @@ export function MobileDownloadsPage() {
                     )}
                   </div>
 
+                  {isQueued && (
+                    <div style={{ fontSize: 11, color: '#f59e0b', background: 'rgba(245, 158, 11, 0.1)', padding: '6px 10px', borderRadius: 'var(--radius-sm)' }}>
+                      ⏳ En cola (máx. 2 simultáneas)...
+                    </div>
+                  )}
+
                   {isDownloading && (
                     <div>
                       {(() => {
-                        const pct = task.progress > 1 ? Math.min(100, Math.round(task.progress)) : Math.min(100, Math.round(task.progress * 100));
-                        const dlMB = (task.downloadedBytes / (1024 * 1024)).toFixed(1);
-                        const totalMB = task.totalBytes ? (task.totalBytes / (1024 * 1024)).toFixed(1) : null;
+                        const totalBytes = task.totalBytes;
+                        const downloadedBytes = task.downloadedBytes;
+                        const pct = (totalBytes && totalBytes > 0)
+                          ? Math.min(100, Math.max(0, Math.round((downloadedBytes / totalBytes) * 100)))
+                          : Math.min(100, Math.max(0, Math.round(task.progress)));
+
+                        const dlMB = (downloadedBytes / (1024 * 1024)).toFixed(1);
+                        const totalMB = totalBytes ? (totalBytes / (1024 * 1024)).toFixed(1) : null;
                         return (
                           <>
                             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>

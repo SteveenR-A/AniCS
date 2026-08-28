@@ -17,12 +17,14 @@ type DownloadMap = Arc<Mutex<HashMap<String, tokio::task::JoinHandle<()>>>>;
 
 pub struct DownloadManager {
     pub tasks: DownloadMap,
+    pub semaphore: Arc<tokio::sync::Semaphore>,
 }
 
 impl DownloadManager {
     pub fn new() -> Self {
         Self {
             tasks: Arc::new(Mutex::new(HashMap::new())),
+            semaphore: Arc::new(tokio::sync::Semaphore::new(2)), // Máximo 2 descargas concurrentes activas
         }
     }
 }
@@ -106,8 +108,37 @@ pub async fn start_download(
     let app_handle_finish = app_handle.clone();
     let stream_url_clone = stream_url.clone();
     let referer_clone = referer.clone();
+    let semaphore_clone = state.download_manager.semaphore.clone();
 
     let handle = tokio::spawn(async move {
+        // 1. Notificar inmediatamente que la tarea está en cola
+        let _ = progress_tx.send(DownloadProgress {
+            id: dl_id_for_task.clone(),
+            progress: 0.0,
+            speed_kbps: 0.0,
+            downloaded_bytes: 0,
+            total_bytes: None,
+            status: DownloadStatus::Queued,
+            error: None,
+        });
+
+        // 2. Esperar turno en el semáforo (máx 2 activas simultáneas)
+        let _permit = match semaphore_clone.acquire().await {
+            Ok(p) => p,
+            Err(_) => return,
+        };
+
+        // 3. Notificar que comienza a descargar
+        let _ = progress_tx.send(DownloadProgress {
+            id: dl_id_for_task.clone(),
+            progress: 0.0,
+            speed_kbps: 0.0,
+            downloaded_bytes: 0,
+            total_bytes: None,
+            status: DownloadStatus::Downloading,
+            error: None,
+        });
+
         if is_mp4 {
             // Si es un enlace de MediaFire, resolver la página HTML primero para obtener el link directo
             let actual_url = if stream_url_clone.contains("mediafire.com") {
