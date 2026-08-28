@@ -79,6 +79,7 @@ pub fn run() {
             commands::clear_image_cache,
             commands::preload_images_batch,
             commands::save_local_anime_cover,
+            commands::download_and_run_installer,
             // Almacenamiento e Historial
             commands::upsert_history,
             commands::get_history,

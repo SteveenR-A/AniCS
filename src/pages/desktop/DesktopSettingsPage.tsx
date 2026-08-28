@@ -5,6 +5,7 @@ import {
   FolderOpen, AlertCircle, Info, ExternalLink, Sparkles, ShieldCheck, Palette, HardDrive, Trash2, Database, Activity
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { ChangelogModal } from '@/components/ChangelogModal';
@@ -48,6 +49,11 @@ export function DesktopSettingsPage() {
   const [updateInfo, setUpdateInfo] = useState<GitHubRelease | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
 
+  // Descargador de actualización interna en segundo plano estilo VSCode
+  const [downloadingAsset, setDownloadingAsset] = useState<string | null>(null);
+  const [downloadProgress, setDownloadProgress] = useState<number>(0);
+  const [downloadStatusText, setDownloadStatusText] = useState<string>('');
+
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
   const [showChangelog, setShowChangelog] = useState(false);
 
@@ -59,6 +65,23 @@ export function DesktopSettingsPage() {
   const [dbStats, setDbStats] = useState<DatabaseStats | null>(null);
   const [isOptimizingDb, setIsOptimizingDb] = useState(false);
   const [isResettingDb, setIsResettingDb] = useState(false);
+
+  useEffect(() => {
+    const unlisten = listen('update-download-progress', (event: any) => {
+      const payload = event.payload;
+      if (payload) {
+        setDownloadProgress(payload.progress);
+        const downloadedMb = (payload.downloaded / (1024 * 1024)).toFixed(1);
+        const totalMb = payload.total > 0 ? (payload.total / (1024 * 1024)).toFixed(1) : '?';
+        setDownloadStatusText(`${payload.progress.toFixed(0)}% (${downloadedMb} MB / ${totalMb} MB)`);
+      }
+    });
+
+    return () => {
+      unlisten.then(f => f());
+    };
+  }, []);
+
 
   const loadCache = async () => {
     try {
@@ -749,12 +772,21 @@ export function DesktopSettingsPage() {
           {updateInfo && (
             <div style={{
               background: 'var(--bg-elevated)', borderRadius: 'var(--radius-md)',
-              border: '1px solid var(--border-subtle)', padding: 16,
+              border: '1px solid var(--border-subtle)', padding: 18,
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-                <span style={{ fontWeight: 700, fontSize: 15 }}>
-                  {updateInfo.name || updateInfo.tag_name}
-                </span>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontWeight: 800, fontSize: 16, color: 'var(--text-primary)' }}>
+                    {updateInfo.name || updateInfo.tag_name}
+                  </span>
+                  <span style={{
+                    fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 'var(--radius-full)',
+                    background: isNewVersionAvailable(updateInfo.tag_name) ? 'rgba(16, 185, 129, 0.15)' : 'rgba(99, 102, 241, 0.15)',
+                    color: isNewVersionAvailable(updateInfo.tag_name) ? 'var(--accent-success)' : 'var(--accent-primary)',
+                  }}>
+                    {isNewVersionAvailable(updateInfo.tag_name) ? 'Nueva versión disponible' : 'Misma versión (Reinstalador)'}
+                  </span>
+                </div>
                 <button
                   onClick={() => openUrl(updateInfo.html_url)}
                   style={{
@@ -766,25 +798,78 @@ export function DesktopSettingsPage() {
                 </button>
               </div>
 
+              {/* Notas del parche del release */}
+              {updateInfo.body && (
+                <div style={{
+                  background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-md)', padding: '12px 14px', marginBottom: 14,
+                  maxHeight: 180, overflowY: 'auto', fontSize: 12, lineHeight: 1.6,
+                  color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', fontFamily: 'inherit',
+                }}>
+                  <div style={{ fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Sparkles size={14} color="var(--accent-primary)" /> Novedades y cambios de esta versión:
+                  </div>
+                  {updateInfo.body}
+                </div>
+              )}
+
+              {/* Descarga interna en segundo plano estilo VSCode */}
+              {downloadingAsset && (
+                <div style={{
+                  background: 'var(--bg-surface)', border: '1px solid var(--border-accent)',
+                  borderRadius: 'var(--radius-md)', padding: 14, marginBottom: 14,
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>
+                    <span style={{ color: 'var(--text-primary)' }}>Descargando actualización en segundo plano...</span>
+                    <span style={{ color: 'var(--accent-primary)' }}>{downloadStatusText}</span>
+                  </div>
+                  <div style={{ width: '100%', height: 6, background: 'var(--bg-elevated)', borderRadius: 3, overflow: 'hidden' }}>
+                    <div style={{
+                      width: `${downloadProgress}%`, height: '100%',
+                      background: 'linear-gradient(90deg, var(--accent-primary), var(--accent-secondary))',
+                      transition: 'width 0.2s ease',
+                    }} />
+                  </div>
+                </div>
+              )}
+
+              {/* Solo mostrar el instalador de Windows (.exe) */}
               {updateInfo.assets.length > 0 && (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 12 }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
                   {updateInfo.assets
-                    .filter(asset => !asset.name.endsWith('.msi'))
+                    .filter(asset => asset.name.toLowerCase().endsWith('.exe'))
                     .map((asset) => (
                       <button
                         key={asset.name}
-                        onClick={() => openUrl(asset.browser_download_url)}
+                        disabled={Boolean(downloadingAsset)}
+                        onClick={async () => {
+                          setDownloadingAsset(asset.name);
+                          setDownloadProgress(0);
+                          setDownloadStatusText('Iniciando descarga interna...');
+                          try {
+                            await invoke('download_and_run_installer', {
+                              url: asset.browser_download_url,
+                              filename: asset.name,
+                            });
+                            setDownloadStatusText('¡Instalador iniciado! Se actualizará la aplicación.');
+                          } catch (err: any) {
+                            console.error('Error al descargar instalador', err);
+                            setDownloadStatusText(`Error: ${err?.message || err}`);
+                          } finally {
+                            setTimeout(() => setDownloadingAsset(null), 6000);
+                          }
+                        }}
                         style={{
-                          background: 'var(--accent-primary-glow)',
-                          border: '1px solid var(--accent-primary)',
-                          borderRadius: 'var(--radius-md)', padding: '9px 16px',
-                          color: 'var(--text-primary)', cursor: 'pointer', fontSize: 13,
-                          fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8,
+                          background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))',
+                          border: 'none', borderRadius: 'var(--radius-md)', padding: '10px 20px',
+                          color: 'white', cursor: downloadingAsset ? 'not-allowed' : 'pointer', fontSize: 13,
+                          fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8,
+                          boxShadow: 'var(--shadow-glow)', opacity: downloadingAsset ? 0.7 : 1,
                         }}
                       >
-                        <Download size={15} color="var(--accent-primary)" />
-                        <span>{asset.name.endsWith('.exe') ? 'Instalador Windows (.exe)' : asset.name}</span>
-                        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                        <Download size={16} />
+                        <span>{downloadingAsset === asset.name ? 'Descargando e Instalando...' : 'Descargar e Instalar Actualización'}</span>
+                        <span style={{ fontSize: 11, opacity: 0.85 }}>
                           ({(asset.size / (1024 * 1024)).toFixed(1)} MB)
                         </span>
                       </button>

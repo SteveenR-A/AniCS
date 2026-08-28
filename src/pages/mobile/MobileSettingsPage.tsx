@@ -413,19 +413,40 @@ export function MobileSettingsPage() {
           </div>
 
           {updateInfo && (
-            <div style={{ background: 'var(--bg-elevated)', padding: 10, borderRadius: 'var(--radius-md)', marginTop: 8 }}>
-              <span style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 6 }}>
-                {updateInfo.name || updateInfo.tag_name}
-              </span>
+            <div style={{ background: 'var(--bg-elevated)', padding: 12, borderRadius: 'var(--radius-md)', marginTop: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-primary)' }}>
+                  {updateInfo.name || updateInfo.tag_name}
+                </span>
+                <span style={{ fontSize: 10, color: 'var(--accent-primary)', fontWeight: 700 }}>
+                  {updateInfo.tag_name}
+                </span>
+              </div>
+
+              {/* Notas del parche */}
+              {updateInfo.body && (
+                <div style={{
+                  background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-sm)', padding: '8px 10px', marginBottom: 10,
+                  maxHeight: 120, overflowY: 'auto', fontSize: 11, lineHeight: 1.5,
+                  color: 'var(--text-secondary)', whiteSpace: 'pre-wrap',
+                }}>
+                  <div style={{ fontWeight: 700, color: 'var(--text-primary)', marginBottom: 2 }}>
+                    Novedades:
+                  </div>
+                  {updateInfo.body}
+                </div>
+              )}
+
               {updateInfo.assets
-                .filter(a => a.name.endsWith('.apk'))
+                .filter(a => a.name.toLowerCase().endsWith('.apk'))
                 .map(asset => (
                   <button
                     key={asset.name}
                     onClick={() => openUrl(asset.browser_download_url)}
                     style={{
-                      width: '100%', background: 'var(--accent-primary)',
-                      border: 'none', borderRadius: 'var(--radius-md)', padding: '8px',
+                      width: '100%', background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))',
+                      border: 'none', borderRadius: 'var(--radius-md)', padding: '10px',
                       color: 'white', fontSize: 12, fontWeight: 700,
                       display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
                     }}

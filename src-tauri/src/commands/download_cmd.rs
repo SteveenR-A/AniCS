@@ -856,3 +856,74 @@ fn format_bytes(bytes: u64) -> String {
     let i = i.min(sizes.len() - 1);
     format!("{:.1} {}", (bytes as f64) / k.powi(i as i32), sizes[i])
 }
+
+/// Descarga el instalador (.exe o .apk) internamente en segundo plano con progreso y lo ejecuta automáticamente
+#[tauri::command]
+pub async fn download_and_run_installer(
+    url: String,
+    filename: String,
+    app_handle: AppHandle,
+) -> Result<String, String> {
+    use tauri::Emitter;
+    use futures::StreamExt;
+    use tokio::io::AsyncWriteExt;
+
+    let temp_dir = std::env::temp_dir();
+    let dest_path = temp_dir.join(&filename);
+
+    let client = &crate::scrapers::DOWNLOAD_CLIENT;
+    let response = client
+        .get(&url)
+        .header("User-Agent", "AniCS-Updater")
+        .send()
+        .await
+        .map_err(|e| format!("Error conectando con servidor de actualización: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("Error HTTP al descargar instalador: {}", response.status()));
+    }
+
+    let total_bytes = response.content_length().unwrap_or(0);
+    let mut downloaded: u64 = 0;
+
+    let mut file = tokio::fs::File::create(&dest_path)
+        .await
+        .map_err(|e| format!("Error creando archivo temporal: {}", e))?;
+
+    let mut stream = response.bytes_stream();
+    while let Some(chunk_result) = stream.next().await {
+        let chunk = chunk_result.map_err(|e| format!("Error descargando paquete: {}", e))?;
+        file.write_all(&chunk)
+            .await
+            .map_err(|e| format!("Error guardando instalador: {}", e))?;
+
+        downloaded += chunk.len() as u64;
+        let progress = if total_bytes > 0 {
+            (downloaded as f64 / total_bytes as f64) * 100.0
+        } else {
+            0.0
+        };
+
+        let _ = app_handle.emit("update-download-progress", serde_json::json!({
+            "downloaded": downloaded,
+            "total": total_bytes,
+            "progress": progress,
+            "filename": filename,
+        }));
+    }
+
+    file.flush().await.map_err(|e| e.to_string())?;
+
+    // Ejecutar el instalador en Windows
+    #[cfg(target_os = "windows")]
+    {
+        if filename.ends_with(".exe") {
+            let _ = std::process::Command::new(&dest_path)
+                .spawn()
+                .map_err(|e| format!("Error ejecutando instalador: {}", e))?;
+        }
+    }
+
+    Ok(dest_path.to_string_lossy().to_string())
+}
+
