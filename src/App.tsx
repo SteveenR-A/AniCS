@@ -47,13 +47,35 @@ export default function App() {
     // Cargar fuentes de extracción al iniciar
     loadSources();
 
+    // Solicitar permisos de notificación al inicio (Android necesita POST_NOTIFICATIONS desde API 33)
+    (async () => {
+      try {
+        const { isPermissionGranted, requestPermission } = await import('@tauri-apps/plugin-notification');
+        const granted = await isPermissionGranted();
+        if (!granted) {
+          await requestPermission();
+        }
+      } catch {
+        // En desktop o si falla, ignorar silenciosamente
+      }
+    })();
+
     // Suscribirse a eventos de descarga globales
     const unsubProgress = onDownloadProgress((progress) => {
       updateProgress(progress);
     });
 
     const unsubCompleted = onDownloadCompleted((result) => {
-      console.log('Download completed:', result);
+      // Marcar la tarea como completada en el store cuando Rust confirma la descarga
+      useDownloadStore.getState().updateProgress({
+        id: result.id,
+        progress: 100,
+        speedKbps: 0,
+        downloadedBytes: 0,
+        totalBytes: undefined,
+        status: 'completed',
+        error: undefined,
+      });
     });
 
     return () => {

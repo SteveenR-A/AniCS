@@ -126,6 +126,22 @@ export function MobileDetailsPage() {
 
   const handleConfirmDownload = async () => {
     if (!details || !downloadModalEp || !selectedDownloadServer) return;
+    if (isStartingDownload) return; // guardia anti-doble-clic
+
+    // Verificar que no hay ya una descarga activa para este mismo episodio
+    const existingTasks = useDownloadStore.getState().tasks;
+    const alreadyDownloading = Array.from(existingTasks.values()).some(
+      t => t.animeTitle === details.title &&
+           t.episodeNumber === downloadModalEp.number &&
+           (t.status === 'downloading' || t.status === 'queued')
+    );
+    if (alreadyDownloading) {
+      setDownloadModalEp(null);
+      setDownloadSuccessToast(`Ep. ${downloadModalEp.number} ya se está descargando`);
+      setTimeout(() => setDownloadSuccessToast(null), 3500);
+      return;
+    }
+
     setIsStartingDownload(true);
     try {
       const media = await resolveStream(selectedDownloadServer, source);

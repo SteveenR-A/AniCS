@@ -45,31 +45,18 @@ export const useDownloadStore = create<DownloadStore>((set, get) => ({
       const next = new Map(state.tasks);
       const existing = next.get(progress.id);
       if (existing) {
+        // Solo actualizar tareas que ya existen — nunca crear tareas nuevas desde eventos de progreso
         next.set(progress.id, {
           ...existing,
           progress: progress.progress,
           speedKbps: progress.speedKbps,
           downloadedBytes: progress.downloadedBytes,
-          totalBytes: progress.totalBytes,
-          status: progress.status,
-          error: progress.error,
-        });
-      } else {
-        // Si no existe, crear la tarea con los datos del progreso
-        next.set(progress.id, {
-          id: progress.id,
-          animeTitle: `Episodio`,
-          episodeNumber: 1,
-          streamUrl: '',
-          outputPath: '',
-          progress: progress.progress,
-          speedKbps: progress.speedKbps,
-          downloadedBytes: progress.downloadedBytes,
-          totalBytes: progress.totalBytes,
+          totalBytes: progress.totalBytes ?? existing.totalBytes,
           status: progress.status,
           error: progress.error,
         });
       }
+      // Si no existe la tarea, descartar silenciosamente (evita entradas fantasma por race condition)
       return { tasks: next };
     }),
 

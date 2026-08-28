@@ -106,6 +106,21 @@ jobs:
       - name: Build Android APK
         run: |
           npx @tauri-apps/cli android init --skip-targets-install || true
+
+          # Añadir permisos de Android al AndroidManifest.xml generado
+          MANIFEST="src-tauri/gen/android/app/src/main/AndroidManifest.xml"
+          if [ -f "$MANIFEST" ]; then
+            # Insertar permisos antes de <application> si no existen ya
+            if ! grep -q "FOREGROUND_SERVICE" "$MANIFEST"; then
+              sed -i 's|<application|<uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />\n    <uses-permission android:name="android.permission.WAKE_LOCK" />\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />\n    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />\n    <application|g' "$MANIFEST"
+              echo "Permisos añadidos al AndroidManifest.xml"
+            else
+              echo "Permisos ya presentes en AndroidManifest.xml"
+            fi
+          else
+            echo "AndroidManifest.xml no encontrado en: $MANIFEST"
+          fi
+
           npx @tauri-apps/cli android build --apk --target aarch64 --ci
 
       - name: Sign APK (Release Keystore)
