@@ -65,6 +65,7 @@ export function MobileSchedulePage() {
   useEffect(() => {
     const cached = getScheduleDays(activeSource);
     if (!cached || cached.length === 0) {
+      setLocalScheduleDays([]);
       setIsLoading(true);
       loadSchedule();
     }

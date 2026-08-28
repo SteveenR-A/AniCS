@@ -155,6 +155,9 @@ export function DesktopHomePage() {
     }
 
     if (!freshLatest || freshLatest.length === 0 || !freshSchedule || freshSchedule.length === 0) {
+      setLatestList([]);
+      setScheduleList([]);
+      setIsLoading(true);
       load();
     }
   }, [activeSource, getLatestEpisodes, getScheduleStore, load]);
