@@ -992,11 +992,25 @@ pub async fn download_and_run_installer(
         {
             let cache_dir = app_handle.path().app_cache_dir().unwrap_or_else(|_| PathBuf::from("/data/user/0/com.anics.app/cache"));
             let _ = fs::create_dir_all(&cache_dir);
+            // Limpiar cualquier APK descargado previamente para que nunca se acumulen en el almacenamiento
+            if let Ok(entries) = fs::read_dir(&cache_dir) {
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    if p.is_file() && p.extension().map(|e| e.eq_ignore_ascii_case("apk")).unwrap_or(false) {
+                        let _ = fs::remove_file(p);
+                    }
+                }
+            }
             cache_dir.join(&filename)
         }
         #[cfg(not(target_os = "android"))]
         {
             let temp_dir = std::env::temp_dir();
+            // Limpiar cualquier instalador de actualización previo
+            let old_installer = temp_dir.join(&filename);
+            if old_installer.exists() {
+                let _ = fs::remove_file(old_installer);
+            }
             temp_dir.join(&filename)
         }
     };

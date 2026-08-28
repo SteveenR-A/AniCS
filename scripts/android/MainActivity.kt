@@ -73,6 +73,20 @@ class AndroidNativeBridge(private val activity: android.app.Activity) {
       }
     }
   }
+
+  @JavascriptInterface
+  fun openInBrowser(url: String) {
+    activity.runOnUiThread {
+      try {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        activity.startActivity(intent)
+      } catch (e: Exception) {
+        Log.e("AniCS", "Error al abrir navegador externo: ${e.message}", e)
+      }
+    }
+  }
 }
 
 class MainActivity : TauriActivity() {
@@ -105,6 +119,7 @@ class MainActivity : TauriActivity() {
 
     startWebViewObserver()
     requestStoragePermissions()
+    cleanOldApks()
   }
 
   override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -181,6 +196,23 @@ class MainActivity : TauriActivity() {
         Manifest.permission.WRITE_EXTERNAL_STORAGE
       )
       ActivityCompat.requestPermissions(this, permissions, 1001)
+    }
+  }
+
+  private fun cleanOldApks() {
+    try {
+      val dirsToClean = listOfNotNull(cacheDir, externalCacheDir)
+      dirsToClean.forEach { dir ->
+        dir.listFiles { file ->
+          file.isFile && file.name.endsWith(".apk", ignoreCase = true)
+        }?.forEach { file ->
+          try {
+            file.delete()
+          } catch (_: Exception) {}
+        }
+      }
+    } catch (e: Exception) {
+      Log.w("AniCS", "No se pudieron limpiar APKs antiguos de caché: ${e.message}")
     }
   }
 }

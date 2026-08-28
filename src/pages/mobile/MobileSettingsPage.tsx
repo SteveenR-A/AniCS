@@ -52,6 +52,7 @@ export function MobileSettingsPage() {
   const [downloadingAsset, setDownloadingAsset] = useState<string | null>(null);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [downloadStatusText, setDownloadStatusText] = useState<string | null>(null);
+  const [downloadedApkMap, setDownloadedApkMap] = useState<Record<string, string>>({});
 
   const [cacheStats, setCacheStats] = useState<{ totalFormatted: string; fileCount: number } | null>(null);
   const [maxCacheMb, setMaxCacheMb] = useState('300');
@@ -143,6 +144,7 @@ export function MobileSettingsPage() {
     setIsCheckingUpdate(true);
     setUpdateError(null);
     setUpdateInfo(null);
+    setDownloadedApkMap({});
     try {
       const response = await fetch(`https://api.github.com/repos/${updateRepo}/releases/latest`, {
         headers: { 'Accept': 'application/vnd.github.v3+json' },
@@ -616,77 +618,105 @@ export function MobileSettingsPage() {
 
               {updateInfo.assets
                 .filter(a => a.name.toLowerCase().endsWith('.apk'))
-                .map(asset => (
-                  <div key={asset.name} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    <button
-                      disabled={Boolean(downloadingAsset)}
-                      onClick={async () => {
-                        setDownloadingAsset(asset.name);
-                        setDownloadProgress(0);
-                        setDownloadStatusText('Iniciando descarga...');
-                        try {
-                          const savedPath: string = await invoke('download_and_run_installer', {
-                            url: asset.browser_download_url,
-                            filename: asset.name,
-                          });
-                          setDownloadStatusText('¡Descarga completada!');
+                .map(asset => {
+                  const isDownloaded = Boolean(downloadedApkMap[asset.name]);
+                  const localApkPath = downloadedApkMap[asset.name];
 
-                          if ((window as any).AndroidBridge && (window as any).AndroidBridge.installApk) {
-                            if (window.confirm('La descarga ha finalizado. ¿Deseas instalar la actualización ahora?')) {
-                              try {
-                                (window as any).AndroidBridge.installApk(savedPath);
-                              } catch (bridgeErr: any) {
-                                console.error('Error invocando AndroidBridge.installApk:', bridgeErr);
-                                alert(`Error al iniciar instalación nativa: ${bridgeErr?.message || bridgeErr}`);
-                              }
-                            }
-                          } else {
-                            const bridgeMissingMsg = 'Puente AndroidBridge no disponible. ¿Deseas abrir el instalador con el sistema?';
-                            if (window.confirm(bridgeMissingMsg)) {
-                              try {
-                                await openPath(savedPath);
-                              } catch (openErr: any) {
-                                console.warn('Error abriendo paquete con openPath:', openErr);
-                                alert(`No se pudo abrir el instalador (${openErr?.message || openErr}). Abriendo enlace en navegador...`);
-                                await openUrl(asset.browser_download_url);
-                              }
-                            }
+                  const openBrowserFallback = (url: string) => {
+                    if ((window as any).AndroidBridge && typeof (window as any).AndroidBridge.openInBrowser === 'function') {
+                      (window as any).AndroidBridge.openInBrowser(url);
+                    } else {
+                      openUrl(url).catch(err => {
+                        console.error('Error abriendo navegador externo:', err);
+                      });
+                    }
+                  };
+
+                  const executeInstall = (path: string) => {
+                    if ((window as any).AndroidBridge && (window as any).AndroidBridge.installApk) {
+                      try {
+                        (window as any).AndroidBridge.installApk(path);
+                      } catch (bridgeErr: any) {
+                        console.error('Error invocando AndroidBridge.installApk:', bridgeErr);
+                        alert(`Error al iniciar instalación nativa: ${bridgeErr?.message || bridgeErr}`);
+                      }
+                    } else {
+                      const bridgeMissingMsg = 'Puente AndroidBridge no disponible. ¿Deseas abrir el instalador con el sistema?';
+                      if (window.confirm(bridgeMissingMsg)) {
+                        openPath(path).catch((openErr: any) => {
+                          console.warn('Error abriendo paquete con openPath:', openErr);
+                          alert(`No se pudo abrir el instalador (${openErr?.message || openErr}). Abriendo enlace en navegador...`);
+                          openBrowserFallback(asset.browser_download_url);
+                        });
+                      }
+                    }
+                  };
+
+                  return (
+                    <div key={asset.name} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      <button
+                        disabled={Boolean(downloadingAsset)}
+                        onClick={async () => {
+                          if (isDownloaded && localApkPath) {
+                            executeInstall(localApkPath);
+                            return;
                           }
-                        } catch (err: any) {
-                          console.error('Error durante la descarga o instalación del APK:', err);
-                          const errorMessage = err?.message || String(err);
-                          setDownloadStatusText(`Error: ${errorMessage}`);
-                          alert(`Error al actualizar: ${errorMessage}`);
-                        } finally {
-                          setTimeout(() => setDownloadingAsset(null), 8000);
-                        }
-                      }}
-                      style={{
-                        width: '100%', background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))',
-                        border: 'none', borderRadius: 'var(--radius-md)', padding: '11px',
-                        color: 'white', fontSize: 12, fontWeight: 700, cursor: downloadingAsset ? 'not-allowed' : 'pointer',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                        opacity: downloadingAsset ? 0.75 : 1,
-                      }}
-                    >
-                      <Download size={14} />
-                      {downloadingAsset === asset.name
-                        ? 'Descargando actualización...'
-                        : `Descargar e Instalar APK (${(asset.size / (1024 * 1024)).toFixed(1)} MB)`}
-                    </button>
 
-                    <button
-                      onClick={() => openUrl(asset.browser_download_url)}
-                      style={{
-                        background: 'none', border: 'none', color: 'var(--text-muted)',
-                        fontSize: 10, cursor: 'pointer', padding: '2px 0', textAlign: 'center',
-                        textDecoration: 'underline',
-                      }}
-                    >
-                      Descargar archivo APK desde el navegador
-                    </button>
-                  </div>
-                ))}
+                          setDownloadingAsset(asset.name);
+                          setDownloadProgress(0);
+                          setDownloadStatusText('Iniciando descarga...');
+                          try {
+                            const savedPath: string = await invoke('download_and_run_installer', {
+                              url: asset.browser_download_url,
+                              filename: asset.name,
+                            });
+                            setDownloadedApkMap(prev => ({ ...prev, [asset.name]: savedPath }));
+                            setDownloadStatusText('¡Descarga completada!');
+
+                            if (window.confirm('La descarga ha finalizado. ¿Deseas instalar la actualización ahora?')) {
+                              executeInstall(savedPath);
+                            }
+                          } catch (err: any) {
+                            console.error('Error durante la descarga o instalación del APK:', err);
+                            const errorMessage = err?.message || String(err);
+                            setDownloadStatusText(`Error: ${errorMessage}`);
+                            alert(`Error al actualizar: ${errorMessage}`);
+                          } finally {
+                            setTimeout(() => setDownloadingAsset(null), 5000);
+                          }
+                        }}
+                        style={{
+                          width: '100%',
+                          background: isDownloaded
+                            ? 'linear-gradient(135deg, #10b981, #059669)'
+                            : 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))',
+                          border: 'none', borderRadius: 'var(--radius-md)', padding: '11px',
+                          color: 'white', fontSize: 12, fontWeight: 700, cursor: downloadingAsset ? 'not-allowed' : 'pointer',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                          opacity: downloadingAsset ? 0.75 : 1,
+                        }}
+                      >
+                        {isDownloaded ? <Check size={15} /> : <Download size={14} />}
+                        {downloadingAsset === asset.name
+                          ? 'Descargando actualización...'
+                          : isDownloaded
+                            ? 'Instalar APK'
+                            : `Descargar e Instalar APK (${(asset.size / (1024 * 1024)).toFixed(1)} MB)`}
+                      </button>
+
+                      <button
+                        onClick={() => openBrowserFallback(asset.browser_download_url)}
+                        style={{
+                          background: 'none', border: 'none', color: 'var(--text-muted)',
+                          fontSize: 10, cursor: 'pointer', padding: '4px 0', textAlign: 'center',
+                          textDecoration: 'underline',
+                        }}
+                      >
+                        Descargar archivo APK desde el navegador (Chrome)
+                      </button>
+                    </div>
+                  );
+                })}
             </div>
           )}
         </div>
