@@ -875,8 +875,25 @@ pub async fn download_and_run_installer(
     use futures::StreamExt;
     use tokio::io::AsyncWriteExt;
 
-    let temp_dir = std::env::temp_dir();
-    let dest_path = temp_dir.join(&filename);
+    let dest_path = {
+        #[cfg(target_os = "android")]
+        {
+            let download_dir = PathBuf::from("/storage/emulated/0/Download");
+            let _ = fs::create_dir_all(&download_dir);
+            if download_dir.exists() {
+                download_dir.join(&filename)
+            } else {
+                let anime_dir = PathBuf::from("/storage/emulated/0/Anime");
+                let _ = fs::create_dir_all(&anime_dir);
+                anime_dir.join(&filename)
+            }
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            let temp_dir = std::env::temp_dir();
+            temp_dir.join(&filename)
+        }
+    };
 
     let client = &crate::scrapers::DOWNLOAD_CLIENT;
     let response = client

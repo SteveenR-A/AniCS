@@ -5,7 +5,8 @@ import {
   AlertCircle, ExternalLink, Sparkles, ShieldCheck, Palette, HardDrive, Trash2, Database, Activity, Folder
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
-import { openUrl } from '@tauri-apps/plugin-opener';
+import { listen } from '@tauri-apps/api/event';
+import { openUrl, openPath } from '@tauri-apps/plugin-opener';
 import { ChangelogModal } from '@/components/ChangelogModal';
 import { useThemeStore, THEMES } from '@/stores/useThemeStore';
 import { getCacheStats, clearImageCache } from '@/services/downloadService';
@@ -47,6 +48,11 @@ export function MobileSettingsPage() {
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
   const [showChangelog, setShowChangelog] = useState(false);
 
+  // Estados de Descarga Interna de APK
+  const [downloadingAsset, setDownloadingAsset] = useState<string | null>(null);
+  const [downloadProgress, setDownloadProgress] = useState(0);
+  const [downloadStatusText, setDownloadStatusText] = useState<string | null>(null);
+
   const [cacheStats, setCacheStats] = useState<{ totalFormatted: string; fileCount: number } | null>(null);
   const [maxCacheMb, setMaxCacheMb] = useState('300');
   const [isClearingCache, setIsClearingCache] = useState(false);
@@ -77,6 +83,21 @@ export function MobileSettingsPage() {
   useEffect(() => {
     loadCache();
     loadDb();
+
+    // Escuchar progreso en tiempo real de la descarga interna del APK
+    const unlisten = listen('update-download-progress', (event: any) => {
+      const { progress, downloaded, total } = event.payload || {};
+      if (typeof progress === 'number') {
+        setDownloadProgress(Math.round(progress));
+        const dlMb = (downloaded / (1024 * 1024)).toFixed(1);
+        const totMb = (total / (1024 * 1024)).toFixed(1);
+        setDownloadStatusText(`${Math.round(progress)}% (${dlMb} MB / ${totMb} MB)`);
+      }
+    });
+
+    return () => {
+      unlisten.then((fn) => fn());
+    };
   }, []);
 
   useEffect(() => {
@@ -573,21 +594,79 @@ export function MobileSettingsPage() {
                 </div>
               )}
 
+              {/* Barra de progreso de descarga interna de APK */}
+              {downloadingAsset && (
+                <div style={{
+                  background: 'var(--bg-surface)', border: '1px solid var(--border-accent)',
+                  borderRadius: 'var(--radius-md)', padding: '10px 12px', marginBottom: 10,
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, fontWeight: 700, marginBottom: 5 }}>
+                    <span style={{ color: 'var(--text-primary)' }}>Descargando APK en la app...</span>
+                    <span style={{ color: 'var(--accent-primary)' }}>{downloadStatusText}</span>
+                  </div>
+                  <div style={{ width: '100%', height: 6, background: 'var(--bg-elevated)', borderRadius: 3, overflow: 'hidden' }}>
+                    <div style={{
+                      width: `${downloadProgress}%`, height: '100%',
+                      background: 'linear-gradient(90deg, var(--accent-primary), var(--accent-secondary))',
+                      transition: 'width 0.2s ease',
+                    }} />
+                  </div>
+                </div>
+              )}
+
               {updateInfo.assets
                 .filter(a => a.name.toLowerCase().endsWith('.apk'))
                 .map(asset => (
-                  <button
-                    key={asset.name}
-                    onClick={() => openUrl(asset.browser_download_url)}
-                    style={{
-                      width: '100%', background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))',
-                      border: 'none', borderRadius: 'var(--radius-md)', padding: '10px',
-                      color: 'white', fontSize: 12, fontWeight: 700,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                    }}
-                  >
-                    <Download size={14} /> Descargar APK Android ({(asset.size / (1024 * 1024)).toFixed(1)} MB)
-                  </button>
+                  <div key={asset.name} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <button
+                      disabled={Boolean(downloadingAsset)}
+                      onClick={async () => {
+                        setDownloadingAsset(asset.name);
+                        setDownloadProgress(0);
+                        setDownloadStatusText('Iniciando descarga interna...');
+                        try {
+                          const savedPath: string = await invoke('download_and_run_installer', {
+                            url: asset.browser_download_url,
+                            filename: asset.name,
+                          });
+                          setDownloadStatusText('¡Descargado! Abriendo instalador de paquetes...');
+                          try {
+                            await openPath(savedPath);
+                          } catch (openErr) {
+                            console.warn('Error abriendo paquete con openPath', openErr);
+                          }
+                        } catch (err: any) {
+                          console.error('Error al descargar APK internamente', err);
+                          setDownloadStatusText(`Error: ${err?.message || err}`);
+                        } finally {
+                          setTimeout(() => setDownloadingAsset(null), 8000);
+                        }
+                      }}
+                      style={{
+                        width: '100%', background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))',
+                        border: 'none', borderRadius: 'var(--radius-md)', padding: '11px',
+                        color: 'white', fontSize: 12, fontWeight: 700, cursor: downloadingAsset ? 'not-allowed' : 'pointer',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                        opacity: downloadingAsset ? 0.75 : 1,
+                      }}
+                    >
+                      <Download size={14} />
+                      {downloadingAsset === asset.name
+                        ? 'Descargando actualización...'
+                        : `Descargar e Instalar APK (${(asset.size / (1024 * 1024)).toFixed(1)} MB)`}
+                    </button>
+
+                    <button
+                      onClick={() => openUrl(asset.browser_download_url)}
+                      style={{
+                        background: 'none', border: 'none', color: 'var(--text-muted)',
+                        fontSize: 10, cursor: 'pointer', padding: '2px 0', textAlign: 'center',
+                        textDecoration: 'underline',
+                      }}
+                    >
+                      Descargar archivo APK desde el navegador
+                    </button>
+                  </div>
                 ))}
             </div>
           )}
