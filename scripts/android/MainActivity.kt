@@ -19,7 +19,7 @@ import androidx.core.content.FileProvider
 import android.Manifest
 import java.io.File
 import app.tauri.plugin.PluginManager
-import app.tauri.plugin.TauriActivity
+import app.tauri.TauriActivity
 
 class AndroidNativeBridge(private val activity: android.app.Activity) {
   @JavascriptInterface
