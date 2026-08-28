@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use async_trait::async_trait;
 use base64::prelude::*;
 use once_cell::sync::Lazy;
@@ -192,28 +192,70 @@ impl AnimeExtractor for JKAnimeExtractor {
         let doc = Html::parse_document(&html);
         let mut days = vec![];
 
-        let day_block_sel = Selector::parse("div.semana, div[class*='semana']").unwrap();
+        let day_block_sel = Selector::parse("div.box.semana, div.semana").unwrap();
         let day_title_sel = Selector::parse("h2").unwrap();
-        let anime_link_sel = Selector::parse("div.boxx a, a").unwrap();
+        let card_sel = Selector::parse("div.cajas > div.box, div.box.img, div.img").unwrap();
+        let a_sel = Selector::parse("a").unwrap();
+        let img_sel = Selector::parse("img").unwrap();
         let h3_sel = Selector::parse("h3").unwrap();
 
         for block in doc.select(&day_block_sel) {
+            // Ignorar bloques de búsqueda o filtro
+            if block.value().classes().any(|c| c == "filtro") {
+                continue;
+            }
+
             let day_name = block.select(&day_title_sel).next()
                 .map(|h| inner_text(&h).trim().to_string())
                 .unwrap_or_else(|| "Día".to_string());
 
-            let mut animes = vec![];
-            for a in block.select(&anime_link_sel) {
-                let href = attr(&a, "href");
-                let title = a.select(&h3_sel).next()
-                    .map(|h| inner_text(&h))
-                    .unwrap_or_else(|| inner_text(&a));
+            if day_name.to_lowercase().contains("buscar") {
+                continue;
+            }
 
-                if href.is_empty() || title.is_empty() || !href.contains("jkanime.net/") { continue; }
+            let mut animes = vec![];
+            let mut seen_urls = HashSet::new();
+
+            for item in block.select(&card_sel) {
+                // Enlace principal del anime
+                let href = if let Some(a) = item.select(&a_sel).next() {
+                    attr(&a, "href")
+                } else {
+                    String::new()
+                };
+
+                if href.is_empty() || !href.contains("jkanime.net/") {
+                    continue;
+                }
 
                 let clean_url = normalize_url(&href, &self.base_url);
+                if seen_urls.contains(&clean_url) {
+                    continue;
+                }
+                seen_urls.insert(clean_url.clone());
+
+                // Título completo: usar atributo title del contenedor si existe, o h3
+                let raw_title = attr(&item, "title").trim().to_string();
+                let title = if !raw_title.is_empty() {
+                    raw_title
+                } else if let Some(h3) = item.select(&h3_sel).next() {
+                    inner_text(&h3)
+                } else if let Some(a) = item.select(&a_sel).next() {
+                    inner_text(&a)
+                } else {
+                    String::new()
+                };
+
+                if title.is_empty() {
+                    continue;
+                }
+
+                // Imagen de portada
+                let img_src = item.select(&img_sel).next().map(|img| attr(&img, "src")).unwrap_or_default();
                 let slug = clean_url.trim_end_matches('/').split('/').last().unwrap_or("").to_string();
-                let thumbnail_url = if !slug.is_empty() {
+                let thumbnail_url = if !img_src.is_empty() {
+                    normalize_url(&img_src, &self.base_url)
+                } else if !slug.is_empty() {
                     format!("https://cdn.jkdesa.com/assets/images/animes/image/{}.jpg", slug)
                 } else {
                     String::new()

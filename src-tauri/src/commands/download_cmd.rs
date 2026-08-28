@@ -382,11 +382,17 @@ pub async fn scan_local_downloads(
     let mut groups: HashMap<String, (PathBuf, Vec<LocalEpisodeItem>)> = HashMap::new();
 
     // Obtener historial completo para mapear progreso
-    let history_map: HashMap<String, f64> = storage::get_history(500, 0)
-        .unwrap_or_default()
-        .into_iter()
-        .map(|h| (format!("{}-{}", h.anime_title.to_lowercase(), h.episode_number), h.watch_progress))
-        .collect();
+    let history_list = storage::get_history(500, 0).unwrap_or_default();
+    let mut path_history_map: HashMap<String, f64> = HashMap::new();
+    let mut title_history_map: HashMap<String, f64> = HashMap::new();
+
+    for h in &history_list {
+        let norm_path = h.episode_url.replace('\\', "/").to_lowercase();
+        path_history_map.entry(norm_path).or_insert(h.watch_progress);
+
+        let key = format!("{}-{}", h.anime_title.to_lowercase().trim(), h.episode_number);
+        title_history_map.entry(key).or_insert(h.watch_progress);
+    }
 
     // 1. Escanear subdirectorios (cada subdirectorio representa un Anime)
     if let Ok(entries) = fs::read_dir(&base_dir) {
@@ -397,7 +403,7 @@ pub async fn scan_local_downloads(
                 let clean_title = folder_name.replace('_', " ").trim().to_string();
 
                 let mut episodes = vec![];
-                scan_episodes_in_dir(&path, &clean_title, &mut episodes, &history_map);
+                scan_episodes_in_dir(&path, &clean_title, &mut episodes, &path_history_map, &title_history_map);
 
                 if !episodes.is_empty() {
                     // Ordenar episodios ascendentemente por número
@@ -421,15 +427,7 @@ pub async fn scan_local_downloads(
                             })
                             .unwrap_or_else(|| "Reciente".to_string());
 
-                        let key = format!("{}-{}", anime_title.to_lowercase(), ep_number);
-                        let progress = history_map.get(&key).cloned().unwrap_or(0.0);
-                        let watch_status = if progress >= 0.85 {
-                            "completed"
-                        } else if progress > 0.05 {
-                            "in_progress"
-                        } else {
-                            "unseen"
-                        }.to_string();
+                        let (progress, watch_status) = get_watch_info(&path, &anime_title, ep_number, &path_history_map, &title_history_map);
 
                         let item = LocalEpisodeItem {
                             file_path: path.to_string_lossy().to_string(),
@@ -630,11 +628,38 @@ pub async fn preload_images_batch(
 }
 
 
+fn get_watch_info(
+    file_path: &Path,
+    anime_title: &str,
+    ep_number: u32,
+    path_history_map: &HashMap<String, f64>,
+    title_history_map: &HashMap<String, f64>,
+) -> (f64, String) {
+    let norm_path = file_path.to_string_lossy().replace('\\', "/").to_lowercase();
+    let title_key = format!("{}-{}", anime_title.to_lowercase().trim(), ep_number);
+
+    let progress = path_history_map.get(&norm_path)
+        .or_else(|| title_history_map.get(&title_key))
+        .cloned()
+        .unwrap_or(0.0);
+
+    let watch_status = if progress >= 0.85 {
+        "completed"
+    } else if progress > 0.001 {
+        "in_progress"
+    } else {
+        "unseen"
+    }.to_string();
+
+    (progress, watch_status)
+}
+
 fn scan_episodes_in_dir(
     dir: &Path,
     anime_title: &str,
     episodes: &mut Vec<LocalEpisodeItem>,
-    history_map: &HashMap<String, f64>,
+    path_history_map: &HashMap<String, f64>,
+    title_history_map: &HashMap<String, f64>,
 ) {
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
@@ -655,15 +680,7 @@ fn scan_episodes_in_dir(
                                     })
                                     .unwrap_or_else(|| "Reciente".to_string());
 
-                                let key = format!("{}-{}", anime_title.to_lowercase(), ep_number);
-                                let progress = history_map.get(&key).cloned().unwrap_or(0.0);
-                                let watch_status = if progress >= 0.85 {
-                                    "completed"
-                                } else if progress > 0.05 {
-                                    "in_progress"
-                                } else {
-                                    "unseen"
-                                }.to_string();
+                                let (progress, watch_status) = get_watch_info(&path, anime_title, ep_number, path_history_map, title_history_map);
 
                                 episodes.push(LocalEpisodeItem {
                                     file_path: path.to_string_lossy().to_string(),

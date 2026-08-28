@@ -50,6 +50,8 @@ export function DesktopTopAnimePage() {
     }
   }, [activeSource, getTopList, loadTop]);
 
+  const isDonghua = activeSource === 'mundodonghua';
+
   return (
     <div style={{ padding: '28px 36px', maxWidth: 1440, margin: '0 auto' }}>
       {/* Header Desktop */}
@@ -68,10 +70,12 @@ export function DesktopTopAnimePage() {
           </div>
           <div>
             <h1 style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-0.03em', margin: 0 }}>
-              Top Animes & Ranking
+              {isDonghua ? 'Top Donghuas Populares' : 'Top Animes & Ranking'}
             </h1>
             <p style={{ color: 'var(--text-muted)', fontSize: 13, margin: '3px 0 0' }}>
-              Los animes más valorados y aclamados por la comunidad · {activeSource === 'jkanime' ? 'JKAnime' : 'MundoDonghua'}
+              {isDonghua
+                ? 'Las producciones de animación china más destacadas · MundoDonghua'
+                : 'Los animes más valorados y aclamados por la comunidad · JKAnime'}
             </p>
           </div>
         </div>

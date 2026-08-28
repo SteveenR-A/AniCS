@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search, X, Loader2, SearchX,
-  RotateCcw, ChevronDown, ChevronUp, Check, SlidersHorizontal
+  RotateCcw, ChevronDown, ChevronUp, Check, SlidersHorizontal, RefreshCw
 } from 'lucide-react';
 import { useAnimeStore } from '@/stores/useAnimeStore';
 import { searchAnime, advancedSearch } from '@/services/animeService';
@@ -231,6 +231,24 @@ export function MobileSearchPage() {
         >
           <SlidersHorizontal size={14} />
           {activeFilterCount > 0 && <span>({activeFilterCount})</span>}
+        </button>
+
+        {/* Botón Recargar Móvil */}
+        <button
+          onClick={() => {
+            loadGenres(activeSource);
+            executeSearch(query, selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
+          }}
+          disabled={isSearching}
+          title="Actualizar catálogo"
+          style={{
+            background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
+            borderRadius: 'var(--radius-full)', padding: '8px 12px',
+            color: 'var(--text-primary)', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+        >
+          <RefreshCw size={14} className={isSearching ? 'animate-spin' : ''} />
         </button>
       </div>
 

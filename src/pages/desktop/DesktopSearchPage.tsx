@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search, X, Loader2, SearchX,
-  RotateCcw, ChevronDown, ChevronUp, Check, SlidersHorizontal
+  RotateCcw, ChevronDown, ChevronUp, Check, SlidersHorizontal, RefreshCw
 } from 'lucide-react';
 import { useAnimeStore } from '@/stores/useAnimeStore';
 import { searchAnime, advancedSearch } from '@/services/animeService';
@@ -305,6 +305,26 @@ export function DesktopSearchPage() {
             </span>
           )}
           {showFilters ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+        </button>
+
+        {/* Botón Recargar / Actualizar Búsqueda */}
+        <button
+          onClick={() => {
+            loadGenres(activeSource);
+            executeSearch(query, selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
+          }}
+          disabled={isSearching}
+          title="Actualizar catálogo y recargar resultados"
+          style={{
+            background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
+            borderRadius: 'var(--radius-full)', padding: '10px 18px',
+            color: 'var(--text-primary)', fontSize: 13, fontWeight: 700,
+            cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8,
+            boxShadow: 'var(--shadow-subtle)',
+          }}
+        >
+          <RefreshCw size={15} className={isSearching ? 'animate-spin' : ''} />
+          <span>Actualizar</span>
         </button>
       </div>
 

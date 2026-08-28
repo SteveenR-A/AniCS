@@ -225,13 +225,12 @@ export function MobileFavoritesPage() {
 // ──────────────────────────────────────────
 export function MobileDownloadsPage() {
   const navigate = useNavigate();
-  const { tasks, cancelTask, removeTask } = useDownloadStore();
+  const { tasks, cancelTask, removeTask, expandedFolders, toggleFolder } = useDownloadStore();
   const { setCurrentAnime, setCurrentEpisode, setResolvedMedia, setServers, openPlayer } = usePlayerStore();
 
   const [activeTab, setActiveTab] = useState<'local' | 'active'>('local');
   const [downloadFolder, setDownloadFolder] = useState<string>('');
   const [animeFolders, setAnimeFolders] = useState<LocalAnimeFolder[]>([]);
-  const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
   const [isScanning, setIsScanning] = useState(false);
 
   const loadLocalFolders = useCallback(async () => {
@@ -250,14 +249,12 @@ export function MobileDownloadsPage() {
 
   useEffect(() => {
     loadLocalFolders();
-  }, []);
-
-  const toggleFolder = (folderPath: string) => {
-    setExpandedFolders(prev => ({
-      ...prev,
-      [folderPath]: !prev[folderPath],
-    }));
-  };
+    const handleFocus = () => {
+      loadLocalFolders();
+    };
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [loadLocalFolders]);
 
   const handleDeleteEpisode = async (filePath: string, animeTitle: string) => {
     try {
@@ -450,47 +447,83 @@ export function MobileDownloadsPage() {
                           padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 6,
                         }}
                       >
-                        {anime.episodes.map((ep) => (
-                          <div
-                            key={ep.filePath}
-                            style={{
-                              background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
-                              borderRadius: 'var(--radius-md)', padding: '8px 10px',
-                              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
-                            }}
-                          >
-                            <div style={{ minWidth: 0, flex: 1 }}>
-                              <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>
-                                Ep. {ep.episodeNumber}
-                              </span>
-                              <span style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 6 }}>
-                                {ep.fileSizeFormatted}
-                              </span>
-                            </div>
+                        {anime.episodes.map((ep) => {
+                          const isCompleted = ep.watchStatus === 'completed';
+                          const isInProgress = ep.watchStatus === 'in_progress';
 
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                              <button
-                                onClick={() => handlePlayEpisode(ep, anime)}
-                                style={{
-                                  background: 'var(--accent-primary)', border: 'none', borderRadius: 'var(--radius-sm)',
-                                  padding: '5px 10px', color: 'white', fontSize: 11, fontWeight: 700,
-                                  display: 'flex', alignItems: 'center', gap: 4,
-                                }}
-                              >
-                                <Play size={11} fill="white" /> Ver
-                              </button>
-                              <button
-                                onClick={() => handleDeleteEpisode(ep.filePath, anime.animeTitle)}
-                                style={{
-                                  background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
-                                  borderRadius: 'var(--radius-sm)', padding: 5, color: 'var(--text-muted)',
-                                }}
-                              >
-                                <Trash2 size={12} />
-                              </button>
+                          return (
+                            <div
+                              key={ep.filePath}
+                              style={{
+                                background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
+                                borderRadius: 'var(--radius-md)', padding: '10px 12px',
+                                display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+                              }}
+                            >
+                              <div style={{ minWidth: 0, flex: 1 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                  <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
+                                    Ep. {ep.episodeNumber}
+                                  </span>
+                                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                                    {ep.fileSizeFormatted}
+                                  </span>
+                                </div>
+
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                                  {isCompleted ? (
+                                    <span style={{
+                                      fontSize: 10, fontWeight: 800, color: 'var(--accent-success)',
+                                      background: 'rgba(16,185,129,0.15)', padding: '1px 6px', borderRadius: 4,
+                                      display: 'inline-flex', alignItems: 'center', gap: 3,
+                                    }}>
+                                      <Check size={10} /> Visto
+                                    </span>
+                                  ) : isInProgress ? (
+                                    <span style={{
+                                      fontSize: 10, fontWeight: 800, color: 'var(--accent-primary)',
+                                      background: 'rgba(59,130,246,0.15)', padding: '1px 6px', borderRadius: 4,
+                                      display: 'inline-flex', alignItems: 'center', gap: 3,
+                                    }}>
+                                      <Eye size={10} /> En progreso ({Math.round(ep.watchProgress * 100)}%)
+                                    </span>
+                                  ) : (
+                                    <span style={{
+                                      fontSize: 10, fontWeight: 700, color: 'var(--text-muted)',
+                                      background: 'var(--bg-elevated)', padding: '1px 6px', borderRadius: 4,
+                                      display: 'inline-flex', alignItems: 'center', gap: 3,
+                                    }}>
+                                      <EyeOff size={10} /> No visto
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <button
+                                  onClick={() => handlePlayEpisode(ep, anime)}
+                                  style={{
+                                    background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))',
+                                    border: 'none', borderRadius: 'var(--radius-sm)',
+                                    padding: '6px 12px', color: 'white', fontSize: 11, fontWeight: 700,
+                                    display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer',
+                                  }}
+                                >
+                                  <Play size={11} fill="white" /> Ver
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteEpisode(ep.filePath, anime.animeTitle)}
+                                  style={{
+                                    background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
+                                    borderRadius: 'var(--radius-sm)', padding: 6, color: 'var(--text-muted)', cursor: 'pointer',
+                                  }}
+                                >
+                                  <Trash2 size={12} />
+                                </button>
+                              </div>
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </motion.div>
                     )}
                   </AnimatePresence>

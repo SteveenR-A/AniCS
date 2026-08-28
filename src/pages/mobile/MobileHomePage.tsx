@@ -103,23 +103,6 @@ export function MobileHomePage() {
   const [isLoading, setIsLoading] = useState<boolean>(!cachedLatest || cachedLatest.length === 0);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  useEffect(() => {
-    const freshLatest = getLatestEpisodes(activeSource);
-    const freshSchedule = getScheduleStore(activeSource);
-    if (freshLatest && freshLatest.length > 0) {
-      setLatestList(freshLatest);
-      setIsLoading(false);
-    } else {
-      setLatestList([]);
-      setIsLoading(true);
-    }
-    if (freshSchedule) {
-      setScheduleList(freshSchedule);
-    } else {
-      setScheduleList([]);
-    }
-  }, [activeSource, getLatestEpisodes, getScheduleStore]);
-
   const load = useCallback(async () => {
     try {
       const [latest, sched] = await Promise.allSettled([
@@ -132,8 +115,15 @@ export function MobileHomePage() {
         setLatestList(latest.value);
       }
       if (sched.status === 'fulfilled') {
-        setSchedule(sched.value, activeSource);
-        setScheduleList(sched.value);
+        const seen = new Set<string>();
+        const uniqueSched = sched.value.filter((a) => {
+          const key = (a.url || a.title).toLowerCase();
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+        setSchedule(uniqueSched, activeSource);
+        setScheduleList(uniqueSched);
       }
     } catch (e) {
       console.error('Error cargando datos de inicio en Móvil', e);
@@ -144,12 +134,25 @@ export function MobileHomePage() {
   }, [activeSource, setLatestEpisodes, setSchedule]);
 
   useEffect(() => {
-    const current = getLatestEpisodes(activeSource);
-    if (!current || current.length === 0) {
+    const freshLatest = getLatestEpisodes(activeSource);
+    const freshSchedule = getScheduleStore(activeSource);
+    if (freshLatest && freshLatest.length > 0) {
+      setLatestList(freshLatest);
+      setIsLoading(false);
+    } else {
+      setLatestList([]);
       setIsLoading(true);
+    }
+    if (freshSchedule && freshSchedule.length > 0) {
+      setScheduleList(freshSchedule);
+    } else {
+      setScheduleList([]);
+    }
+
+    if (!freshLatest || freshLatest.length === 0 || !freshSchedule || freshSchedule.length === 0) {
       load();
     }
-  }, [activeSource, getLatestEpisodes, load]);
+  }, [activeSource, getLatestEpisodes, getScheduleStore, load]);
 
   const handleRefresh = () => {
     setIsRefreshing(true);
@@ -162,6 +165,8 @@ export function MobileHomePage() {
     });
   };
 
+  const isDonghua = activeSource === 'mundodonghua';
+
   return (
     <div style={{ padding: '12px 14px 24px' }}>
       {/* Header Móvil */}
@@ -171,10 +176,10 @@ export function MobileHomePage() {
       }}>
         <div>
           <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0, color: 'var(--text-primary)' }}>
-            {activeSource === 'jkanime' ? 'Anime Reciente' : 'Donghua Reciente'}
+            AniCS · {isDonghua ? 'MundoDonghua' : 'JKAnime'}
           </h2>
           <p style={{ color: 'var(--text-muted)', fontSize: 11, margin: '2px 0 0' }}>
-            Últimos episodios estrenados
+            {isDonghua ? 'Donghuas y animación china' : 'Episodios estrenados al instante'}
           </p>
         </div>
 
@@ -182,9 +187,9 @@ export function MobileHomePage() {
           onClick={handleRefresh}
           disabled={isRefreshing}
           style={{
-            background: 'var(--bg-surface)', border: '1px solid var(--border-moderate)',
+            background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
             borderRadius: 'var(--radius-full)', padding: '6px 12px',
-            color: 'var(--text-secondary)', cursor: 'pointer',
+            color: 'var(--text-primary)', cursor: 'pointer',
             display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 600,
           }}
         >
@@ -193,13 +198,13 @@ export function MobileHomePage() {
         </button>
       </div>
 
-      {/* Horario semanal en carrusel horizontal táctil */}
+      {/* Sección 1: En Emisión (Scroll Horizontal Móvil) */}
       {scheduleList.length > 0 && (
         <section style={{ marginBottom: 20 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
-            <TrendingUp size={14} color="var(--accent-secondary)" />
-            <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              Hoy en emisión
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+            <TrendingUp size={14} color="var(--accent-primary)" />
+            <span style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+              {isDonghua ? 'Donghuas en Emisión' : 'En Emisión Hoy'}
             </span>
           </div>
           <div style={{

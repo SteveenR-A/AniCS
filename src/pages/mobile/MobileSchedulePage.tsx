@@ -43,8 +43,18 @@ export function MobileSchedulePage() {
         setIsLoading(true);
       }
       const res = await getScheduleDaysFromApi(activeSource);
-      setScheduleDays(res, activeSource);
-      setLocalScheduleDays(res);
+      const sanitized = res.map((day) => {
+        const seen = new Set<string>();
+        const uniqueAnimes = day.animes.filter((a) => {
+          const key = (a.url || a.title).toLowerCase();
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+        return { ...day, animes: uniqueAnimes };
+      });
+      setScheduleDays(sanitized, activeSource);
+      setLocalScheduleDays(sanitized);
     } catch (e) {
       console.error('Failed to load schedule days in Mobile', e);
     } finally {
@@ -60,12 +70,38 @@ export function MobileSchedulePage() {
     }
   }, [activeSource, getScheduleDays, loadSchedule]);
 
+  const isDonghua = activeSource === 'mundodonghua';
+
   const displayedDays = useMemo(() => {
-    if (selectedDay === 'all') {
-      return scheduleDays;
+    if (isDonghua || selectedDay === 'all') {
+      return scheduleDays.map((day) => {
+        const seen = new Set<string>();
+        const unique = day.animes.filter((a) => {
+          const key = (a.url || a.title).toLowerCase();
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+        return { ...day, animes: unique };
+      });
     }
-    return scheduleDays.filter((d) => d.day.toLowerCase().includes(selectedDay.toLowerCase()));
-  }, [scheduleDays, selectedDay]);
+
+    const filtered = scheduleDays.filter((d) => d.day.toLowerCase().includes(selectedDay.toLowerCase()));
+    return filtered.map((day) => {
+      const seen = new Set<string>();
+      const unique = day.animes.filter((a) => {
+        const key = (a.url || a.title).toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      return { ...day, animes: unique };
+    });
+  }, [scheduleDays, selectedDay, isDonghua]);
+
+  const totalAnimes = useMemo(() => {
+    return displayedDays.reduce((acc, curr) => acc + curr.animes.length, 0);
+  }, [displayedDays]);
 
   return (
     <div style={{ padding: '12px 14px 24px' }}>
@@ -76,10 +112,10 @@ export function MobileSchedulePage() {
       }}>
         <div>
           <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0, color: 'var(--text-primary)' }}>
-            Horario Semanal
+            {isDonghua ? 'Donghuas en Emisión' : 'Horario Semanal'}
           </h2>
           <p style={{ color: 'var(--text-muted)', fontSize: 11, margin: '2px 0 0' }}>
-            {activeSource === 'jkanime' ? 'Estrenos semanales Anime' : 'Estrenos semanales Donghua'}
+            {isDonghua ? `${totalAnimes} donghuas en emisión` : 'Estrenos semanales Anime'}
           </p>
         </div>
 
@@ -99,48 +135,50 @@ export function MobileSchedulePage() {
       </div>
 
       {/* Tabs de Días con Scroll Horizontal Táctil */}
-      <div style={{
-        display: 'flex', gap: 6,
-        overflowX: 'auto',
-        WebkitOverflowScrolling: 'touch',
-        marginBottom: 16,
-        paddingBottom: 4,
-        scrollbarWidth: 'none',
-      }}>
-        <button
-          onClick={() => setSelectedDay('all')}
-          style={{
-            padding: '5px 12px', borderRadius: 'var(--radius-full)',
-            background: selectedDay === 'all' ? 'var(--accent-primary)' : 'var(--bg-surface)',
-            color: selectedDay === 'all' ? 'white' : 'var(--text-secondary)',
-            border: selectedDay === 'all' ? '1px solid var(--accent-primary)' : '1px solid var(--border-moderate)',
-            fontWeight: selectedDay === 'all' ? 700 : 500, fontSize: 11, cursor: 'pointer',
-            whiteSpace: 'nowrap', flexShrink: 0,
-          }}
-        >
-          Toda la semana
-        </button>
+      {!isDonghua && (
+        <div style={{
+          display: 'flex', gap: 6,
+          overflowX: 'auto',
+          WebkitOverflowScrolling: 'touch',
+          marginBottom: 16,
+          paddingBottom: 4,
+          scrollbarWidth: 'none',
+        }}>
+          <button
+            onClick={() => setSelectedDay('all')}
+            style={{
+              padding: '5px 12px', borderRadius: 'var(--radius-full)',
+              background: selectedDay === 'all' ? 'var(--accent-primary)' : 'var(--bg-surface)',
+              color: selectedDay === 'all' ? 'white' : 'var(--text-secondary)',
+              border: selectedDay === 'all' ? '1px solid var(--accent-primary)' : '1px solid var(--border-moderate)',
+              fontSize: 11, fontWeight: selectedDay === 'all' ? 700 : 500, cursor: 'pointer',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            Toda la semana
+          </button>
 
-        {DAYS_ORDER.map((day) => {
-          const isSelected = selectedDay === day;
-          return (
-            <button
-              key={day}
-              onClick={() => setSelectedDay(day)}
-              style={{
-                padding: '5px 12px', borderRadius: 'var(--radius-full)',
-                background: isSelected ? 'var(--accent-primary)' : 'var(--bg-surface)',
-                color: isSelected ? 'white' : 'var(--text-secondary)',
-                border: isSelected ? '1px solid var(--accent-primary)' : '1px solid var(--border-moderate)',
-                fontWeight: isSelected ? 700 : 500, fontSize: 11, cursor: 'pointer',
-                whiteSpace: 'nowrap', flexShrink: 0,
-              }}
-            >
-              {day}
-            </button>
-          );
-        })}
-      </div>
+          {DAYS_ORDER.map((day) => {
+            const isSelected = selectedDay === day;
+            return (
+              <button
+                key={day}
+                onClick={() => setSelectedDay(day)}
+                style={{
+                  padding: '5px 12px', borderRadius: 'var(--radius-full)',
+                  background: isSelected ? 'var(--accent-primary)' : 'var(--bg-surface)',
+                  color: isSelected ? 'white' : 'var(--text-secondary)',
+                  border: isSelected ? '1px solid var(--accent-primary)' : '1px solid var(--border-moderate)',
+                  fontSize: 11, fontWeight: isSelected ? 700 : 500, cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {day}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Listado de Animes en 2 Columnas */}
       {isLoading ? (

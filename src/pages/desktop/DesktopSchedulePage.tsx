@@ -43,8 +43,18 @@ export function DesktopSchedulePage() {
         setIsLoading(true);
       }
       const res = await getScheduleDaysFromApi(activeSource);
-      setScheduleDays(res, activeSource);
-      setLocalScheduleDays(res);
+      const sanitized = res.map((day) => {
+        const seen = new Set<string>();
+        const uniqueAnimes = day.animes.filter((a) => {
+          const key = (a.url || a.title).toLowerCase();
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+        return { ...day, animes: uniqueAnimes };
+      });
+      setScheduleDays(sanitized, activeSource);
+      setLocalScheduleDays(sanitized);
     } catch (e) {
       console.error('Failed to load schedule days in Desktop', e);
     } finally {
@@ -60,16 +70,38 @@ export function DesktopSchedulePage() {
     }
   }, [activeSource, getScheduleDays, loadSchedule]);
 
+  const isDonghua = activeSource === 'mundodonghua';
+
   const displayedDays = useMemo(() => {
-    if (selectedDay === 'all') {
-      return scheduleDays;
+    if (isDonghua || selectedDay === 'all') {
+      return scheduleDays.map((day) => {
+        const seen = new Set<string>();
+        const unique = day.animes.filter((a) => {
+          const key = (a.url || a.title).toLowerCase();
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+        return { ...day, animes: unique };
+      });
     }
-    return scheduleDays.filter((d) => d.day.toLowerCase().includes(selectedDay.toLowerCase()));
-  }, [scheduleDays, selectedDay]);
+
+    const filtered = scheduleDays.filter((d) => d.day.toLowerCase().includes(selectedDay.toLowerCase()));
+    return filtered.map((day) => {
+      const seen = new Set<string>();
+      const unique = day.animes.filter((a) => {
+        const key = (a.url || a.title).toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      return { ...day, animes: unique };
+    });
+  }, [scheduleDays, selectedDay, isDonghua]);
 
   const totalAnimes = useMemo(() => {
-    return scheduleDays.reduce((acc, curr) => acc + curr.animes.length, 0);
-  }, [scheduleDays]);
+    return displayedDays.reduce((acc, curr) => acc + curr.animes.length, 0);
+  }, [displayedDays]);
 
   return (
     <div style={{ padding: '28px 36px', maxWidth: 1440, margin: '0 auto' }}>
@@ -89,10 +121,10 @@ export function DesktopSchedulePage() {
           </div>
           <div>
             <h1 style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-0.03em', margin: 0 }}>
-              Horario de Emisión Semanal
+              {isDonghua ? 'Donghuas en Emisión' : 'Horario de Emisión Semanal'}
             </h1>
             <p style={{ color: 'var(--text-muted)', fontSize: 13, margin: '3px 0 0' }}>
-              {totalAnimes} producciones en emisión oficial · {activeSource === 'jkanime' ? 'JKAnime' : 'MundoDonghua'}
+              {totalAnimes} producciones en emisión oficial · {isDonghua ? 'MundoDonghua' : 'JKAnime'}
             </p>
           </div>
         </div>
@@ -109,46 +141,59 @@ export function DesktopSchedulePage() {
           }}
         >
           <RefreshCw size={14} style={{ animation: isLoading ? 'spin-slow 1s linear infinite' : 'none' }} />
-          Actualizar horario
+          Actualizar {isDonghua ? 'donghuas' : 'horario'}
         </button>
       </div>
 
       {/* Selector de Días Desktop */}
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 32 }}>
-        <button
-          onClick={() => setSelectedDay('all')}
-          style={{
-            padding: '8px 18px', borderRadius: 'var(--radius-full)',
-            background: selectedDay === 'all' ? 'var(--accent-primary)' : 'var(--bg-surface)',
-            color: selectedDay === 'all' ? 'white' : 'var(--text-secondary)',
-            border: selectedDay === 'all' ? '1px solid var(--accent-primary)' : '1px solid var(--border-moderate)',
-            fontWeight: selectedDay === 'all' ? 700 : 500, fontSize: 13, cursor: 'pointer',
-            boxShadow: selectedDay === 'all' ? 'var(--shadow-glow)' : 'none',
-          }}
-        >
-          📅 Toda la semana
-        </button>
+      {!isDonghua ? (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 32 }}>
+          <button
+            onClick={() => setSelectedDay('all')}
+            style={{
+              padding: '8px 18px', borderRadius: 'var(--radius-full)',
+              background: selectedDay === 'all' ? 'var(--accent-primary)' : 'var(--bg-surface)',
+              color: selectedDay === 'all' ? 'white' : 'var(--text-secondary)',
+              border: selectedDay === 'all' ? '1px solid var(--accent-primary)' : '1px solid var(--border-moderate)',
+              fontWeight: selectedDay === 'all' ? 700 : 500, fontSize: 13, cursor: 'pointer',
+              boxShadow: selectedDay === 'all' ? 'var(--shadow-glow)' : 'none',
+            }}
+          >
+            📅 Toda la semana
+          </button>
 
-        {DAYS_ORDER.map((day) => {
-          const isSelected = selectedDay === day;
-          return (
-            <button
-              key={day}
-              onClick={() => setSelectedDay(day)}
-              style={{
-                padding: '8px 18px', borderRadius: 'var(--radius-full)',
-                background: isSelected ? 'var(--accent-primary)' : 'var(--bg-surface)',
-                color: isSelected ? 'white' : 'var(--text-secondary)',
-                border: isSelected ? '1px solid var(--accent-primary)' : '1px solid var(--border-moderate)',
-                fontWeight: isSelected ? 700 : 500, fontSize: 13, cursor: 'pointer',
-                boxShadow: isSelected ? 'var(--shadow-glow)' : 'none',
-              }}
-            >
-              {day}
-            </button>
-          );
-        })}
-      </div>
+          {DAYS_ORDER.map((day) => {
+            const isSelected = selectedDay === day;
+            return (
+              <button
+                key={day}
+                onClick={() => setSelectedDay(day)}
+                style={{
+                  padding: '8px 18px', borderRadius: 'var(--radius-full)',
+                  background: isSelected ? 'var(--accent-primary)' : 'var(--bg-surface)',
+                  color: isSelected ? 'white' : 'var(--text-secondary)',
+                  border: isSelected ? '1px solid var(--accent-primary)' : '1px solid var(--border-moderate)',
+                  fontWeight: isSelected ? 700 : 500, fontSize: 13, cursor: 'pointer',
+                  boxShadow: isSelected ? 'var(--shadow-glow)' : 'none',
+                }}
+              >
+                {day}
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <div style={{ marginBottom: 24 }}>
+          <div style={{
+            display: 'inline-flex', alignItems: 'center', gap: 8,
+            background: 'var(--accent-primary-glow)', border: '1px solid var(--accent-primary)',
+            borderRadius: 'var(--radius-full)', padding: '6px 18px',
+            color: 'var(--text-primary)', fontSize: 13, fontWeight: 700,
+          }}>
+            <span>✨ Animación China en Emisión Continua</span>
+          </div>
+        </div>
+      )}
 
       {/* Listado de Animes Desktop */}
       {isLoading ? (

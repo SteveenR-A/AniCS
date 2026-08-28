@@ -265,13 +265,12 @@ export function DesktopFavoritesPage() {
 // ──────────────────────────────────────────
 export function DesktopDownloadsPage() {
   const navigate = useNavigate();
-  const { tasks, cancelTask, removeTask } = useDownloadStore();
+  const { tasks, cancelTask, removeTask, expandedFolders, toggleFolder } = useDownloadStore();
   const { setCurrentAnime, setCurrentEpisode, setResolvedMedia, setServers, openPlayer } = usePlayerStore();
 
   const [activeTab, setActiveTab] = useState<'local' | 'active'>('local');
   const [downloadFolder, setDownloadFolder] = useState<string>('');
   const [animeFolders, setAnimeFolders] = useState<LocalAnimeFolder[]>([]);
-  const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
   const [isScanning, setIsScanning] = useState(false);
 
   const loadLocalFolders = useCallback(async (customPath?: string) => {
@@ -290,14 +289,12 @@ export function DesktopDownloadsPage() {
 
   useEffect(() => {
     loadLocalFolders();
-  }, []);
-
-  const toggleFolder = (folderPath: string) => {
-    setExpandedFolders(prev => ({
-      ...prev,
-      [folderPath]: !prev[folderPath],
-    }));
-  };
+    const handleFocus = () => {
+      loadLocalFolders();
+    };
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [loadLocalFolders]);
 
   const handleSelectFolder = async () => {
     try {

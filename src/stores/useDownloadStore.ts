@@ -4,14 +4,34 @@ import { cancelDownload } from '@/services/downloadService';
 
 interface DownloadStore {
   tasks: Map<string, DownloadTask>;
+  expandedFolders: Record<string, boolean>;
   addTask: (task: DownloadTask) => void;
   updateProgress: (progress: DownloadProgress) => void;
   removeTask: (id: string) => void;
   cancelTask: (id: string) => Promise<void>;
+  toggleFolder: (folderPath: string) => void;
+  setFolderExpanded: (folderPath: string, isExpanded: boolean) => void;
 }
 
 export const useDownloadStore = create<DownloadStore>((set, get) => ({
   tasks: new Map(),
+  expandedFolders: {},
+
+  toggleFolder: (folderPath) =>
+    set((state) => ({
+      expandedFolders: {
+        ...state.expandedFolders,
+        [folderPath]: !state.expandedFolders[folderPath],
+      },
+    })),
+
+  setFolderExpanded: (folderPath, isExpanded) =>
+    set((state) => ({
+      expandedFolders: {
+        ...state.expandedFolders,
+        [folderPath]: isExpanded,
+      },
+    })),
 
   addTask: (task) =>
     set((state) => {

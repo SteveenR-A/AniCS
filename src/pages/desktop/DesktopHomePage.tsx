@@ -108,23 +108,6 @@ export function DesktopHomePage() {
   const [isLoading, setIsLoading] = useState<boolean>(!cachedLatest || cachedLatest.length === 0);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  useEffect(() => {
-    const freshLatest = getLatestEpisodes(activeSource);
-    const freshSchedule = getScheduleStore(activeSource);
-    if (freshLatest && freshLatest.length > 0) {
-      setLatestList(freshLatest);
-      setIsLoading(false);
-    } else {
-      setLatestList([]);
-      setIsLoading(true);
-    }
-    if (freshSchedule) {
-      setScheduleList(freshSchedule);
-    } else {
-      setScheduleList([]);
-    }
-  }, [activeSource, getLatestEpisodes, getScheduleStore]);
-
   const load = useCallback(async () => {
     try {
       const [latest, sched] = await Promise.allSettled([
@@ -137,8 +120,15 @@ export function DesktopHomePage() {
         setLatestList(latest.value);
       }
       if (sched.status === 'fulfilled') {
-        setSchedule(sched.value, activeSource);
-        setScheduleList(sched.value);
+        const seen = new Set<string>();
+        const uniqueSched = sched.value.filter((a) => {
+          const key = (a.url || a.title).toLowerCase();
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+        setSchedule(uniqueSched, activeSource);
+        setScheduleList(uniqueSched);
       }
     } catch (e) {
       console.error('Error cargando datos de inicio en Desktop', e);
@@ -149,12 +139,25 @@ export function DesktopHomePage() {
   }, [activeSource, setLatestEpisodes, setSchedule]);
 
   useEffect(() => {
-    const current = getLatestEpisodes(activeSource);
-    if (!current || current.length === 0) {
+    const freshLatest = getLatestEpisodes(activeSource);
+    const freshSchedule = getScheduleStore(activeSource);
+    if (freshLatest && freshLatest.length > 0) {
+      setLatestList(freshLatest);
+      setIsLoading(false);
+    } else {
+      setLatestList([]);
       setIsLoading(true);
+    }
+    if (freshSchedule && freshSchedule.length > 0) {
+      setScheduleList(freshSchedule);
+    } else {
+      setScheduleList([]);
+    }
+
+    if (!freshLatest || freshLatest.length === 0 || !freshSchedule || freshSchedule.length === 0) {
       load();
     }
-  }, [activeSource, getLatestEpisodes, load]);
+  }, [activeSource, getLatestEpisodes, getScheduleStore, load]);
 
   const handleRefresh = () => {
     setIsRefreshing(true);
@@ -166,6 +169,8 @@ export function DesktopHomePage() {
       state: { anime },
     });
   };
+
+  const isDonghua = activeSource === 'mundodonghua';
 
   return (
     <div style={{ padding: '28px 36px', maxWidth: 1440, margin: '0 auto' }}>
@@ -191,9 +196,14 @@ export function DesktopHomePage() {
               }}>
                 AniCS
               </span>
+              <span style={{ fontSize: 20, fontWeight: 700, color: 'var(--text-secondary)', marginLeft: 10 }}>
+                · {isDonghua ? 'MundoDonghua' : 'JKAnime'}
+              </span>
             </h1>
             <p style={{ color: 'var(--text-muted)', fontSize: 13, margin: '3px 0 0' }}>
-              Catálogo de {activeSource === 'jkanime' ? 'Anime en emisión' : 'MundoDonghua'} · Actualizado al instante
+              {isDonghua
+                ? 'Catálogo de Donghuas y animación en emisión · Actualizado al instante'
+                : 'Catálogo de Anime japonés en emisión · Actualizado al instante'}
             </p>
           </div>
         </div>
@@ -216,13 +226,13 @@ export function DesktopHomePage() {
         </motion.button>
       </div>
 
-      {/* Horario semanal (Desktop Chips) */}
+      {/* Sección 1: En Emisión */}
       {scheduleList.length > 0 && (
         <section style={{ marginBottom: 36 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-            <TrendingUp size={16} color="var(--accent-secondary)" />
-            <h2 style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-secondary)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-              En emisión hoy
+            <TrendingUp size={18} color="var(--accent-primary)" />
+            <h2 style={{ fontSize: 13, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)', margin: 0 }}>
+              {isDonghua ? 'Donghuas en Emisión Oficial' : 'En Emisión Hoy'}
             </h2>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>

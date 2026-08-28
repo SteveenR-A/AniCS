@@ -52,12 +52,19 @@ async fn test_mundodonghua_get_latest() {
 
 #[tokio::test]
 async fn test_jkanime_schedule_and_top() {
-    let top_html = anics_lib::scrapers::fetch_html("https://jkanime.net/top/", Some("https://jkanime.net/")).await.unwrap();
-    let doc_top = scraper::Html::parse_document(&top_html);
-    let sample = scraper::Selector::parse("a[href='https://jkanime.net/one-piece/']").unwrap();
-    if let Some(a) = doc_top.select(&sample).next() {
-        println!("Parent tag and class: <{}> class='{}'", a.parent().unwrap().value().as_element().unwrap().name(), a.parent().unwrap().value().as_element().unwrap().attr("class").unwrap_or(""));
-        println!("Link HTML: {}", &a.html()[..std::cmp::min(300, a.html().len())]);
+    let extractor = JKAnimeExtractor::new();
+    let days = extractor.get_schedule_days().await.expect("Failed to get schedule days");
+    println!("JKAnime schedule days count: {}", days.len());
+    assert!(!days.is_empty(), "Schedule days should not be empty");
+
+    for d in &days {
+        println!("Day: {} - Animes: {}", d.day, d.animes.len());
+        let mut seen = std::collections::HashSet::new();
+        for a in &d.animes {
+            assert!(!seen.contains(&a.url), "Duplicate anime url found in day {}: {}", d.day, a.url);
+            seen.insert(a.url.clone());
+            assert!(!a.title.to_lowercase().starts_with("último capítulo"), "Invalid title found: {}", a.title);
+        }
     }
 }
 

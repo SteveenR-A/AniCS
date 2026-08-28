@@ -12,7 +12,7 @@ import {
 import { usePlayerStore } from '@/stores/usePlayerStore';
 import { useAnimeStore } from '@/stores/useAnimeStore';
 import { resolveStream, getServers, getDetails } from '@/services/animeService';
-import { upsertHistory } from '@/services/storageService';
+import { upsertHistory, getEpisodeProgress } from '@/services/storageService';
 import { useResponsive } from '@/hooks/useResponsive';
 import type { VideoServer, Episode } from '@/types';
 
@@ -268,6 +268,29 @@ export function PlayerPage() {
     }
   };
 
+  const playbackTimeRef = useRef(playbackTime);
+  const durationRef = useRef(duration);
+  const currentAnimeRef = useRef(currentAnime);
+  const currentEpisodeRef = useRef(currentEpisode);
+  const hasResumedProgressRef = useRef(false);
+
+  useEffect(() => {
+    playbackTimeRef.current = playbackTime;
+  }, [playbackTime]);
+
+  useEffect(() => {
+    durationRef.current = duration;
+  }, [duration]);
+
+  useEffect(() => {
+    currentAnimeRef.current = currentAnime;
+  }, [currentAnime]);
+
+  useEffect(() => {
+    currentEpisodeRef.current = currentEpisode;
+    hasResumedProgressRef.current = false;
+  }, [currentEpisode]);
+
   const tryFallbackServer = () => {
     if (!servers.length || !selectedServer) return;
     const currentIndex = servers.findIndex(s => s.url === selectedServer.url);
@@ -279,25 +302,37 @@ export function PlayerPage() {
   };
 
   // Guardar progreso en el historial de SQLite
-  const saveProgress = useCallback(() => {
-    if (!currentAnime || !currentEpisode || !duration || duration <= 0) return;
-    const prog = playbackTime / duration;
+  const saveProgress = useCallback((overrideProgress?: number) => {
+    const anime = currentAnimeRef.current;
+    const ep = currentEpisodeRef.current;
+    if (!anime || !ep) return;
+
+    const dur = durationRef.current;
+    const time = playbackTimeRef.current;
+
+    let prog = 0.01; // Progreso inicial al comenzar a reproducir
+    if (typeof overrideProgress === 'number') {
+      prog = overrideProgress;
+    } else if (dur && dur > 0) {
+      prog = Math.max(0.01, Math.min(1.0, time / dur));
+    }
+
     upsertHistory({
-      id: `${currentAnime.url}-${currentEpisode.number}`,
-      animeTitle: currentAnime.title,
-      animeUrl: currentAnime.url,
-      thumbnailUrl: currentAnime.thumbnailUrl,
-      episodeNumber: currentEpisode.number,
-      episodeUrl: currentEpisode.url,
-      watchProgress: Math.min(1.0, Math.max(0.0, prog)),
+      id: `${anime.url}-${ep.number}`,
+      animeTitle: anime.title,
+      animeUrl: anime.url,
+      thumbnailUrl: anime.thumbnailUrl,
+      episodeNumber: ep.number,
+      episodeUrl: ep.url,
+      watchProgress: prog,
       watchedAt: new Date().toISOString(),
-      source: currentAnime.source,
+      source: anime.source,
     }).catch(console.error);
-  }, [currentAnime, currentEpisode, playbackTime, duration]);
+  }, []);
 
   // Guardar progreso periódicamente cada 10 segundos
   useEffect(() => {
-    const interval = setInterval(saveProgress, 10000);
+    const interval = setInterval(() => saveProgress(), 10000);
     return () => {
       clearInterval(interval);
       saveProgress();
@@ -340,7 +375,7 @@ export function PlayerPage() {
   };
 
   const handleEnded = () => {
-    saveProgress();
+    saveProgress(1.0);
     if (autoNext && currentAnime && currentEpisode) {
       const nextEp = currentAnime.episodes.find(e => e.number === currentEpisode.number + 1);
       if (nextEp) {
@@ -646,15 +681,46 @@ export function PlayerPage() {
             objectFit: aspectRatio,
             filter: brightness > 1 ? `brightness(${brightness})` : undefined,
           }}
-          onPlay={() => setIsPlaying(true)}
-          onPause={() => setIsPlaying(false)}
+          onPlay={() => {
+            setIsPlaying(true);
+            saveProgress();
+          }}
+          onPause={() => {
+            setIsPlaying(false);
+            saveProgress();
+          }}
+          onLoadedMetadata={async () => {
+            const v = videoRef.current;
+            if (v) {
+              setDuration(v.duration);
+              durationRef.current = v.duration;
+              if (!hasResumedProgressRef.current && currentEpisodeRef.current) {
+                try {
+                  const savedProg = await getEpisodeProgress(currentEpisodeRef.current.url);
+                  if (savedProg && savedProg > 0.01 && savedProg < 0.90 && v.duration > 0) {
+                    v.currentTime = savedProg * v.duration;
+                    hasResumedProgressRef.current = true;
+                    showToast({ icon: 'seek', text: `Reanudado al ${Math.round(savedProg * 100)}%` });
+                  }
+                } catch (e) {
+                  console.error('Error resuming progress:', e);
+                }
+              }
+            }
+          }}
           onTimeUpdate={() => {
             const v = videoRef.current;
-            if (v) setPlaybackTime(v.currentTime);
+            if (v) {
+              setPlaybackTime(v.currentTime);
+              playbackTimeRef.current = v.currentTime;
+            }
           }}
           onDurationChange={() => {
             const v = videoRef.current;
-            if (v) setDuration(v.duration);
+            if (v) {
+              setDuration(v.duration);
+              durationRef.current = v.duration;
+            }
           }}
           onError={() => {
             console.warn('Video element error, switching to fallback server...');

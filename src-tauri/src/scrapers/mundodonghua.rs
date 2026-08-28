@@ -132,50 +132,35 @@ impl AnimeExtractor for MundoDonghuaExtractor {
         Ok(results)
     }
 
-    // Horario semanal plano
+    // Horario semanal de Donghuas en emisión
     async fn get_schedule(&self) -> AppResult<Vec<AnimeResult>> {
+        let url = self.url("/lista-donghuas-emision");
+        if let Ok(html) = fetch_html(&url, Some(&self.base_url)).await {
+            if !html.is_empty() {
+                let list = parse_donghua_cards(&html, &self.base_url, self.id());
+                if !list.is_empty() {
+                    return Ok(list);
+                }
+            }
+        }
         self.get_latest(1).await
     }
 
-    // Horario estructurado
+    // Horario estructurado para MundoDonghua
     async fn get_schedule_days(&self) -> AppResult<Vec<ScheduleDay>> {
-        let latest = self.get_latest(1).await?;
+        let list = self.get_schedule().await?;
         Ok(vec![ScheduleDay {
-            day: "Emisión Reciente".to_string(),
-            animes: latest,
+            day: "Donghuas en Emisión Oficial".to_string(),
+            animes: list,
         }])
     }
 
-    // Top Donghuas
+    // Top Donghuas populares
     async fn get_top(&self) -> AppResult<Vec<AnimeResult>> {
         let url = self.url("/lista-donghuas");
         if let Ok(html) = fetch_html(&url, Some(&self.base_url)).await {
             if !html.is_empty() {
-                let doc = Html::parse_document(&html);
-                let item_sel = Selector::parse("div.md-donghua-card, div.col-6, div.col-md-4, .item").unwrap();
-                let a_sel = Selector::parse("a").unwrap();
-                let img_sel = Selector::parse("img").unwrap();
-                let title_sel = Selector::parse("h3, h4, h5, .title").unwrap();
-                let mut results = vec![];
-
-                for item in doc.select(&item_sel).take(40) {
-                    if let Some(a) = item.select(&a_sel).next() {
-                        let href = attr(&a, "href");
-                        let title = item.select(&title_sel).next().map(|h| inner_text(&h)).unwrap_or_else(|| inner_text(&a));
-                        if href.is_empty() || title.is_empty() { continue; }
-
-                        let thumb = item.select(&img_sel).next().map(|img| attr(&img, "src")).unwrap_or_default();
-
-                        results.push(AnimeResult {
-                            title,
-                            url: normalize_url(&href, &self.base_url),
-                            thumbnail_url: normalize_url(&thumb, &self.base_url),
-                            source: self.id().to_string(),
-                            ..Default::default()
-                        });
-                    }
-                }
-
+                let results = parse_donghua_cards(&html, &self.base_url, self.id());
                 if !results.is_empty() {
                     return Ok(results);
                 }
@@ -187,25 +172,23 @@ impl AnimeExtractor for MundoDonghuaExtractor {
     // Búsqueda avanzada con filtros dinámicos
     async fn advanced_search(&self, filters: &SearchFilters) -> AppResult<SearchResultPage> {
         let page = filters.page;
-        let mut results = vec![];
-
         let active_genre = filters.genre.as_ref();
 
         let target_url = if let Some(ref q) = filters.query {
             let q_trimmed = q.trim();
             if !q_trimmed.is_empty() {
-                self.url(&format!("/busqueda?q={}&p={}", urlencoding::encode(q_trimmed), page))
+                self.url(&format!("/busquedas?donghua={}&p={}", urlencoding::encode(q_trimmed), page))
             } else if let Some(g) = active_genre {
                 let g_slug = g.to_lowercase().replace(' ', "-");
                 self.url(&format!("/genero/{}/{}", g_slug, page))
             } else {
-                self.url(&format!("/donghuas?p={}", page))
+                self.url(&format!("/lista-donghuas?p={}", page))
             }
         } else if let Some(g) = active_genre {
             let g_slug = g.to_lowercase().replace(' ', "-");
             self.url(&format!("/genero/{}/{}", g_slug, page))
         } else {
-            self.url(&format!("/donghuas?p={}", page))
+            self.url(&format!("/lista-donghuas?p={}", page))
         };
 
         let html = fetch_html(&target_url, Some(&self.base_url)).await
@@ -219,33 +202,8 @@ impl AnimeExtractor for MundoDonghuaExtractor {
             });
         }
 
-        let doc = Html::parse_document(&html);
-        let card_sel = Selector::parse("div.md-card, div.md-donghua-item, .donghua-card").unwrap();
-        let a_sel = Selector::parse("a").unwrap();
-        let title_sel = Selector::parse("h5.md-card-title, h5, .title, a.title").unwrap();
-        let img_sel = Selector::parse("img, .cover, .md-card-img img").unwrap();
-
-        for card in doc.select(&card_sel) {
-            let href = card.select(&a_sel).next().map(|a| attr(&a, "href")).unwrap_or_default();
-            let title = card.select(&title_sel).next().map(|h| inner_text(&h)).unwrap_or_default();
-            if href.is_empty() || title.is_empty() { continue; }
-
-            let thumbnail = card.select(&img_sel).next().map(|i| {
-                let src = attr(&i, "src");
-                if src.is_empty() { attr(&i, "data-src") } else { src }
-            }).unwrap_or_default();
-
-            results.push(AnimeResult {
-                title,
-                url: normalize_donghua_url(&href, &self.base_url),
-                thumbnail_url: normalize_url(&thumbnail, &self.base_url),
-                anime_type: Some("Donghua".to_string()),
-                source: self.id().to_string(),
-                ..Default::default()
-            });
-        }
-
-        let has_next = results.len() >= 20;
+        let results = parse_donghua_cards(&html, &self.base_url, self.id());
+        let has_next = results.len() >= 15;
 
         Ok(SearchResultPage {
             results,
@@ -575,4 +533,49 @@ fn default_donghua_genres() -> Vec<GenreItem> {
         GenreItem { name: "2D".into(), slug: "2d".into() },
         GenreItem { name: "Sobrenatural".into(), slug: "sobrenatural".into() },
     ]
+}
+
+fn parse_donghua_cards(html: &str, base_url: &str, source_id: &str) -> Vec<AnimeResult> {
+    let doc = Html::parse_document(html);
+    let mut results = vec![];
+    let mut seen = std::collections::HashSet::new();
+
+    let a_sel = Selector::parse("a[href*='/donghua/'], div.md-card a, div.col-6 a, div.col-md-4 a").unwrap();
+    let title_sel = Selector::parse("h3.md-card-title, h5.md-card-title, h3, h5, .title, a.title").unwrap();
+    let img_sel = Selector::parse("img").unwrap();
+
+    for a in doc.select(&a_sel) {
+        let href = attr(&a, "href");
+        if href.is_empty() || href == "/donghua" || href == "/donghua/" { continue; }
+
+        let clean_url = normalize_donghua_url(&href, base_url);
+        if seen.contains(&clean_url) { continue; }
+        seen.insert(clean_url.clone());
+
+        let title = if let Some(h) = a.select(&title_sel).next() {
+            inner_text(&h)
+        } else if let Some(img) = a.select(&img_sel).next() {
+            attr(&img, "alt")
+        } else {
+            String::new()
+        };
+
+        if title.is_empty() { continue; }
+
+        let thumbnail = a.select(&img_sel).next().map(|i| {
+            let src = attr(&i, "src");
+            if src.is_empty() { attr(&i, "data-src") } else { src }
+        }).unwrap_or_default();
+
+        results.push(AnimeResult {
+            title,
+            url: clean_url,
+            thumbnail_url: normalize_url(&thumbnail, base_url),
+            anime_type: Some("Donghua".to_string()),
+            source: source_id.to_string(),
+            ..Default::default()
+        });
+    }
+
+    results
 }

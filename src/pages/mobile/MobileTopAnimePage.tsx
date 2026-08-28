@@ -50,6 +50,8 @@ export function MobileTopAnimePage() {
     }
   }, [activeSource, getTopList, loadTop]);
 
+  const isDonghua = activeSource === 'mundodonghua';
+
   return (
     <div style={{ padding: '12px 14px 24px' }}>
       {/* Header Móvil */}
@@ -67,7 +69,7 @@ export function MobileTopAnimePage() {
           </div>
           <div>
             <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0, color: 'var(--text-primary)' }}>
-              Top Ranking
+              {isDonghua ? 'Top Donghuas' : 'Top Ranking'}
             </h2>
           </div>
         </div>
