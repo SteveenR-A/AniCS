@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { RefreshCw, Zap, TrendingUp } from 'lucide-react';
@@ -34,14 +34,14 @@ function MobileAnimeCard({ anime, onClick }: { anime: AnimeResult; onClick: () =
           background: 'linear-gradient(to top, rgba(10,11,15,0.95), transparent)',
         }} />
 
-        {anime.episode && (
+        {anime.episode && anime.episode.toLowerCase().trim() !== 'donghua' && (
           <div style={{
             position: 'absolute', top: 6, right: 6,
             background: 'var(--accent-primary)',
             color: 'white', fontSize: 10, fontWeight: 700,
             padding: '2px 7px', borderRadius: 'var(--radius-full)',
           }}>
-            Ep {anime.episode}
+            {anime.episode.toLowerCase().startsWith('ep') ? anime.episode : `Ep ${anime.episode}`}
           </div>
         )}
 
@@ -89,77 +89,69 @@ function MobileSkeletonCard() {
 
 export function MobileHomePage() {
   const navigate = useNavigate();
-  const {
-    activeSource,
-    getLatestEpisodes, setLatestEpisodes,
-    getSchedule: getScheduleStore, setSchedule,
-  } = useAnimeStore();
+  const activeSource = useAnimeStore((s) => s.activeSource);
 
-  const cachedLatest = getLatestEpisodes(activeSource);
-  const cachedSchedule = getScheduleStore(activeSource);
-
-  const [latestList, setLatestList] = useState<AnimeResult[]>(() => cachedLatest ?? []);
-  const [scheduleList, setScheduleList] = useState<AnimeResult[]>(() => cachedSchedule ?? []);
-  const [isLoading, setIsLoading] = useState<boolean>(!cachedLatest || cachedLatest.length === 0);
+  const [latestList, setLatestList] = useState<AnimeResult[]>([]);
+  const [scheduleList, setScheduleList] = useState<AnimeResult[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (targetSource: string) => {
+    setIsLoading(true);
+    setLatestList([]);
+    setScheduleList([]);
     try {
       const [latest, sched] = await Promise.allSettled([
-        getLatest(activeSource, 1),
-        getSchedule(activeSource),
+        getLatest(targetSource, 1),
+        getSchedule(targetSource),
       ]);
 
+      // Si el usuario cambió de fuente mientras cargaba, descartamos la respuesta antigua
+      if (useAnimeStore.getState().activeSource !== targetSource) {
+        return;
+      }
+
       if (latest.status === 'fulfilled') {
-        setLatestEpisodes(latest.value, activeSource);
-        setLatestList(latest.value);
+        const seen = new Set<string>();
+        const sanitizedLatest = latest.value
+          .map((a) => ({ ...a, source: targetSource }))
+          .filter((a) => {
+            const key = (a.url || a.title).toLowerCase();
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
+        setLatestList(sanitizedLatest);
       }
       if (sched.status === 'fulfilled') {
         const seen = new Set<string>();
-        const uniqueSched = sched.value.filter((a) => {
-          const key = (a.url || a.title).toLowerCase();
-          if (seen.has(key)) return false;
-          seen.add(key);
-          return true;
-        });
-        setSchedule(uniqueSched, activeSource);
+        const uniqueSched = sched.value
+          .map((a) => ({ ...a, source: targetSource }))
+          .filter((a) => {
+            const key = (a.url || a.title).toLowerCase();
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
         setScheduleList(uniqueSched);
       }
     } catch (e) {
       console.error('Error cargando datos de inicio en Móvil', e);
     } finally {
-      setIsLoading(false);
-      setIsRefreshing(false);
+      if (useAnimeStore.getState().activeSource === targetSource) {
+        setIsLoading(false);
+        setIsRefreshing(false);
+      }
     }
-  }, [activeSource, setLatestEpisodes, setSchedule]);
+  }, []);
 
   useEffect(() => {
-    const freshLatest = getLatestEpisodes(activeSource);
-    const freshSchedule = getScheduleStore(activeSource);
-    if (freshLatest && freshLatest.length > 0) {
-      setLatestList(freshLatest);
-      setIsLoading(false);
-    } else {
-      setLatestList([]);
-      setIsLoading(true);
-    }
-    if (freshSchedule && freshSchedule.length > 0) {
-      setScheduleList(freshSchedule);
-    } else {
-      setScheduleList([]);
-    }
-
-    if (!freshLatest || freshLatest.length === 0 || !freshSchedule || freshSchedule.length === 0) {
-      setLatestList([]);
-      setScheduleList([]);
-      setIsLoading(true);
-      load();
-    }
-  }, [activeSource, getLatestEpisodes, getScheduleStore, load]);
+    load(activeSource);
+  }, [activeSource, load]);
 
   const handleRefresh = () => {
     setIsRefreshing(true);
-    load();
+    load(activeSource);
   };
 
   const handleAnimeClick = (anime: AnimeResult) => {
@@ -251,8 +243,8 @@ export function MobileHomePage() {
         }}>
           {isLoading
             ? Array.from({ length: 10 }).map((_, i) => <MobileSkeletonCard key={i} />)
-            : latestList.map((anime) => (
-                <div key={anime.url}>
+            : latestList.map((anime, idx) => (
+                <div key={`${anime.source}-${anime.url}-${idx}`}>
                   <MobileAnimeCard anime={anime} onClick={() => handleAnimeClick(anime)} />
                 </div>
               ))

@@ -8,14 +8,14 @@ import { CachedImage } from '@/components/CachedImage';
 import type { ScheduleDay, AnimeResult } from '@/types';
 
 const DAYS_ORDER = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
+const EMPTY_SCHEDULE_DAYS: ScheduleDay[] = [];
 
 export function MobileSchedulePage() {
   const navigate = useNavigate();
-  const { activeSource, getScheduleDays, setScheduleDays } = useAnimeStore();
+  const activeSource = useAnimeStore((s) => s.activeSource);
 
-  const cachedDays = getScheduleDays(activeSource);
-  const [scheduleDays, setLocalScheduleDays] = useState<ScheduleDay[]>(() => cachedDays ?? []);
-  const [isLoading, setIsLoading] = useState<boolean>(!cachedDays || cachedDays.length === 0);
+  const [scheduleDays, setScheduleDays] = useState<ScheduleDay[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   const [selectedDay, setSelectedDay] = useState<string>('all');
 
   useEffect(() => {
@@ -25,51 +25,41 @@ export function MobileSchedulePage() {
     setSelectedDay(todayName);
   }, []);
 
-  useEffect(() => {
-    const fresh = getScheduleDays(activeSource);
-    if (fresh && fresh.length > 0) {
-      setLocalScheduleDays(fresh);
-      setIsLoading(false);
-    } else {
-      setLocalScheduleDays([]);
-      setIsLoading(true);
-    }
-  }, [activeSource, getScheduleDays]);
-
-  const loadSchedule = useCallback(async () => {
+  const loadSchedule = useCallback(async (targetSource: string) => {
+    setIsLoading(true);
+    setScheduleDays([]);
     try {
-      const cached = getScheduleDays(activeSource);
-      if (!cached || cached.length === 0) {
-        setIsLoading(true);
+      const res = await getScheduleDaysFromApi(targetSource);
+
+      if (useAnimeStore.getState().activeSource !== targetSource) {
+        return;
       }
-      const res = await getScheduleDaysFromApi(activeSource);
+
       const sanitized = res.map((day) => {
         const seen = new Set<string>();
-        const uniqueAnimes = day.animes.filter((a) => {
-          const key = (a.url || a.title).toLowerCase();
-          if (seen.has(key)) return false;
-          seen.add(key);
-          return true;
-        });
+        const uniqueAnimes = day.animes
+          .map((a) => ({ ...a, source: targetSource }))
+          .filter((a) => {
+            const key = (a.url || a.title).toLowerCase();
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
         return { ...day, animes: uniqueAnimes };
       });
-      setScheduleDays(sanitized, activeSource);
-      setLocalScheduleDays(sanitized);
+      setScheduleDays(sanitized);
     } catch (e) {
       console.error('Failed to load schedule days in Mobile', e);
     } finally {
-      setIsLoading(false);
+      if (useAnimeStore.getState().activeSource === targetSource) {
+        setIsLoading(false);
+      }
     }
-  }, [activeSource, getScheduleDays, setScheduleDays]);
+  }, []);
 
   useEffect(() => {
-    const cached = getScheduleDays(activeSource);
-    if (!cached || cached.length === 0) {
-      setLocalScheduleDays([]);
-      setIsLoading(true);
-      loadSchedule();
-    }
-  }, [activeSource, getScheduleDays, loadSchedule]);
+    loadSchedule(activeSource);
+  }, [activeSource, loadSchedule]);
 
   const isDonghua = activeSource === 'mundodonghua';
 
@@ -121,7 +111,7 @@ export function MobileSchedulePage() {
         </div>
 
         <button
-          onClick={loadSchedule}
+          onClick={() => loadSchedule(activeSource)}
           disabled={isLoading}
           style={{
             background: 'var(--bg-surface)', border: '1px solid var(--border-moderate)',
@@ -231,9 +221,9 @@ export function MobileSchedulePage() {
                 gridTemplateColumns: 'repeat(2, 1fr)',
                 gap: 10,
               }}>
-                {dayGroup.animes.map((anime) => (
+                {dayGroup.animes.map((anime, idx) => (
                   <motion.div
-                    key={anime.url}
+                    key={`${anime.source}-${anime.url}-${idx}`}
                     whileTap={{ scale: 0.96 }}
                     onClick={() => navigate(`/details/${encodeURIComponent(anime.url)}?source=${anime.source}`, { state: { anime } })}
                     style={{

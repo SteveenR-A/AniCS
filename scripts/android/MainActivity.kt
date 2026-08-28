@@ -6,12 +6,54 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.webkit.WebView
+import android.webkit.JavascriptInterface
+import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
+import android.util.Log
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.app.ActivityCompat
+import androidx.core.content.FileProvider
 import android.Manifest
+import java.io.File
 import app.tauri.plugin.PluginManager
+import app.tauri.plugin.TauriActivity
+
+class AndroidNativeBridge(private val activity: android.app.Activity) {
+  @JavascriptInterface
+  fun installApk(filePath: String) {
+    activity.runOnUiThread {
+      try {
+        val apkFile = File(filePath)
+        if (!apkFile.exists()) {
+          Toast.makeText(activity, "El archivo de actualización no se encontró.", Toast.LENGTH_LONG).show()
+          return@runOnUiThread
+        }
+        val uri: Uri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+          FileProvider.getUriForFile(
+            activity,
+            "${activity.packageName}.fileprovider",
+            apkFile
+          )
+        } else {
+          Uri.fromFile(apkFile)
+        }
+
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+          setDataAndType(uri, "application/vnd.android.package-archive")
+          addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        activity.startActivity(intent)
+      } catch (e: Exception) {
+        Log.e("AniCS", "Error al iniciar instalador APK", e)
+        Toast.makeText(activity, "Error al abrir el instalador: ${e.message}", Toast.LENGTH_LONG).show()
+      }
+    }
+  }
+}
 
 class MainActivity : TauriActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
@@ -99,6 +141,7 @@ class MainActivity : TauriActivity() {
           mediaPlaybackRequiresUserGesture = false
           domStorageEnabled = true
         }
+        child.addJavascriptInterface(AndroidNativeBridge(this@MainActivity), "AndroidBridge")
       } else if (child is ViewGroup) {
         enableWebViewFileAccess(child)
       }

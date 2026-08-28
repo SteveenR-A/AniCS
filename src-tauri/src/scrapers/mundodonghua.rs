@@ -160,7 +160,20 @@ impl AnimeExtractor for MundoDonghuaExtractor {
                     })
                     .unwrap_or_default();
 
-                let episode = card.select(&badge_sel).next().map(|b| inner_text(&b));
+                let raw_badge = card.select(&badge_sel).next().map(|b| inner_text(&b));
+                let episode = raw_badge.and_then(|b| {
+                    let clean_b = b.trim();
+                    if clean_b.eq_ignore_ascii_case("donghua") {
+                        static EP_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r#"(?i)(?:episodio|ep|cap|capitulo)\s*(\d+)"#).unwrap());
+                        if let Some(caps) = EP_RE.captures(&title) {
+                            caps.get(1).map(|m| m.as_str().to_string())
+                        } else {
+                            None
+                        }
+                    } else {
+                        Some(clean_b.to_string())
+                    }
+                });
 
                 results.push(AnimeResult {
                     title,

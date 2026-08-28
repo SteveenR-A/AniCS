@@ -432,13 +432,18 @@ export function PlayerPage() {
       return;
     }
 
+    const cleanAnimeUrl = anime.url.replace(/\/+$/, '').trim();
+    const cleanEpUrl = ep.url.replace(/\/+$/, '').trim();
+    const epNum = ep.number;
+    const historyId = `${cleanAnimeUrl}-${epNum}`;
+
     upsertHistory({
-      id: `${anime.url}-${ep.number}`,
+      id: historyId,
       animeTitle: anime.title,
-      animeUrl: anime.url,
+      animeUrl: cleanAnimeUrl,
       thumbnailUrl: anime.thumbnailUrl,
-      episodeNumber: ep.number,
-      episodeUrl: ep.url,
+      episodeNumber: epNum,
+      episodeUrl: cleanEpUrl,
       watchProgress: prog,
       watchedAt: new Date().toISOString(),
       source: anime.source,
@@ -1368,7 +1373,7 @@ export function PlayerPage() {
                     {playbackSpeed.toFixed(1)}X
                   </button>
 
-                  {/* Botón de Aspecto / Pantalla Completa */}
+                  {/* Botón de Aspecto */}
                   <button
                     onClick={cycleAspectRatio}
                     title="Relación de aspecto"
@@ -1382,6 +1387,21 @@ export function PlayerPage() {
                   >
                     <Scaling size={14} />
                     <span>{aspectRatio === 'contain' ? '16:9' : aspectRatio === 'cover' ? 'Zoom' : 'Estirar'}</span>
+                  </button>
+
+                  {/* Botón de Pantalla Completa (Fullscreen) */}
+                  <button
+                    onClick={toggleFullscreen}
+                    title={isFullscreen ? 'Salir de pantalla completa (F)' : 'Pantalla completa (F)'}
+                    style={{
+                      background: isFullscreen ? 'var(--accent-primary)' : 'rgba(255,255,255,0.1)',
+                      border: '1px solid rgba(255,255,255,0.2)',
+                      borderRadius: 'var(--radius-md)', padding: '5px 8px',
+                      color: 'white', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    }}
+                  >
+                    {isFullscreen ? <Minimize size={14} /> : <Maximize size={14} />}
                   </button>
                 </div>
               </div>
@@ -1401,21 +1421,21 @@ export function PlayerPage() {
             transition={{ type: 'spring', damping: 25, stiffness: 300 }}
             style={{
               position: 'absolute', top: 0, right: 0, bottom: 0,
-              width: isMobile ? '80%' : 320, maxWidth: '100%',
+              width: isMobile ? 'min(270px, 72vw)' : 320, maxWidth: '100%',
               background: 'rgba(12, 13, 18, 0.96)', backdropFilter: 'blur(24px)',
               borderLeft: '1px solid var(--border-moderate)',
               zIndex: 35, display: 'flex', flexDirection: 'column',
-              padding: 16, boxShadow: 'var(--shadow-2xl)',
+              padding: isMobile ? '12px 14px' : 16, boxShadow: 'var(--shadow-2xl)',
             }}
             onClick={e => e.stopPropagation()}
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-              <h3 style={{ fontSize: 15, fontWeight: 700, color: 'white', margin: 0 }}>
+              <h3 style={{ fontSize: isMobile ? 13 : 15, fontWeight: 700, color: 'white', margin: 0 }}>
                 Episodios ({currentAnime.episodes.length})
               </h3>
               <button
                 onClick={() => setActiveDrawer('none')}
-                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}
               >
                 Cerrar
               </button>
@@ -1432,10 +1452,10 @@ export function PlayerPage() {
                       setActiveDrawer('none');
                     }}
                     style={{
-                      padding: '10px 12px', borderRadius: 'var(--radius-md)',
+                      padding: isMobile ? '8px 10px' : '10px 12px', borderRadius: 'var(--radius-md)',
                       background: isCurrent ? 'var(--accent-primary)' : 'var(--bg-elevated)',
                       border: `1px solid ${isCurrent ? 'transparent' : 'var(--border-subtle)'}`,
-                      color: 'white', fontSize: 13, fontWeight: isCurrent ? 700 : 500,
+                      color: 'white', fontSize: isMobile ? 12 : 13, fontWeight: isCurrent ? 700 : 500,
                       textAlign: 'left', cursor: 'pointer', display: 'flex',
                       alignItems: 'center', justifyContent: 'space-between',
                     }}
@@ -1461,19 +1481,22 @@ export function PlayerPage() {
             transition={{ type: 'spring', damping: 25, stiffness: 300 }}
             style={{
               position: 'absolute', top: 0, right: 0, bottom: 0,
-              width: isMobile ? '80%' : 320, maxWidth: '100%',
+              width: isMobile ? 'min(270px, 72vw)' : 320, maxWidth: '100%',
               background: 'rgba(12, 13, 18, 0.96)', backdropFilter: 'blur(24px)',
               borderLeft: '1px solid var(--border-moderate)',
               zIndex: 35, display: 'flex', flexDirection: 'column',
-              padding: 16, gap: 16, boxShadow: 'var(--shadow-2xl)',
+              padding: isMobile ? '12px 14px' : '16px 18px',
+              gap: isMobile ? 12 : 16,
+              boxShadow: 'var(--shadow-2xl)',
+              overflowY: 'auto',
             }}
             onClick={e => e.stopPropagation()}
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <h3 style={{ fontSize: 15, fontWeight: 700, color: 'white', margin: 0 }}>Ajustes de Video</h3>
+              <h3 style={{ fontSize: isMobile ? 13 : 15, fontWeight: 700, color: 'white', margin: 0 }}>Ajustes de Video</h3>
               <button
                 onClick={() => setActiveDrawer('none')}
-                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}
               >
                 Cerrar
               </button>
@@ -1481,31 +1504,60 @@ export function PlayerPage() {
 
             {/* Brillo */}
             <div>
-              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                Brillo ({Math.round(brightness * 100)}%)
-              </span>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <Sun size={12} /> Brillo
+                </span>
+                <span style={{ fontSize: 11, fontWeight: 700, color: '#fbbf24' }}>
+                  {Math.round(brightness * 100)}%
+                </span>
+              </div>
               <input
                 type="range" min={0.2} max={1.5} step={0.05} value={brightness}
                 onChange={e => setBrightness(parseFloat(e.target.value))}
-                style={{ width: '100%', marginTop: 6, accentColor: '#fbbf24' }}
+                style={{ width: '100%', accentColor: '#fbbf24', cursor: 'pointer' }}
+              />
+            </div>
+
+            {/* Volumen */}
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 4 }}>
+                  {isMuted || volume === 0 ? <VolumeX size={12} /> : <Volume2 size={12} />} Volumen
+                </span>
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent-primary)' }}>
+                  {isMuted ? 'Mute' : `${Math.round(volume * 100)}%`}
+                </span>
+              </div>
+              <input
+                type="range" min={0} max={1} step={0.05} value={isMuted ? 0 : volume}
+                onChange={e => {
+                  const val = parseFloat(e.target.value);
+                  setVolume(val);
+                  if (val > 0 && isMuted) setIsMuted(false);
+                }}
+                style={{ width: '100%', accentColor: 'var(--accent-primary)', cursor: 'pointer' }}
               />
             </div>
 
             {/* Velocidad de Reproducción */}
             <div>
-              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
                 Velocidad
               </span>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginTop: 6 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 5, marginTop: 5 }}>
                 {SPEED_OPTIONS.map(s => (
                   <button
                     key={s}
-                    onClick={() => setPlaybackSpeed(s)}
+                    onClick={() => {
+                      setPlaybackSpeed(s);
+                      showToast({ icon: 'seek', text: `Velocidad: ${s}x` });
+                    }}
                     style={{
-                      padding: '8px 0', borderRadius: 'var(--radius-md)',
+                      padding: isMobile ? '5px 0' : '7px 0', borderRadius: 'var(--radius-md)',
                       background: playbackSpeed === s ? 'var(--accent-primary)' : 'var(--bg-elevated)',
                       border: `1px solid ${playbackSpeed === s ? 'transparent' : 'var(--border-subtle)'}`,
-                      color: 'white', fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                      color: 'white', fontSize: 11, fontWeight: 700, cursor: 'pointer',
                     }}
                   >
                     {s}x
@@ -1516,19 +1568,22 @@ export function PlayerPage() {
 
             {/* Escalado de Video */}
             <div>
-              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
                 Escalado
               </span>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginTop: 5 }}>
                 {ASPECT_OPTIONS.map(opt => (
                   <button
                     key={opt.id}
-                    onClick={() => setAspectRatio(opt.id)}
+                    onClick={() => {
+                      setAspectRatio(opt.id);
+                      showToast({ icon: 'aspect', text: `Aspecto: ${opt.label}` });
+                    }}
                     style={{
-                      padding: '8px 12px', borderRadius: 'var(--radius-md)',
+                      padding: isMobile ? '6px 10px' : '8px 12px', borderRadius: 'var(--radius-md)',
                       background: aspectRatio === opt.id ? 'rgba(59,130,246,0.2)' : 'var(--bg-elevated)',
                       border: `1px solid ${aspectRatio === opt.id ? 'var(--accent-primary)' : 'var(--border-subtle)'}`,
-                      color: 'white', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                      color: 'white', fontSize: 11, fontWeight: 600, cursor: 'pointer',
                       textAlign: 'left',
                     }}
                   >

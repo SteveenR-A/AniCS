@@ -141,6 +141,18 @@ impl AnimeExtractor for JKAnimeExtractor {
                 let href = attr(&a, "href");
                 if href.is_empty() { continue; }
 
+                let episode = a.select(&ep_sel).next()
+                    .map(|ep| inner_text(&ep).replace("Ep ", "").trim().to_string())
+                    .filter(|e| !e.is_empty());
+
+                // Si no tiene badge de episodio y la URL no termina en número de episodio, pertenece a TOP ANIMES del footer
+                let clean_href = href.trim_end_matches('/');
+                let ends_with_num = clean_href.split('/').last().map(|s| s.parse::<u32>().is_ok()).unwrap_or(false);
+
+                if episode.is_none() && !ends_with_num {
+                    continue;
+                }
+
                 let title = a.select(&title_sel).next()
                     .map(|h| inner_text(&h))
                     .unwrap_or_else(|| inner_text(&a));
@@ -155,9 +167,6 @@ impl AnimeExtractor for JKAnimeExtractor {
                         }
                     })
                     .unwrap_or_default();
-
-                let episode = a.select(&ep_sel).next()
-                    .map(|ep| inner_text(&ep).replace("Ep ", "").trim().to_string());
 
                 results.push(AnimeResult {
                     title,

@@ -16,7 +16,7 @@ import { clearMemoryCache } from '@/components/CachedImage';
 const DEFAULT_JKANIME = 'https://jkanime.net';
 const DEFAULT_MUNDODONGHUA = 'https://www.mundodonghua.com';
 const DEFAULT_ANDROID_DOWNLOAD_DIR = '/storage/emulated/0/Anime';
-const CURRENT_VERSION = '0.1.4';
+const CURRENT_VERSION = '0.1.5';
 declare const __APP_COMMIT_HASH__: string;
 
 interface GitHubRelease {
@@ -623,21 +623,23 @@ export function MobileSettingsPage() {
                       onClick={async () => {
                         setDownloadingAsset(asset.name);
                         setDownloadProgress(0);
+                        setDownloadStatusText('Iniciando descarga...');
                         try {
                           const savedPath: string = await invoke('download_and_run_installer', {
                             url: asset.browser_download_url,
                             filename: asset.name,
                           });
                           setDownloadStatusText('¡Descargado! Abriendo instalador...');
-                          try {
-                            await openPath(savedPath);
-                            setTimeout(async () => {
-                              try {
-                                await invoke('exit_app');
-                              } catch {}
-                            }, 1200);
-                          } catch (openErr) {
-                            console.warn('Error abriendo paquete con openPath', openErr);
+
+                          if (typeof (window as any).AndroidBridge !== 'undefined' && typeof (window as any).AndroidBridge?.installApk === 'function') {
+                            (window as any).AndroidBridge.installApk(savedPath);
+                          } else {
+                            try {
+                              await openPath(savedPath);
+                            } catch (openErr) {
+                              console.warn('Error abriendo paquete con openPath, descargando desde navegador...', openErr);
+                              await openUrl(asset.browser_download_url);
+                            }
                           }
                         } catch (err: any) {
                           console.error('Error al descargar APK internamente', err);

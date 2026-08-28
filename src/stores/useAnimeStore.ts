@@ -47,6 +47,7 @@ interface AnimeStore {
   // Setters y Getters de Top Animes
   setTopList: (list: AnimeResult[], source?: string) => void;
   getTopList: (source?: string) => AnimeResult[] | undefined;
+  invalidateSourceCache: (source?: string) => void;
 
   // Búsqueda
   setSearchResults: (results: AnimeResult[], query?: string, source?: string) => void;
@@ -63,6 +64,15 @@ interface AnimeStore {
   loadSources: () => Promise<void>;
   loadGenres: (source?: string) => Promise<void>;
   preloadImages: (animes: AnimeResult[]) => void;
+}
+
+function isItemSourceValid(item: AnimeResult, src: string): boolean {
+  if (item.source && item.source !== src) return false;
+  if (item.url) {
+    if (src === 'jkanime' && !item.url.includes('jkanime.net')) return false;
+    if (src === 'mundodonghua' && !item.url.includes('mundodonghua.com')) return false;
+  }
+  return true;
 }
 
 export const useAnimeStore = create<AnimeStore>((set, get) => ({
@@ -107,13 +117,16 @@ export const useAnimeStore = create<AnimeStore>((set, get) => ({
 
   setLatestEpisodes: (episodes, source) => {
     const src = source || get().activeSource;
+    const validated = episodes
+      .filter((ep) => isItemSourceValid(ep, src))
+      .map((ep) => ({ ...ep, source: src }));
     set((state) => ({
       latestEpisodesBySource: {
         ...state.latestEpisodesBySource,
-        [src]: episodes,
+        [src]: validated,
       },
     }));
-    get().preloadImages(episodes);
+    get().preloadImages(validated);
   },
 
   getLatestEpisodes: (source) => {
@@ -123,13 +136,16 @@ export const useAnimeStore = create<AnimeStore>((set, get) => ({
 
   setSchedule: (schedule, source) => {
     const src = source || get().activeSource;
+    const validated = schedule
+      .filter((a) => isItemSourceValid(a, src))
+      .map((a) => ({ ...a, source: src }));
     set((state) => ({
       scheduleBySource: {
         ...state.scheduleBySource,
-        [src]: schedule,
+        [src]: validated,
       },
     }));
-    get().preloadImages(schedule);
+    get().preloadImages(validated);
   },
 
   getSchedule: (source) => {
@@ -139,14 +155,20 @@ export const useAnimeStore = create<AnimeStore>((set, get) => ({
 
   setScheduleDays: (days, source) => {
     const src = source || get().activeSource;
+    const validatedDays = days.map((day) => ({
+      ...day,
+      animes: day.animes
+        .filter((a) => isItemSourceValid(a, src))
+        .map((a) => ({ ...a, source: src })),
+    }));
     set((state) => ({
       scheduleDaysBySource: {
         ...state.scheduleDaysBySource,
-        [src]: days,
+        [src]: validatedDays,
       },
     }));
     // Precargar todas las imágenes de los días de emisión en el backend
-    const allAnimes = days.flatMap((d) => d.animes);
+    const allAnimes = validatedDays.flatMap((d) => d.animes);
     get().preloadImages(allAnimes);
   },
 
@@ -157,18 +179,41 @@ export const useAnimeStore = create<AnimeStore>((set, get) => ({
 
   setTopList: (list, source) => {
     const src = source || get().activeSource;
+    const validated = list
+      .filter((a) => isItemSourceValid(a, src))
+      .map((a) => ({ ...a, source: src }));
     set((state) => ({
       topListBySource: {
         ...state.topListBySource,
-        [src]: list,
+        [src]: validated,
       },
     }));
-    get().preloadImages(list);
+    get().preloadImages(validated);
   },
 
   getTopList: (source) => {
     const src = source || get().activeSource;
     return get().topListBySource[src];
+  },
+
+  invalidateSourceCache: (source?: string) => {
+    const src = source || get().activeSource;
+    set((state) => {
+      const nextLatest = { ...state.latestEpisodesBySource };
+      const nextSchedule = { ...state.scheduleBySource };
+      const nextScheduleDays = { ...state.scheduleDaysBySource };
+      const nextTop = { ...state.topListBySource };
+      delete nextLatest[src];
+      delete nextSchedule[src];
+      delete nextScheduleDays[src];
+      delete nextTop[src];
+      return {
+        latestEpisodesBySource: nextLatest,
+        scheduleBySource: nextSchedule,
+        scheduleDaysBySource: nextScheduleDays,
+        topListBySource: nextTop,
+      };
+    });
   },
 
   setSearchResults: (results, query, source) => {

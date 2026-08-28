@@ -96,6 +96,7 @@ export function MobileSearchPage() {
     order: string,
     page: number = 1
   ) => {
+    const currentSource = activeSource;
     setIsSearching(true);
     try {
       const hasAdvancedFilters = Boolean(genre || status || type || order);
@@ -109,28 +110,50 @@ export function MobileSearchPage() {
           orderBy: order || undefined,
           page,
         };
-        const res = await advancedSearch(filters, activeSource);
+        const res = await advancedSearch(filters, currentSource);
+
+        if (useAnimeStore.getState().activeSource !== currentSource) {
+          return;
+        }
+
+        const sanitized = res.results.map((a) => ({ ...a, source: currentSource }));
         if (page > 1) {
-          setSearchResults([...searchResults, ...res.results]);
+          setSearchResults([...searchResults, ...sanitized]);
         } else {
-          setSearchResults(res.results);
+          setSearchResults(sanitized);
         }
         setHasNextPage(res.hasNext);
       } else if (q.trim()) {
-        const res = await searchAnime(q.trim(), activeSource);
-        setSearchResults(res);
+        const res = await searchAnime(q.trim(), currentSource);
+
+        if (useAnimeStore.getState().activeSource !== currentSource) {
+          return;
+        }
+
+        const sanitized = res.map((a) => ({ ...a, source: currentSource }));
+        setSearchResults(sanitized);
         setHasNextPage(false);
       } else {
-        const res = await advancedSearch({ page: 1 }, activeSource);
-        setSearchResults(res.results);
+        const res = await advancedSearch({ page: 1 }, currentSource);
+
+        if (useAnimeStore.getState().activeSource !== currentSource) {
+          return;
+        }
+
+        const sanitized = res.results.map((a) => ({ ...a, source: currentSource }));
+        setSearchResults(sanitized);
         setHasNextPage(res.hasNext);
       }
     } catch (e) {
       console.error(e);
-      setSearchResults([]);
+      if (useAnimeStore.getState().activeSource === currentSource) {
+        setSearchResults([]);
+      }
     } finally {
-      setIsSearching(false);
-      setIsLoadingMore(false);
+      if (useAnimeStore.getState().activeSource === currentSource) {
+        setIsSearching(false);
+        setIsLoadingMore(false);
+      }
     }
   }, [activeSource, searchResults, setSearchResults, setIsSearching]);
 

@@ -6,9 +6,13 @@ async fn test_jkanime_get_latest() {
     let results = extractor.get_latest(1).await.expect("Failed to get latest from JKAnime");
     println!("JKAnime Latest results count: {}", results.len());
     for r in results.iter().take(5) {
-        println!(" - Title: '{}', Ep: {:?}, Thumb: '{}'", r.title, r.episode, r.thumbnail_url);
+        println!(" - Title: '{}', Ep: {:?}, URL: '{}'", r.title, r.episode, r.url);
     }
     assert!(!results.is_empty(), "JKAnime get_latest returned empty results");
+    // Comprobar que ningún resultado sea una tarjeta de Top Anime sin episodio
+    for r in results.iter() {
+        assert!(r.episode.is_some(), "JKAnime get_latest returned a non-episode anime: {}", r.title);
+    }
 }
 
 #[tokio::test]
@@ -47,6 +51,9 @@ async fn test_mundodonghua_get_latest() {
     let extractor = MundoDonghuaExtractor::new();
     let results = extractor.get_latest(1).await.expect("Failed to get latest from MundoDonghua");
     println!("MundoDonghua Latest results count: {}", results.len());
+    for r in results.iter().take(5) {
+        println!(" - Title: '{}', Ep: {:?}, URL: '{}'", r.title, r.episode, r.url);
+    }
     assert!(!results.is_empty(), "MundoDonghua get_latest returned empty results");
 }
 

@@ -36,8 +36,16 @@ export function MobileHistoryPage() {
   const loadHistory = useCallback(async () => {
     setIsLoading(true);
     try {
-      const data = await getHistory(50, 0);
-      setEntries(data);
+      const data = await getHistory(150, 0);
+      const seen = new Set<string>();
+      const deduplicated = data.filter((item) => {
+        const normTitle = item.animeTitle.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+        const key = `${normTitle}-ep-${item.episodeNumber}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      setEntries(deduplicated);
     } catch (e) {
       console.error(e);
     } finally {
@@ -102,12 +110,19 @@ export function MobileHistoryPage() {
               <p style={{ fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', margin: 0 }}>
                 {entry.animeTitle}
               </p>
-              <p style={{ fontSize: 11, color: 'var(--accent-primary)', fontWeight: 700, margin: '2px 0 6px' }}>
-                Episodio {entry.episodeNumber}
-              </p>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '2px 0 6px' }}>
+                <span style={{ fontSize: 11, color: 'var(--accent-primary)', fontWeight: 700 }}>
+                  Episodio {entry.episodeNumber}
+                </span>
+                {entry.watchProgress >= 0.85 && (
+                  <span style={{ fontSize: 9, fontWeight: 800, color: '#34d399', background: 'rgba(16, 185, 129, 0.15)', padding: '1px 5px', borderRadius: 3 }}>
+                    Visto
+                  </span>
+                )}
+              </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <div style={{ flex: 1, height: 4, background: 'var(--bg-elevated)', borderRadius: 2, overflow: 'hidden' }}>
-                  <div style={{ width: `${Math.round(entry.watchProgress * 100)}%`, height: '100%', background: 'var(--accent-primary)' }} />
+                  <div style={{ width: `${Math.round(entry.watchProgress * 100)}%`, height: '100%', background: entry.watchProgress >= 0.85 ? '#34d399' : 'var(--accent-primary)' }} />
                 </div>
                 <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600 }}>
                   {Math.round(entry.watchProgress * 100)}%

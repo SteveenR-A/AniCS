@@ -665,7 +665,15 @@ pub fn delete_local_download(file_path: String, app_handle: AppHandle) -> Result
             .canonicalize()
             .map_err(|_| "Invalid target path".to_string())?;
 
-        if !target_canonical.starts_with(base_canonical) {
+        let is_valid = target_canonical.starts_with(&base_canonical)
+            || (cfg!(target_os = "android") && {
+                Path::new("/storage/emulated/0/Anime")
+                    .canonicalize()
+                    .map(|p| target_canonical.starts_with(&p))
+                    .unwrap_or(false)
+            });
+
+        if !is_valid {
             return Err("Access denied: path is outside the download directory".to_string());
         }
 
@@ -689,7 +697,19 @@ pub fn delete_local_anime_folder(folder_path: String, app_handle: AppHandle) -> 
             .canonicalize()
             .map_err(|_| "Invalid target folder path".to_string())?;
 
-        if !target_canonical.starts_with(base_canonical) {
+        if target_canonical == base_canonical {
+            return Err("Access denied: cannot delete root download directory".to_string());
+        }
+
+        let is_valid = target_canonical.starts_with(&base_canonical)
+            || (cfg!(target_os = "android") && {
+                Path::new("/storage/emulated/0/Anime")
+                    .canonicalize()
+                    .map(|p| target_canonical != p && target_canonical.starts_with(&p))
+                    .unwrap_or(false)
+            });
+
+        if !is_valid {
             return Err("Access denied: folder path is outside the download directory".to_string());
         }
 
@@ -905,8 +925,10 @@ fn parse_anime_from_filename(filename: &str, parent_dir: Option<&Path>) -> (Stri
 }
 
 fn extract_episode_num(text: &str) -> Option<u32> {
-    let re = regex::Regex::new(r#"(?:ep|cap|episodio|\b)(\d{1,4})\b"#).ok()?;
-    for cap in re.captures_iter(&text.to_lowercase()) {
+    static RE: once_cell::sync::Lazy<regex::Regex> = once_cell::sync::Lazy::new(|| {
+        regex::Regex::new(r#"(?:ep|cap|episodio|\b)(\d{1,4})\b"#).expect("Invalid episode regex")
+    });
+    for cap in RE.captures_iter(&text.to_lowercase()) {
         if let Some(m) = cap.get(1) {
             if let Ok(num) = m.as_str().parse::<u32>() {
                 return Some(num);

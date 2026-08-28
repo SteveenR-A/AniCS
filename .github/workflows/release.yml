@@ -114,12 +114,23 @@ jobs:
             cp -rf src-tauri/icons/android/* src-tauri/gen/android/app/src/main/res/
           fi
 
-          # Añadir permisos de Android y almacenamiento al AndroidManifest.xml generado
+          # Copiar configuración XML de FileProvider
+          mkdir -p src-tauri/gen/android/app/src/main/res/xml
+          if [ -f "scripts/android/res/xml/file_paths.xml" ]; then
+            echo "Copiando file_paths.xml a la estructura de Android..."
+            cp -f scripts/android/res/xml/file_paths.xml src-tauri/gen/android/app/src/main/res/xml/file_paths.xml
+          fi
+
+          # Añadir permisos de Android, almacenamiento y FileProvider al AndroidManifest.xml generado
           MANIFEST="src-tauri/gen/android/app/src/main/AndroidManifest.xml"
           if [ -f "$MANIFEST" ]; then
             if ! grep -q "MANAGE_EXTERNAL_STORAGE" "$MANIFEST"; then
               sed -i 's|<application|<uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />\n    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />\n    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />\n    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />\n    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />\n    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />\n    <uses-permission android:name="android.permission.WAKE_LOCK" />\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />\n    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />\n    <application android:requestLegacyExternalStorage="true"|g' "$MANIFEST"
               echo "Permisos de almacenamiento añadidos al AndroidManifest.xml"
+            fi
+            if ! grep -q "androidx.core.content.FileProvider" "$MANIFEST"; then
+              sed -i 's|</application>|    <provider\n        android:name="androidx.core.content.FileProvider"\n        android:authorities="${applicationId}.fileprovider"\n        android:exported="false"\n        android:grantUriPermissions="true">\n        <meta-data\n            android:name="android.support.FILE_PROVIDER_PATHS"\n            android:resource="@xml/file_paths" />\n    </provider>\n  </application>|g' "$MANIFEST"
+              echo "FileProvider añadido al AndroidManifest.xml"
             fi
           fi
 

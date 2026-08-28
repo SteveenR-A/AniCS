@@ -1,5 +1,21 @@
 [
   {
+    "version": "0.1.5",
+    "date": "2026-08-28",
+    "title": "Actualizador Nativo APK, Gestos Refinados, I/O Asíncrono y Seguridad",
+    "type": "patch",
+    "highlights": [
+      "Instalador nativo de actualizaciones APK en Android mediante FileProvider e Intent del sistema",
+      "Gestos táctiles perfeccionados: 1 toque para controles HUD con debounce y doble toque para -10s / Play-Pause / +10s",
+      "Liberación y descarga inmediata del búfer de video y HLS al cambiar de episodio",
+      "Corrección de bug visual de persistencia entre catálogos Anime y Donghua",
+      "Reproducción local sin conexión directa al servidor HTTP streaming interno",
+      "Escaneo de descargas con I/O asíncrono no bloqueante para máxima fluidez",
+      "Protección de seguridad contra Path Traversal en eliminación de descargas locales",
+      "Suite de pruebas unitarias automatizadas con Vitest"
+    ]
+  },
+  {
     "version": "0.1.4",
     "date": "2026-08-28",
     "title": "Reproductor Limpio (Estilo C#), Servidor Streaming y Correcciones",

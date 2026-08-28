@@ -9,47 +9,43 @@ import type { AnimeResult } from '@/types';
 
 export function DesktopTopAnimePage() {
   const navigate = useNavigate();
-  const { activeSource, getTopList, setTopList } = useAnimeStore();
+  const activeSource = useAnimeStore((s) => s.activeSource);
 
-  const cachedTop = getTopList(activeSource);
-  const [topList, setLocalTopList] = useState<AnimeResult[]>(() => cachedTop ?? []);
-  const [isLoading, setIsLoading] = useState<boolean>(!cachedTop || cachedTop.length === 0);
+  const [topList, setTopList] = useState<AnimeResult[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
 
-  useEffect(() => {
-    const fresh = getTopList(activeSource);
-    if (fresh && fresh.length > 0) {
-      setLocalTopList(fresh);
-      setIsLoading(false);
-    } else {
-      setLocalTopList([]);
-      setIsLoading(true);
-    }
-  }, [activeSource, getTopList]);
-
-  const loadTop = useCallback(async () => {
+  const loadTop = useCallback(async (targetSource: string) => {
+    setIsLoading(true);
+    setTopList([]);
     try {
-      const cached = getTopList(activeSource);
-      if (!cached || cached.length === 0) {
-        setIsLoading(true);
+      const res = await getTopAnimes(targetSource);
+
+      if (useAnimeStore.getState().activeSource !== targetSource) {
+        return;
       }
-      const res = await getTopAnimes(activeSource);
-      setTopList(res, activeSource);
-      setLocalTopList(res);
+
+      const seen = new Set<string>();
+      const sanitized = res
+        .map((a) => ({ ...a, source: targetSource }))
+        .filter((a) => {
+          const key = (a.url || a.title).toLowerCase();
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+      setTopList(sanitized);
     } catch (e) {
       console.error('Failed to load top animes in Desktop', e);
     } finally {
-      setIsLoading(false);
+      if (useAnimeStore.getState().activeSource === targetSource) {
+        setIsLoading(false);
+      }
     }
-  }, [activeSource, getTopList, setTopList]);
+  }, []);
 
   useEffect(() => {
-    const cached = getTopList(activeSource);
-    if (!cached || cached.length === 0) {
-      setLocalTopList([]);
-      setIsLoading(true);
-      loadTop();
-    }
-  }, [activeSource, getTopList, loadTop]);
+    loadTop(activeSource);
+  }, [activeSource, loadTop]);
 
   const isDonghua = activeSource === 'mundodonghua';
 
@@ -82,7 +78,7 @@ export function DesktopTopAnimePage() {
         </div>
 
         <button
-          onClick={loadTop}
+          onClick={() => loadTop(activeSource)}
           disabled={isLoading}
           style={{
             background: 'var(--bg-surface)', border: '1px solid var(--border-moderate)',
@@ -136,7 +132,7 @@ export function DesktopTopAnimePage() {
 
             return (
               <motion.div
-                key={anime.url}
+                key={`${anime.source}-${anime.url}-${index}`}
                 whileHover={{ y: -6, scale: 1.03 }}
                 whileTap={{ scale: 0.98 }}
                 onClick={() => navigate(`/details/${encodeURIComponent(anime.url)}?source=${anime.source}`, { state: { anime } })}
