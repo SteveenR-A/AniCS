@@ -1,6 +1,6 @@
 [package]
 name = "anics"
-version = "0.1.3"
+version = "0.1.4"
 description = "AniCS - Anime streaming app"
 authors = ["AniCS"]
 edition = "2021"

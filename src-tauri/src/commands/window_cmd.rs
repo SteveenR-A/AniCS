@@ -16,3 +16,9 @@ pub async fn set_fullscreen(app: tauri::AppHandle, fullscreen: bool) -> Result<(
     Ok(())
 }
 
+/// Cierra el proceso de la aplicación limpiamente
+#[tauri::command]
+pub fn exit_app(app: tauri::AppHandle) {
+    app.exit(0);
+}
+

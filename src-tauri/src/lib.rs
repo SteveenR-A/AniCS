@@ -48,6 +48,13 @@ pub fn run() {
                 storage::warmup_image_cache(&app_handle_warmup).await;
             });
 
+            // Iniciar servidor HTTP local para streaming de videos descargados
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = crate::downloader::media_server::start_media_server().await {
+                    log::error!("Failed to start media server: {}", e);
+                }
+            });
+
             log::info!("AniCS started");
             Ok(())
         })
@@ -74,6 +81,7 @@ pub fn run() {
             commands::delete_local_anime_folder,
             commands::get_default_download_dir,
             commands::set_download_dir,
+            commands::get_local_media_url,
             commands::cache_image,
             commands::get_cache_stats,
             commands::clear_image_cache,
@@ -91,6 +99,7 @@ pub fn run() {
             commands::get_favorites,
             // Ajustes y Ventana
             commands::set_fullscreen,
+            commands::exit_app,
             commands::get_setting,
             commands::set_setting,
             commands::get_all_settings,

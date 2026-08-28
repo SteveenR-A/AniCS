@@ -1,5 +1,18 @@
 [
   {
+    "version": "0.1.4",
+    "date": "2026-08-28",
+    "title": "Reproductor Limpio (Estilo C#), Servidor Streaming y Correcciones",
+    "type": "minor",
+    "highlights": [
+      "Servidor HTTP local interno en Rust para streaming con Range requests de videos descargados",
+      "Rediseño minimalista y limpio del reproductor sin emojis ni saturación visual",
+      "Control de gestos táctiles: 1 clic para alternar controles, doble clic para adelantar/retroceder o pausar",
+      "Corrección de persistencia de streams entre animes y catálogos (Mundo Donghua / JKAnime)",
+      "Instalador APK con descarga en caché y cierre limpio de proceso para actualización fluida"
+    ]
+  },
+  {
     "version": "0.1.3",
     "date": "2026-08-28",
     "title": "Modo Inmersivo Completo en Móvil y Correcciones",

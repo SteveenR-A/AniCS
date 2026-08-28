@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import { getDetails, getServers, resolveStream } from '@/services/animeService';
 import { addFavorite, removeFavorite, isFavorite as checkFavorite, getHistory } from '@/services/storageService';
-import { startDownload, scanLocalDownloads, saveLocalAnimeCover } from '@/services/downloadService';
+import { startDownload, scanLocalDownloads, saveLocalAnimeCover, getLocalMediaUrl } from '@/services/downloadService';
 import { usePlayerStore } from '@/stores/usePlayerStore';
 import { useAnimeStore } from '@/stores/useAnimeStore';
 import { useDownloadStore } from '@/stores/useDownloadStore';
@@ -64,7 +64,9 @@ export function DesktopDetailsPage() {
   const [isStartingDownload, setIsStartingDownload] = useState(false);
   const [downloadSuccessToast, setDownloadSuccessToast] = useState<string | null>(null);
 
-  const { openPlayer, setCurrentAnime, setCurrentEpisode, setServers, setResolvedMedia } = usePlayerStore();
+  const {
+    openPlayer, setCurrentEpisode, setCurrentAnime, setServers, setResolvedMedia, resetPlayback
+  } = usePlayerStore();
 
   useEffect(() => {
     const load = async () => {
@@ -162,12 +164,18 @@ export function DesktopDetailsPage() {
 
   const handlePlayEpisode = async (ep: Episode) => {
     if (!details) return;
+    resetPlayback();
     setLoadingEpisode(ep.number);
 
-    // Si el episodio ya está descargado en disco, reproducir el archivo local al instante
+    // Si el episodio ya está descargado en disco, reproducir a través del servidor local de streaming
     const localEp = localEpisodesMap.get(ep.number);
     if (localEp) {
-      const assetUrl = convertFileSrc(localEp.filePath);
+      let streamUrl = '';
+      try {
+        streamUrl = await getLocalMediaUrl(localEp.filePath);
+      } catch {
+        streamUrl = convertFileSrc(localEp.filePath);
+      }
       const isTs = localEp.filePath.toLowerCase().endsWith('.ts');
       setCurrentAnime({
         title: details.title,
@@ -192,7 +200,7 @@ export function DesktopDetailsPage() {
         watchProgress: historyMap.get(ep.number) ?? 0,
       });
       setResolvedMedia({
-        directUrl: assetUrl,
+        directUrl: streamUrl,
         mediaType: isTs ? 'hls' : 'mp4',
         qualities: [],
       });

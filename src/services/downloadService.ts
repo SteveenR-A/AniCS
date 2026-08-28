@@ -80,3 +80,7 @@ export const getCacheStats = (): Promise<import('@/types').CacheStats> =>
 /** Limpiar la caché de imágenes en disco */
 export const clearImageCache = (): Promise<{ freedBytes: number; freedFormatted: string }> =>
   invoke('clear_image_cache');
+
+/** Obtiene la URL de streaming local HTTP para reproducir un archivo descargado */
+export const getLocalMediaUrl = (filePath: string): Promise<string> =>
+  invoke('get_local_media_url', { filePath });

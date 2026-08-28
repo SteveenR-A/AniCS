@@ -22,6 +22,7 @@ interface PlayerStore {
   setSelectedServer: (server: VideoServer | null) => void;
   setIsLoadingServers: (v: boolean) => void;
   setIsResolving: (v: boolean) => void;
+  resetPlayback: () => void;
   openPlayer: () => void;
   closePlayer: () => void;
   setVolume: (v: number) => void;
@@ -51,8 +52,9 @@ export const usePlayerStore = create<PlayerStore>((set) => ({
   setSelectedServer: (server) => set({ selectedServer: server }),
   setIsLoadingServers: (v) => set({ isLoadingServers: v }),
   setIsResolving: (v) => set({ isResolving: v }),
+  resetPlayback: () => set({ resolvedMedia: null, selectedServer: null, playbackTime: 0, duration: 0, isResolving: false, isLoadingServers: false }),
   openPlayer: () => set({ isPlayerOpen: true }),
-  closePlayer: () => set({ isPlayerOpen: false, resolvedMedia: null }),
+  closePlayer: () => set({ isPlayerOpen: false, resolvedMedia: null, selectedServer: null }),
   setVolume: (v) => set({ volume: v }),
   setIsMuted: (v) => set({ isMuted: v }),
   setPlaybackTime: (t) => set({ playbackTime: t }),

@@ -1002,3 +1002,9 @@ pub async fn download_and_run_installer(
     Ok(dest_path.to_string_lossy().to_string())
 }
 
+/// Obtiene la URL de streaming HTTP local con soporte de Range Requests para reproducir videos locales
+#[tauri::command]
+pub fn get_local_media_url(file_path: String) -> String {
+    crate::downloader::media_server::get_media_stream_url(&file_path)
+}
+

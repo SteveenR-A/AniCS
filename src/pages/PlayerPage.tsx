@@ -5,9 +5,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft, Play, Pause, Volume2, VolumeX,
   Maximize, Minimize, Settings, ChevronLeft, ChevronRight,
-  Loader2, FastForward, SkipForward, RotateCcw,
-  Sparkles, Check, Sun, ListVideo, Zap, Server, AlertCircle,
-  Eye, EyeOff, ChevronDown, ChevronUp, Scaling, Tv
+  Loader2, SkipForward, SkipBack, RotateCcw, RotateCw,
+  Sun, ListVideo, Zap, Server, AlertCircle,
+  Eye, EyeOff, Scaling
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { usePlayerStore } from '@/stores/usePlayerStore';
@@ -15,7 +15,7 @@ import { useAnimeStore } from '@/stores/useAnimeStore';
 import { resolveStream, getServers, getDetails } from '@/services/animeService';
 import { upsertHistory, getEpisodeProgress } from '@/services/storageService';
 import { useResponsive } from '@/hooks/useResponsive';
-import type { VideoServer, Episode } from '@/types';
+import type { VideoServer } from '@/types';
 
 function formatTime(s: number) {
   if (isNaN(s) || s <= 0) return '0:00';
@@ -26,9 +26,9 @@ function formatTime(s: number) {
 
 const SPEED_OPTIONS = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
 const ASPECT_OPTIONS = [
-  { id: 'contain', label: 'Original / Ajustar' },
-  { id: 'cover', label: 'Recortar / Zoom 16:9' },
-  { id: 'fill', label: 'Estirar / Pantalla' },
+  { id: 'contain', label: 'Original / Ajustar (16:9)' },
+  { id: 'cover', label: 'Recortar / Zoom pantalla' },
+  { id: 'fill', label: 'Estirar a los bordes' },
 ] as const;
 
 export function PlayerPage() {
@@ -42,6 +42,10 @@ export function PlayerPage() {
   const controlsTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const toastTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const centerAnimTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  // Timers para distinguir 1 clic (mostrar/ocultar HUD) de 2 clics (seek/play)
+  const clickTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clickCountRef = useRef(0);
 
   // Touch gesture state refs
   const touchStartY = useRef<number | null>(null);
@@ -61,7 +65,7 @@ export function PlayerPage() {
     selectedServer, setSelectedServer, setResolvedMedia, setIsResolving,
     isResolving, volume, isMuted, setVolume, setIsMuted,
     playbackTime, setPlaybackTime, duration, setDuration,
-    setServers, setCurrentEpisode, setCurrentAnime
+    setServers, setCurrentEpisode, setCurrentAnime, resetPlayback
   } = usePlayerStore();
 
   const { getCachedDetails, cacheDetails } = useAnimeStore();
@@ -75,8 +79,6 @@ export function PlayerPage() {
   const [aspectRatio, setAspectRatio] = useState<'contain' | 'cover' | 'fill'>('contain');
   const [autoNext, setAutoNext] = useState(true);
   const [activeDrawer, setActiveDrawer] = useState<'none' | 'servers' | 'settings'>('none');
-  
-  // Toggle para ocultar / mostrar la barra de servidores
   const [showServerDropdown, setShowServerDropdown] = useState(false);
 
   // Gestos & HUD Toasts
@@ -105,7 +107,7 @@ export function PlayerPage() {
     centerAnimTimeout.current = setTimeout(() => setCenterPlayPulse(null), 500);
   };
 
-  // Métodos de control de Pantalla Completa e Inmersión total
+  // Métodos de control de Pantalla Completa
   const enterFullscreen = useCallback(async () => {
     try {
       await invoke('set_fullscreen', { fullscreen: true });
@@ -147,7 +149,7 @@ export function PlayerPage() {
     }
   }, [isFullscreen, enterFullscreen, exitFullscreen]);
 
-  // Orientación horizontal automática, Pantalla Completa inmersiva y Screen Wake Lock en Android/móvil
+  // Orientación horizontal automática, Pantalla Completa inmersiva y Screen Wake Lock
   useEffect(() => {
     try {
       if (typeof window !== 'undefined' && window.screen && 'orientation' in window.screen) {
@@ -158,19 +160,15 @@ export function PlayerPage() {
       }
     } catch {}
 
-    // Entrar en modo pantalla completa inmersiva para ocultar barra de estado (batería/wifi) y navegación
     enterFullscreen().catch(() => {});
 
-    // Wake Lock: Mantener pantalla encendida en Android
     let wakeLockSentinel: any = null;
     const requestWakeLock = async () => {
       try {
         if ('wakeLock' in navigator) {
           wakeLockSentinel = await (navigator as any).wakeLock.request('screen');
         }
-      } catch {
-        // Ignorar si el dispositivo no soporta o deniega Wake Lock
-      }
+      } catch {}
     };
 
     requestWakeLock();
@@ -213,46 +211,34 @@ export function PlayerPage() {
     };
   }, [enterFullscreen, exitFullscreen]);
 
-  // Recuperación automática de estado desde URL si se refresca
+  // Sincronización precisa de Anime y Episodio desde URL (sin mezclar animes previos)
+  const currentLoadedKey = useRef<string>('');
+
   useEffect(() => {
     const initFromParams = async () => {
       if (!queryUrl) return;
       const decoded = decodeURIComponent(queryUrl);
+      const epNum = queryEp ? parseInt(queryEp, 10) : 1;
+      const loadKey = `${decoded}-${epNum}-${querySource}`;
 
-      if (currentAnime && currentEpisode && currentAnime.url === decoded) {
+      // Si ya está exactamente cargado, evitar duplicar
+      if (currentLoadedKey.current === loadKey && resolvedMedia) {
         return;
       }
 
-      // 1. Revisar si está en la caché RAM para carga instantánea
-      const cached = getCachedDetails(decoded);
-      if (cached) {
-        setCurrentAnime(cached);
-        const epNum = queryEp ? parseInt(queryEp, 10) : 1;
-        const targetEp = cached.episodes.find(e => e.number === epNum) || cached.episodes[0] || {
-          number: epNum,
-          title: `Episodio ${epNum}`,
-          url: `${decoded.replace(/\/$/, '')}/${epNum}/`,
-          watched: false,
-        };
-        setCurrentEpisode(targetEp);
-
-        try {
-          const srvs = await getServers(targetEp.url, querySource);
-          setServers(srvs);
-        } catch (e) {
-          console.error(e);
-        }
-        return;
-      }
-
+      currentLoadedKey.current = loadKey;
+      resetPlayback();
       setIsLoadingInitial(true);
       setLoadError(null);
-      try {
-        const details = await getDetails(decoded, querySource);
-        setCurrentAnime(details);
-        cacheDetails(details);
 
-        const epNum = queryEp ? parseInt(queryEp, 10) : 1;
+      try {
+        let details = getCachedDetails(decoded);
+        if (!details || details.url !== decoded) {
+          details = await getDetails(decoded, querySource);
+          cacheDetails(details);
+        }
+
+        setCurrentAnime(details);
         const targetEp = details.episodes.find(e => e.number === epNum) || details.episodes[0] || {
           number: epNum,
           title: `Episodio ${epNum}`,
@@ -263,6 +249,19 @@ export function PlayerPage() {
 
         const srvs = await getServers(targetEp.url, querySource);
         setServers(srvs);
+
+        const preferred = srvs.find(s => s.name.toLowerCase().includes('magi'))
+          ?? srvs.find(s => s.name.toLowerCase().includes('desu'))
+          ?? srvs.find(s => s.isDirect)
+          ?? srvs[0];
+
+        if (preferred) {
+          setSelectedServer(preferred);
+          setIsResolving(true);
+          const media = await resolveStream(preferred, querySource);
+          setResolvedMedia(media);
+          setIsResolving(false);
+        }
       } catch (err: any) {
         console.error('Failed to init player from URL params:', err);
         setLoadError(err?.message || 'No se pudo cargar el anime');
@@ -272,7 +271,16 @@ export function PlayerPage() {
     };
 
     initFromParams();
-  }, [queryUrl, queryEp, querySource, getCachedDetails, cacheDetails]);
+
+    return () => {
+      // Limpiar al desmontar la vista del reproductor
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+      resetPlayback();
+    };
+  }, [queryUrl, queryEp, querySource]);
 
   // Sincronizar volumen y velocidad en el elemento <video>
   useEffect(() => {
@@ -282,21 +290,7 @@ export function PlayerPage() {
     }
   }, [volume, isMuted, playbackSpeed]);
 
-  // Resolver automáticamente el mejor servidor
-  useEffect(() => {
-    if (servers.length > 0 && !resolvedMedia && !isResolving) {
-      const preferred = servers.find(s => s.name.toLowerCase().includes('magi'))
-        ?? servers.find(s => s.name.toLowerCase().includes('desu'))
-        ?? servers.find(s => s.isDirect)
-        ?? servers[0];
-
-      if (preferred) {
-        handleSelectServer(preferred);
-      }
-    }
-  }, [servers]);
-
-  // Cargar stream resuelto en el elemento de video
+  // Resolver stream resuelto en el elemento de video
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !resolvedMedia || !resolvedMedia.directUrl) return;
@@ -305,7 +299,6 @@ export function PlayerPage() {
     let isHls = resolvedMedia.mediaType === 'hls' || sourceUrl.includes('.m3u8');
     let blobUrlToRevoke: string | null = null;
 
-    // Solo para archivos locales sin playlist que terminen exactamente en .ts
     if (sourceUrl.toLowerCase().endsWith('.ts') && !sourceUrl.includes('.m3u8')) {
       isHls = true;
       const m3u8Content = `#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:7200\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:7200.0,\n${sourceUrl}\n#EXT-X-ENDLIST`;
@@ -324,20 +317,20 @@ export function PlayerPage() {
       hls.loadSource(sourceUrl);
       hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        video.play().catch(e => console.warn('Autoplay caught:', e));
+        video.play().catch(() => {});
       });
       hls.on(Hls.Events.ERROR, (_, data) => {
         if (data.fatal) {
-          console.warn('Fatal HLS error, attempting fallback server...', data);
+          console.warn('Fatal HLS error, switching fallback server...', data);
           tryFallbackServer();
         }
       });
     } else if (isHls && video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = sourceUrl;
-      video.play().catch(e => console.warn('Autoplay caught:', e));
+      video.play().catch(() => {});
     } else {
       video.src = sourceUrl;
-      video.play().catch(e => console.warn('Autoplay caught:', e));
+      video.play().catch(() => {});
     }
 
     return () => {
@@ -368,21 +361,11 @@ export function PlayerPage() {
   const currentAnimeRef = useRef(currentAnime);
   const currentEpisodeRef = useRef(currentEpisode);
   const hasResumedProgressRef = useRef(false);
-  // Protección: no guardar en los primeros instantes (antes de que el seek de reanudación se aplique)
   const readyToSaveRef = useRef(false);
 
-  useEffect(() => {
-    playbackTimeRef.current = playbackTime;
-  }, [playbackTime]);
-
-  useEffect(() => {
-    durationRef.current = duration;
-  }, [duration]);
-
-  useEffect(() => {
-    currentAnimeRef.current = currentAnime;
-  }, [currentAnime]);
-
+  useEffect(() => { playbackTimeRef.current = playbackTime; }, [playbackTime]);
+  useEffect(() => { durationRef.current = duration; }, [duration]);
+  useEffect(() => { currentAnimeRef.current = currentAnime; }, [currentAnime]);
   useEffect(() => {
     currentEpisodeRef.current = currentEpisode;
     hasResumedProgressRef.current = false;
@@ -405,9 +388,6 @@ export function PlayerPage() {
     const ep = currentEpisodeRef.current;
     if (!anime || !ep) return;
 
-    // No guardar si aún no hemos superado el inicio de reproducción.
-    // Esto evita sobrescribir el progreso previo con 0:00 cuando onPlay se
-    // dispara antes de que el seek de reanudación se aplique.
     if (!readyToSaveRef.current && typeof overrideProgress !== 'number') return;
 
     const dur = durationRef.current;
@@ -419,7 +399,7 @@ export function PlayerPage() {
     } else if (dur && dur > 0) {
       prog = Math.max(0.01, Math.min(1.0, time / dur));
     } else {
-      return; // Sin duración, no guardar
+      return;
     }
 
     upsertHistory({
@@ -435,7 +415,6 @@ export function PlayerPage() {
     }).catch(console.error);
   }, []);
 
-  // Guardar progreso periódicamente cada 10 segundos
   useEffect(() => {
     const interval = setInterval(() => saveProgress(), 10000);
     return () => {
@@ -448,7 +427,6 @@ export function PlayerPage() {
     setShowControls(true);
     if (controlsTimeout.current) clearTimeout(controlsTimeout.current);
     controlsTimeout.current = setTimeout(() => {
-      // Ocultar controles automáticamente tanto en reproducción como en pausa (protección OLED / Lenovo Vantage)
       if (activeDrawer === 'none') {
         setShowControls(false);
         setShowServerDropdown(false);
@@ -532,9 +510,52 @@ export function PlayerPage() {
     showControlsTemp();
   };
 
-  // Gestos táctiles aislados
+  // Manejo de Clics en Pantalla (1 clic = HUD on/off, 2 clics = seek / pause)
+  const handleScreenClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement;
+    if (
+      activeDrawer !== 'none' ||
+      target.closest('[data-interactive]') ||
+      target.closest('button') ||
+      target.closest('input') ||
+      target.closest('select') ||
+      target.closest('.no-gesture')
+    ) {
+      return;
+    }
+
+    const x = e.clientX;
+    const screenWidth = window.innerWidth;
+    clickCountRef.current += 1;
+
+    if (clickCountRef.current === 1) {
+      clickTimeoutRef.current = setTimeout(() => {
+        toggleControlsManual();
+        clickCountRef.current = 0;
+      }, 260);
+    } else if (clickCountRef.current === 2) {
+      if (clickTimeoutRef.current) {
+        clearTimeout(clickTimeoutRef.current);
+        clickTimeoutRef.current = null;
+      }
+      clickCountRef.current = 0;
+
+      if (x < screenWidth * 0.35) {
+        seekRelative(-10);
+        setDoubleTapSide('left');
+        setTimeout(() => setDoubleTapSide(null), 600);
+      } else if (x > screenWidth * 0.65) {
+        seekRelative(10);
+        setDoubleTapSide('right');
+        setTimeout(() => setDoubleTapSide(null), 600);
+      } else {
+        togglePlay();
+      }
+    }
+  };
+
+  // Gestos táctiles
   const handleTouchStart = (e: React.TouchEvent) => {
-    // Si no está en pantalla completa, intentar activarla en la primera interacción táctil
     if (!document.fullscreenElement && !(document as any).webkitFullscreenElement) {
       enterFullscreen().catch(() => {});
     }
@@ -542,8 +563,7 @@ export function PlayerPage() {
     const target = e.target as HTMLElement;
     if (
       activeDrawer !== 'none' ||
-      target.closest('[data-drawer]') ||
-      target.closest('.controls-overlay') ||
+      target.closest('[data-interactive]') ||
       target.closest('button') ||
       target.closest('input') ||
       target.closest('select') ||
@@ -565,9 +585,9 @@ export function PlayerPage() {
       initialBrightness.current = brightness;
       initialVolume.current = isMuted ? 0 : volume;
 
-      if (x < screenWidth * 0.45) {
+      if (x < screenWidth * 0.4) {
         touchActionSide.current = 'left';
-      } else if (x > screenWidth * 0.55) {
+      } else if (x > screenWidth * 0.6) {
         touchActionSide.current = 'right';
       } else {
         touchActionSide.current = null;
@@ -582,20 +602,22 @@ export function PlayerPage() {
       const screenHeight = window.innerHeight;
       const change = deltaY / (screenHeight * 0.6);
 
-      if (touchActionSide.current === 'left') {
-        const newBri = Math.max(0.1, Math.min(1.5, initialBrightness.current + change));
-        setBrightness(newBri);
-        showToast({ icon: 'brightness', text: `Brillo: ${Math.round(newBri * 100)}%`, value: newBri });
-      } else if (touchActionSide.current === 'right') {
-        const newVol = Math.max(0, Math.min(1.0, initialVolume.current + change));
-        setVolume(newVol);
-        setIsMuted(false);
-        showToast({ icon: 'volume', text: `Volumen: ${Math.round(newVol * 100)}%`, value: newVol });
+      if (Math.abs(deltaY) > 10) {
+        if (touchActionSide.current === 'left') {
+          const newBri = Math.max(0.1, Math.min(1.5, initialBrightness.current + change));
+          setBrightness(newBri);
+          showToast({ icon: 'brightness', text: `Brillo: ${Math.round(newBri * 100)}%`, value: newBri });
+        } else if (touchActionSide.current === 'right') {
+          const newVol = Math.max(0, Math.min(1.0, initialVolume.current + change));
+          setVolume(newVol);
+          setIsMuted(false);
+          showToast({ icon: 'volume', text: `Volumen: ${Math.round(newVol * 100)}%`, value: newVol });
+        }
       }
     }
   };
 
-  const handleTouchEnd = (e: React.TouchEvent) => {
+  const handleTouchEnd = () => {
     const now = Date.now();
     const timeDiff = now - touchStartTime.current;
 
@@ -605,11 +627,11 @@ export function PlayerPage() {
       const screenWidth = window.innerWidth;
 
       if (doubleTapDiff < 300) {
-        if (x < screenWidth * 0.4) {
+        if (x < screenWidth * 0.35) {
           seekRelative(-10);
           setDoubleTapSide('left');
           setTimeout(() => setDoubleTapSide(null), 600);
-        } else if (x > screenWidth * 0.6) {
+        } else if (x > screenWidth * 0.65) {
           seekRelative(10);
           setDoubleTapSide('right');
           setTimeout(() => setDoubleTapSide(null), 600);
@@ -619,7 +641,7 @@ export function PlayerPage() {
         lastTapTime.current = 0;
       } else {
         lastTapTime.current = now;
-        showControlsTemp();
+        toggleControlsManual();
       }
     }
 
@@ -628,13 +650,12 @@ export function PlayerPage() {
     touchActionSide.current = null;
   };
 
-  // Rueda del ratón aislada para evitar conflictos con scroll de listas
+  // Rueda del ratón para volumen y brillo
   const handleWheel = (e: React.WheelEvent) => {
     const target = e.target as HTMLElement;
     if (
       activeDrawer !== 'none' ||
-      target.closest('[data-drawer]') ||
-      target.closest('.controls-overlay') ||
+      target.closest('[data-interactive]') ||
       target.closest('button') ||
       target.closest('input') ||
       target.closest('select') ||
@@ -659,7 +680,7 @@ export function PlayerPage() {
     }
   };
 
-  // Atajos de teclado para Windows / Desktop
+  // Atajos de teclado
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement).tagName === 'INPUT') return;
@@ -718,7 +739,7 @@ export function PlayerPage() {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#000', flexDirection: 'column', gap: 14 }}>
         <Loader2 size={36} className="animate-spin" color="var(--accent-primary)" />
-        <p style={{ color: 'var(--text-muted)', fontSize: 14, fontWeight: 600 }}>Cargando episodio...</p>
+        <p style={{ color: 'var(--text-muted)', fontSize: 14, fontWeight: 600 }}>Cargando anime...</p>
       </div>
     );
   }
@@ -728,10 +749,10 @@ export function PlayerPage() {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', flexDirection: 'column', gap: 16, background: '#000', padding: 24, textAlign: 'center' }}>
         <AlertCircle size={48} style={{ color: '#f87171', opacity: 0.8 }} />
         <h2 style={{ fontSize: 18, fontWeight: 700, color: 'white', margin: 0 }}>
-          {loadError || 'No hay contenido seleccionado para reproducir'}
+          {loadError || 'No hay contenido seleccionado'}
         </h2>
         <p style={{ color: 'var(--text-muted)', fontSize: 13, maxWidth: 400 }}>
-          Selecciona un episodio desde el catálogo o la página de detalles para comenzar a ver.
+          Selecciona un episodio para comenzar a reproducir.
         </p>
         <button
           onClick={() => navigate(-1)}
@@ -757,7 +778,7 @@ export function PlayerPage() {
         cursor: showControls ? 'default' : 'none',
       }}
       onMouseMove={showControlsTemp}
-      onClick={showControlsTemp}
+      onClick={handleScreenClick}
       onWheel={handleWheel}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
@@ -768,9 +789,8 @@ export function PlayerPage() {
         style={{
           position: 'absolute', inset: 0,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          background: '#000000', cursor: 'pointer',
+          background: '#000000', pointerEvents: 'none',
         }}
-        onClick={togglePlay}
       >
         <video
           ref={videoRef}
@@ -784,7 +804,6 @@ export function PlayerPage() {
           }}
           onPlay={() => {
             setIsPlaying(true);
-            // Solo guardar si ya estamos listos (evitar sobrescribir antes del seek de reanudación)
             if (readyToSaveRef.current) {
               saveProgress();
             }
@@ -805,11 +824,9 @@ export function PlayerPage() {
                     const targetTime = savedProg * v.duration;
                     v.currentTime = targetTime;
                     hasResumedProgressRef.current = true;
-                    // Dar tiempo al seek antes de habilitar guardado
                     setTimeout(() => { readyToSaveRef.current = true; }, 1500);
                     showToast({ icon: 'seek', text: `Reanudado al ${Math.round(savedProg * 100)}%` });
                   } else {
-                    // Sin progreso previo o episodio nuevo: habilitar guardado de inmediato
                     readyToSaveRef.current = true;
                   }
                 } catch (e) {
@@ -836,13 +853,13 @@ export function PlayerPage() {
             }
           }}
           onError={() => {
-            console.warn('Video element error, switching to fallback server...');
+            console.warn('Video error, switching fallback server...');
             tryFallbackServer();
           }}
           onEnded={handleEnded}
         />
 
-        {/* Capa de Atenuación de Brillo Física (Dimmer Overlay) */}
+        {/* Dimmer de Brillo */}
         {brightness < 1.0 && (
           <div
             style={{
@@ -856,7 +873,7 @@ export function PlayerPage() {
         )}
       </div>
 
-      {/* Center Play/Pause Pulse Animation (cuando se hace clic en pantalla) */}
+      {/* Center Play/Pause Pulse Animation */}
       <AnimatePresence>
         {centerPlayPulse && (
           <motion.div
@@ -895,7 +912,7 @@ export function PlayerPage() {
               color: 'white', zIndex: 30, pointerEvents: 'none',
             }}
           >
-            {doubleTapSide === 'left' ? <RotateCcw size={32} /> : <FastForward size={32} />}
+            {doubleTapSide === 'left' ? <RotateCcw size={32} /> : <RotateCw size={32} />}
             <span style={{ fontSize: 13, fontWeight: 700 }}>
               {doubleTapSide === 'left' ? '-10s' : '+10s'}
             </span>
@@ -903,7 +920,7 @@ export function PlayerPage() {
         )}
       </AnimatePresence>
 
-      {/* HUD Toast (Quick Overlay) */}
+      {/* HUD Toast */}
       <AnimatePresence>
         {hudToast && (
           <motion.div
@@ -932,53 +949,46 @@ export function PlayerPage() {
       {/* Loading Stream Overlay */}
       {isResolving && (
         <div style={{
-          position: 'absolute', inset: 0,
-          background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)',
+          position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(8px)',
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-          gap: 14, zIndex: 35, pointerEvents: 'none',
+          gap: 12, zIndex: 15, pointerEvents: 'none',
         }}>
-          <div style={{
-            width: 44, height: 44, borderRadius: '50%',
-            border: '3px solid var(--border-subtle)',
-            borderTopColor: 'var(--accent-primary)',
-            animation: 'spin-slow 0.8s linear infinite',
-          }} />
-          <p style={{ color: 'white', fontSize: 14, fontWeight: 600 }}>
-            Conectando a {selectedServer?.name || 'servidor'}...
-          </p>
+          <Loader2 size={36} className="animate-spin" color="var(--accent-primary)" />
+          <span style={{ color: 'white', fontSize: 13, fontWeight: 600 }}>Cargando servidor...</span>
         </div>
       )}
 
-      {/* ─── Controls Overlay ─── */}
+      {/* ── Overlay HUD Elegante y Limpio (Estilo C# / Imagen 3) ── */}
       <AnimatePresence>
         {showControls && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.18 }}
+            transition={{ duration: 0.2 }}
             className="controls-overlay"
             style={{
               position: 'absolute', inset: 0,
-              background: 'linear-gradient(to bottom, rgba(0,0,0,0.85) 0%, transparent 20%, transparent 70%, rgba(0,0,0,0.92) 100%)',
+              background: 'linear-gradient(to bottom, rgba(0,0,0,0.85) 0%, transparent 25%, transparent 65%, rgba(0,0,0,0.92) 100%)',
               display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
-              paddingTop: isMobile ? 'calc(12px + env(safe-area-inset-top, 0px))' : '20px',
-              paddingBottom: isMobile ? 'calc(12px + env(safe-area-inset-bottom, 0px))' : '20px',
+              paddingTop: isMobile ? 'calc(12px + env(safe-area-inset-top, 0px))' : '18px',
+              paddingBottom: isMobile ? 'calc(12px + env(safe-area-inset-bottom, 0px))' : '18px',
               paddingLeft: isMobile ? 'calc(16px + env(safe-area-inset-left, 0px))' : '24px',
               paddingRight: isMobile ? 'calc(16px + env(safe-area-inset-right, 0px))' : '24px',
               zIndex: 20, pointerEvents: 'auto',
             }}
-            onClick={togglePlay}
+            onClick={handleScreenClick}
             onWheel={e => e.stopPropagation()}
             onTouchStart={e => e.stopPropagation()}
             onTouchMove={e => e.stopPropagation()}
           >
-            {/* ── Top Bar: Volver, Título Central y Acciones ── */}
+            {/* ── Top Bar (Imagen 3): Volver + Título a la Izquierda | Estado + Servidor + Reload + Ajustes a la Derecha ── */}
             <div
+              data-interactive
               onClick={e => e.stopPropagation()}
               style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}
             >
-              {/* Botón Volver */}
+              {/* Izquierda: Botón Volver + Título del Anime */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, flex: 1 }}>
                 <button
                   onClick={() => {
@@ -986,47 +996,53 @@ export function PlayerPage() {
                     navigate(-1);
                   }}
                   style={{
-                    background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.15)',
+                    background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.2)',
                     borderRadius: 'var(--radius-full)', padding: '6px 14px',
                     display: 'flex', alignItems: 'center', gap: 6,
                     color: 'white', cursor: 'pointer', backdropFilter: 'blur(10px)', flexShrink: 0,
                     fontSize: 13, fontWeight: 700,
                   }}
                 >
-                  <ArrowLeft size={16} /> Volver
+                  <ChevronLeft size={16} /> Volver
                 </button>
-              </div>
 
-              {/* Título Central */}
-              <div style={{ textAlign: 'center', flex: 2, minWidth: 0, overflow: 'hidden' }}>
                 <h2 style={{
                   fontSize: isMobile ? 13 : 15, fontWeight: 700, color: 'white', margin: 0,
                   whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                 }}>
-                  AniCS - {currentAnime.title} - Episodio {currentEpisode.number}
+                  {currentAnime.title} — Episodio {currentEpisode.number}
                 </h2>
               </div>
 
-              {/* Acciones Superiores Derecha (Servidor Ocultable / Desplegable, Ocultar Controles, Episodios, Ajustes) */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end', flex: 1 }}>
-                {/* Selector Desplegable de Servidor */}
+              {/* Derecha: Estado + Servidor Dropdown + Botón Reload + Botón Ajustes */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end', flexShrink: 0 }}>
+                {/* Badge de Estado: Reproduciendo / Pausado */}
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  background: isPlaying ? 'rgba(59, 130, 246, 0.25)' : 'rgba(251, 191, 36, 0.2)',
+                  border: isPlaying ? '1px solid rgba(59, 130, 246, 0.4)' : '1px solid rgba(251, 191, 36, 0.4)',
+                  padding: '5px 12px', borderRadius: 'var(--radius-full)',
+                  color: 'white', fontSize: 11, fontWeight: 700,
+                }}>
+                  {isPlaying ? <Play size={11} fill="white" /> : <Pause size={11} fill="white" />}
+                  <span>{isPlaying ? 'Reproduciendo' : 'Pausado'}</span>
+                </div>
+
+                {/* Selector de Servidor */}
                 <div style={{ position: 'relative' }}>
                   <button
                     onClick={() => setShowServerDropdown(!showServerDropdown)}
                     title="Seleccionar servidor de video"
                     style={{
-                      background: 'rgba(10,11,15,0.8)', border: '1px solid rgba(255,255,255,0.15)',
-                      borderRadius: 'var(--radius-full)', padding: '6px 12px',
+                      background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.2)',
+                      borderRadius: 'var(--radius-full)', padding: '5px 12px',
                       color: 'white', fontSize: 12, fontWeight: 700, cursor: 'pointer',
-                      display: 'flex', alignItems: 'center', gap: 6, backdropFilter: 'blur(12px)',
+                      display: 'flex', alignItems: 'center', gap: 6, backdropFilter: 'blur(10px)',
                     }}
                   >
-                    <Server size={13} color="var(--accent-primary)" />
-                    <span>{selectedServer?.name || 'Servidor'}</span>
-                    {showServerDropdown ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                    <span>{selectedServer?.name || '1080p'}</span>
                   </button>
 
-                  {/* Menú Flotante de Servidores Ocultable */}
                   <AnimatePresence>
                     {showServerDropdown && (
                       <motion.div
@@ -1034,7 +1050,7 @@ export function PlayerPage() {
                         animate={{ opacity: 1, y: 0, scale: 1 }}
                         exit={{ opacity: 0, y: 8, scale: 0.95 }}
                         style={{
-                          position: 'absolute', top: '115%', right: 0,
+                          position: 'absolute', top: '120%', right: 0,
                           background: 'rgba(15,16,22,0.96)', backdropFilter: 'blur(20px)',
                           border: '1px solid var(--border-moderate)', borderRadius: 'var(--radius-lg)',
                           padding: 8, zIndex: 50, display: 'flex', flexDirection: 'column', gap: 4,
@@ -1042,7 +1058,7 @@ export function PlayerPage() {
                         }}
                       >
                         <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', padding: '4px 8px' }}>
-                          Servidores disponibles
+                          Servidores
                         </span>
                         {servers.map((srv, idx) => {
                           const isSelected = selectedServer?.url === srv.url;
@@ -1062,10 +1078,8 @@ export function PlayerPage() {
                               }}
                             >
                               <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                {srv.isDirect && <Zap size={11} color={isSelected ? 'white' : '#34d399'} />}
                                 {srv.name}
                               </span>
-                              {isSelected && <Check size={12} />}
                             </button>
                           );
                         })}
@@ -1074,40 +1088,21 @@ export function PlayerPage() {
                   </AnimatePresence>
                 </div>
 
-                {/* Botón de Relación de Aspecto (16:9 Original / Zoom / Estirar) */}
+                {/* Botón Alternar / Cambiar Servidor Siguiente */}
                 <button
-                  onClick={cycleAspectRatio}
-                  title={`Relación de aspecto actual: ${aspectRatio === 'contain' ? 'Original (16:9)' : aspectRatio === 'cover' ? 'Zoom (Llenar)' : 'Estirar'}`}
+                  onClick={tryFallbackServer}
+                  title="Cambiar al siguiente servidor"
                   style={{
-                    background: aspectRatio !== 'contain' ? 'var(--accent-primary)' : 'rgba(255,255,255,0.1)',
-                    border: '1px solid rgba(255,255,255,0.15)',
-                    borderRadius: 'var(--radius-full)', padding: '6px 10px',
-                    display: 'flex', alignItems: 'center', gap: 5,
-                    color: 'white', fontSize: 11, fontWeight: 700, cursor: 'pointer', backdropFilter: 'blur(10px)',
-                  }}
-                >
-                  <Scaling size={14} />
-                  <span style={{ textTransform: 'capitalize' }}>
-                    {aspectRatio === 'contain' ? '16:9' : aspectRatio === 'cover' ? 'Zoom' : 'Estirar'}
-                  </span>
-                </button>
-
-                {/* Botón Ocultar Controles Manualmente */}
-                <button
-                  onClick={toggleControlsManual}
-                  title="Ocultar controles (C o H)"
-                  style={{
-                    background: 'rgba(255,255,255,0.1)',
-                    border: '1px solid rgba(255,255,255,0.15)',
+                    background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.2)',
                     borderRadius: 'var(--radius-full)', width: 34, height: 34,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     color: 'white', cursor: 'pointer', backdropFilter: 'blur(10px)',
                   }}
                 >
-                  <EyeOff size={15} />
+                  <RotateCw size={15} />
                 </button>
 
-                {/* Botón Drawer de Episodios */}
+                {/* Botón Lista de Episodios */}
                 <button
                   onClick={() => {
                     setActiveDrawer(activeDrawer === 'servers' ? 'none' : 'servers');
@@ -1115,17 +1110,17 @@ export function PlayerPage() {
                   }}
                   title="Lista de episodios"
                   style={{
-                    background: activeDrawer === 'servers' ? 'var(--accent-primary)' : 'rgba(255,255,255,0.1)',
-                    border: '1px solid rgba(255,255,255,0.15)',
+                    background: activeDrawer === 'servers' ? 'var(--accent-primary)' : 'rgba(255,255,255,0.12)',
+                    border: '1px solid rgba(255,255,255,0.2)',
                     borderRadius: 'var(--radius-full)', width: 34, height: 34,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     color: 'white', cursor: 'pointer', backdropFilter: 'blur(10px)',
                   }}
                 >
-                  <ListVideo size={16} />
+                  <ListVideo size={15} />
                 </button>
 
-                {/* Botón Drawer de Ajustes */}
+                {/* Botón Ajustes */}
                 <button
                   onClick={() => {
                     setActiveDrawer(activeDrawer === 'settings' ? 'none' : 'settings');
@@ -1133,209 +1128,183 @@ export function PlayerPage() {
                   }}
                   title="Ajustes de video"
                   style={{
-                    background: activeDrawer === 'settings' ? 'var(--accent-primary)' : 'rgba(255,255,255,0.1)',
-                    border: '1px solid rgba(255,255,255,0.15)',
+                    background: activeDrawer === 'settings' ? 'var(--accent-primary)' : 'rgba(255,255,255,0.12)',
+                    border: '1px solid rgba(255,255,255,0.2)',
                     borderRadius: 'var(--radius-full)', width: 34, height: 34,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     color: 'white', cursor: 'pointer', backdropFilter: 'blur(10px)',
                   }}
                 >
-                  <Settings size={16} />
+                  <Settings size={15} />
                 </button>
               </div>
             </div>
 
-            {/* ─── Bottom Bar: Barra de Progreso + Controles Inferiores (Estilo AniCS C#) ─── */}
+            {/* ── Bottom Bar (Imagen 3): Barra de Progreso Delgada + Controles Izquierda / Velocidad y Opciones Derecha ── */}
             <div
-              className="no-gesture"
+              data-interactive
               onClick={e => e.stopPropagation()}
-              style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
-              onWheel={e => e.stopPropagation()}
-              onTouchStart={e => e.stopPropagation()}
-              onTouchMove={e => e.stopPropagation()}
+              style={{ display: 'flex', flexDirection: 'column', gap: 10 }}
             >
-              {/* Barra de Progreso / Timeline Seekbar con barra verde/azul */}
-              <div style={{ position: 'relative', width: '100%', height: 16, display: 'flex', alignItems: 'center' }}>
-                <input
-                  type="range"
-                  min={0}
-                  max={duration || 100}
-                  value={playbackTime}
-                  onWheel={e => e.stopPropagation()}
-                  onTouchStart={e => e.stopPropagation()}
-                  onTouchMove={e => e.stopPropagation()}
-                  onChange={e => {
-                    const time = parseFloat(e.target.value);
-                    setPlaybackTime(time);
-                    if (videoRef.current) videoRef.current.currentTime = time;
-                  }}
-                  style={{
-                    width: '100%', accentColor: 'var(--accent-primary)',
-                    cursor: 'pointer', height: 6,
-                  }}
-                />
+              {/* Barra de Progreso */}
+              <div
+                style={{
+                  width: '100%', height: 18, display: 'flex', alignItems: 'center',
+                  cursor: 'pointer', position: 'relative',
+                }}
+                onClick={(e) => {
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  const pos = (e.clientX - rect.left) / rect.width;
+                  const target = pos * (duration || 0);
+                  if (videoRef.current) {
+                    videoRef.current.currentTime = target;
+                    setPlaybackTime(target);
+                  }
+                }}
+              >
+                <div style={{
+                  width: '100%', height: 3, background: 'rgba(255,255,255,0.25)',
+                  borderRadius: 2, position: 'relative', overflow: 'visible',
+                }}>
+                  {/* Progreso Reproducido */}
+                  <div style={{
+                    width: `${duration > 0 ? (playbackTime / duration) * 100 : 0}%`,
+                    height: '100%', background: 'var(--accent-primary)', borderRadius: 2,
+                    position: 'relative',
+                  }}>
+                    {/* Thumb Circle */}
+                    <div style={{
+                      position: 'absolute', right: -5, top: -4,
+                      width: 11, height: 11, borderRadius: '50%',
+                      background: 'white', boxShadow: '0 0 8px rgba(0,0,0,0.6)',
+                    }} />
+                  </div>
+                </div>
               </div>
 
-              {/* Fila de Controles Inferiores */}
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
-                {/* Grupo Izquierdo: Botones de Reproducción, Saltos de 10s, Volumen y Tiempo */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 6 : 10 }}>
+              {/* Fila Inferior de Controles */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                {/* Grupo Izquierda (Imagen 3): ⏮ | ↺ 10 | ▶/⏸ | 10 ↻ | ⏭ | 0:04 / 24:16 */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                   {/* Episodio Anterior */}
-                  {currentEpisode.number > 1 && (
-                    <button
-                      onClick={() => handleLoadEpisode(currentEpisode.number - 1)}
-                      title="Episodio anterior"
-                      style={{
-                        background: 'rgba(255,255,255,0.08)', border: 'none', borderRadius: 'var(--radius-md)',
-                        width: 32, height: 32, color: 'white', cursor: 'pointer',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      }}
-                    >
-                      <ChevronLeft size={18} />
-                    </button>
-                  )}
-
-                  {/* Retroceder 10 Segundos */}
                   <button
-                    onClick={() => seekRelative(-10)}
-                    title="Retroceder 10s"
+                    disabled={!currentAnime || currentEpisode.number <= 1}
+                    onClick={() => handleLoadEpisode(currentEpisode.number - 1)}
                     style={{
-                      background: 'rgba(255,255,255,0.08)', border: 'none', borderRadius: 'var(--radius-md)',
-                      width: 34, height: 32, color: 'white', cursor: 'pointer',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 2,
-                      fontSize: 11, fontWeight: 700,
+                      background: 'none', border: 'none',
+                      color: currentEpisode.number > 1 ? 'white' : 'rgba(255,255,255,0.3)',
+                      cursor: currentEpisode.number > 1 ? 'pointer' : 'not-allowed',
+                      display: 'flex', alignItems: 'center', padding: 4,
                     }}
                   >
-                    <RotateCcw size={13} />
-                    <span>10</span>
+                    <SkipBack size={18} />
                   </button>
 
-                  {/* Botón Principal PLAY / PAUSE */}
+                  {/* Retroceder 10s */}
+                  <button
+                    onClick={() => seekRelative(-10)}
+                    style={{
+                      background: 'none', border: 'none', color: 'white',
+                      cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3,
+                      fontSize: 12, fontWeight: 700, padding: 4,
+                    }}
+                  >
+                    <RotateCcw size={16} /> 10
+                  </button>
+
+                  {/* Play / Pause Botón Circular */}
                   <button
                     onClick={togglePlay}
-                    title={isPlaying ? 'Pausar (Espacio)' : 'Reproducir (Espacio)'}
                     style={{
-                      background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))',
-                      border: 'none', borderRadius: 'var(--radius-md)',
-                      width: 40, height: 34, color: 'white', cursor: 'pointer',
+                      width: 38, height: 38, borderRadius: '50%',
+                      background: 'rgba(255,255,255,0.18)', border: '1px solid rgba(255,255,255,0.25)',
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      boxShadow: 'var(--shadow-glow)',
+                      color: 'white', cursor: 'pointer', backdropFilter: 'blur(8px)',
                     }}
                   >
                     {isPlaying ? <Pause size={18} fill="white" /> : <Play size={18} fill="white" style={{ marginLeft: 2 }} />}
                   </button>
 
-                  {/* Avanzar 10 Segundos */}
+                  {/* Avanzar 10s */}
                   <button
                     onClick={() => seekRelative(10)}
-                    title="Avanzar 10s"
                     style={{
-                      background: 'rgba(255,255,255,0.08)', border: 'none', borderRadius: 'var(--radius-md)',
-                      width: 34, height: 32, color: 'white', cursor: 'pointer',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 2,
-                      fontSize: 11, fontWeight: 700,
+                      background: 'none', border: 'none', color: 'white',
+                      cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3,
+                      fontSize: 12, fontWeight: 700, padding: 4,
                     }}
                   >
-                    <span>10</span>
-                    <FastForward size={13} />
+                    10 <RotateCw size={16} />
                   </button>
 
                   {/* Episodio Siguiente */}
                   <button
+                    disabled={!currentAnime || currentEpisode.number >= currentAnime.episodes.length}
                     onClick={() => handleLoadEpisode(currentEpisode.number + 1)}
-                    title="Episodio siguiente"
                     style={{
-                      background: 'rgba(255,255,255,0.08)', border: 'none', borderRadius: 'var(--radius-md)',
-                      width: 32, height: 32, color: 'white', cursor: 'pointer',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      background: 'none', border: 'none',
+                      color: currentEpisode.number < currentAnime.episodes.length ? 'white' : 'rgba(255,255,255,0.3)',
+                      cursor: currentEpisode.number < currentAnime.episodes.length ? 'pointer' : 'not-allowed',
+                      display: 'flex', alignItems: 'center', padding: 4,
                     }}
                   >
-                    <ChevronRight size={18} />
+                    <SkipForward size={18} />
                   </button>
 
-                  {/* Control de Volumen y Porcentaje */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 6 }}>
-                    <button
-                      onClick={() => setIsMuted(!isMuted)}
-                      style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
-                    >
-                      {isMuted || volume === 0 ? <VolumeX size={17} /> : <Volume2 size={17} />}
-                    </button>
-                    {!isMobile && (
-                      <input
-                        type="range"
-                        min={0}
-                        max={1}
-                        step={0.05}
-                        value={isMuted ? 0 : volume}
-                        onChange={e => {
-                          const v = parseFloat(e.target.value);
-                          setVolume(v);
-                          setIsMuted(false);
-                        }}
-                        style={{ width: 70, accentColor: 'var(--accent-primary)', cursor: 'pointer' }}
-                      />
-                    )}
-                    <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', minWidth: 30 }}>
-                      {isMuted ? '0%' : `${Math.round(volume * 100)}%`}
-                    </span>
-                  </div>
-
-                  {/* Tiempo de Reproducción */}
-                  <span style={{ fontSize: 12, fontWeight: 700, color: 'white', marginLeft: 8 }}>
+                  {/* Timestamp */}
+                  <span style={{ fontSize: 12, fontWeight: 700, color: 'white', marginLeft: 6 }}>
                     {formatTime(playbackTime)} / {formatTime(duration)}
                   </span>
                 </div>
 
-                {/* Grupo Derecho: Estado, Selector de Velocidad, Saltar Intro y Pantalla Completa */}
+                {/* Grupo Derecha (Imagen 3): Saltar Intro + Velocidad 1.0X + Aspecto / Fullscreen */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  {/* Botón Saltar Intro */}
+                  {/* Saltar Intro */}
+                  {duration > 120 && (
+                    <button
+                      onClick={() => seekRelative(85)}
+                      style={{
+                        background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)',
+                        borderRadius: 'var(--radius-full)', padding: '5px 12px',
+                        color: 'white', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                        display: 'flex', alignItems: 'center', gap: 4,
+                      }}
+                    >
+                      Saltar Intro (+85s)
+                    </button>
+                  )}
+
+                  {/* Selector de Velocidad (1.0X estilo Imagen 3) */}
                   <button
-                    onClick={() => seekRelative(85)}
+                    onClick={() => {
+                      const currentIndex = SPEED_OPTIONS.indexOf(playbackSpeed);
+                      const nextSpeed = SPEED_OPTIONS[(currentIndex + 1) % SPEED_OPTIONS.length];
+                      setPlaybackSpeed(nextSpeed);
+                      showToast({ icon: 'seek', text: `Velocidad: ${nextSpeed}x` });
+                    }}
                     style={{
-                      background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)',
-                      borderRadius: 'var(--radius-full)', padding: '5px 12px',
+                      background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)',
+                      borderRadius: 'var(--radius-md)', padding: '5px 10px',
+                      color: 'white', fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                    }}
+                  >
+                    {playbackSpeed.toFixed(1)}X
+                  </button>
+
+                  {/* Botón de Aspecto / Pantalla Completa */}
+                  <button
+                    onClick={cycleAspectRatio}
+                    title="Relación de aspecto"
+                    style={{
+                      background: aspectRatio !== 'contain' ? 'var(--accent-primary)' : 'rgba(255,255,255,0.1)',
+                      border: '1px solid rgba(255,255,255,0.2)',
+                      borderRadius: 'var(--radius-md)', padding: '5px 8px',
                       color: 'white', fontSize: 11, fontWeight: 700, cursor: 'pointer',
                       display: 'flex', alignItems: 'center', gap: 4,
                     }}
                   >
-                    <SkipForward size={12} /> Saltar Intro (+85s)
-                  </button>
-
-                  {/* Estado: ● Reproduciendo / ● Pausado */}
-                  <span style={{
-                    fontSize: 11, fontWeight: 700,
-                    color: isPlaying ? '#34d399' : '#fbbf24',
-                    background: isPlaying ? 'rgba(52, 211, 153, 0.12)' : 'rgba(251, 191, 36, 0.12)',
-                    padding: '3px 9px', borderRadius: 'var(--radius-full)',
-                  }}>
-                    ● {isPlaying ? 'Reproduciendo' : 'Pausado'}
-                  </span>
-
-                  {/* Selector de Velocidad Dropdown */}
-                  <select
-                    value={playbackSpeed}
-                    onChange={e => setPlaybackSpeed(parseFloat(e.target.value))}
-                    style={{
-                      background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)',
-                      borderRadius: 'var(--radius-md)', padding: '3px 8px',
-                      color: 'white', fontSize: 11, fontWeight: 700, outline: 'none', cursor: 'pointer',
-                    }}
-                  >
-                    {SPEED_OPTIONS.map(s => (
-                      <option key={s} value={s} style={{ background: '#181920', color: 'white' }}>
-                        {s}x
-                      </option>
-                    ))}
-                  </select>
-
-                  {/* Pantalla Completa */}
-                  <button
-                    onClick={toggleFullscreen}
-                    title={isFullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'}
-                    style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer', padding: 4 }}
-                  >
-                    {isFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
+                    <Scaling size={14} />
+                    <span>{aspectRatio === 'contain' ? '16:9' : aspectRatio === 'cover' ? 'Zoom' : 'Estirar'}</span>
                   </button>
                 </div>
               </div>
@@ -1344,50 +1313,40 @@ export function PlayerPage() {
         )}
       </AnimatePresence>
 
-      {/* Side Drawer: Episodes List */}
+      {/* ── Drawer Lateral de Episodios ── */}
       <AnimatePresence>
         {activeDrawer === 'servers' && (
           <motion.div
+            data-interactive
             initial={{ x: '100%' }}
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
-            transition={{ type: 'spring', damping: 25 }}
-            data-drawer="true"
-            className="drawer-panel"
+            transition={{ type: 'spring', damping: 25, stiffness: 300 }}
             style={{
-              position: 'absolute', top: 0, right: 0, bottom: 0, width: isMobile ? '80vw' : 340,
-              background: 'rgba(10,11,15,0.95)', backdropFilter: 'blur(24px)',
+              position: 'absolute', top: 0, right: 0, bottom: 0,
+              width: isMobile ? '80%' : 320, maxWidth: '100%',
+              background: 'rgba(12, 13, 18, 0.96)', backdropFilter: 'blur(24px)',
               borderLeft: '1px solid var(--border-moderate)',
-              zIndex: 30,
-              paddingTop: isMobile ? 'calc(20px + env(safe-area-inset-top, 0px))' : 20,
-              paddingBottom: isMobile ? 'calc(20px + env(safe-area-inset-bottom, 0px))' : 20,
-              paddingRight: isMobile ? 'calc(20px + env(safe-area-inset-right, 0px))' : 20,
-              paddingLeft: isMobile ? 'calc(20px + env(safe-area-inset-left, 0px))' : 20,
-              display: 'flex', flexDirection: 'column',
+              zIndex: 35, display: 'flex', flexDirection: 'column',
+              padding: 16, boxShadow: 'var(--shadow-2xl)',
             }}
             onClick={e => e.stopPropagation()}
-            onWheel={e => e.stopPropagation()}
-            onTouchStart={e => e.stopPropagation()}
-            onTouchMove={e => e.stopPropagation()}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <h3 style={{ fontSize: 16, fontWeight: 800, color: 'white', margin: 0 }}>Episodios</h3>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <h3 style={{ fontSize: 15, fontWeight: 700, color: 'white', margin: 0 }}>
+                Episodios ({currentAnime.episodes.length})
+              </h3>
               <button
                 onClick={() => setActiveDrawer('none')}
-                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}
               >
-                ✕
+                Cerrar
               </button>
             </div>
 
-            <div
-              style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}
-              onWheel={e => e.stopPropagation()}
-              onTouchStart={e => e.stopPropagation()}
-              onTouchMove={e => e.stopPropagation()}
-            >
+            <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
               {currentAnime.episodes.map(ep => {
-                const isCurrent = ep.number === currentEpisode.number;
+                const isCurrent = currentEpisode.number === ep.number;
                 return (
                   <button
                     key={ep.number}
@@ -1399,13 +1358,13 @@ export function PlayerPage() {
                       padding: '10px 12px', borderRadius: 'var(--radius-md)',
                       background: isCurrent ? 'var(--accent-primary)' : 'var(--bg-elevated)',
                       border: `1px solid ${isCurrent ? 'transparent' : 'var(--border-subtle)'}`,
-                      color: isCurrent ? 'white' : 'var(--text-primary)',
-                      textAlign: 'left', cursor: 'pointer', fontSize: 13, fontWeight: isCurrent ? 700 : 500,
-                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                      color: 'white', fontSize: 13, fontWeight: isCurrent ? 700 : 500,
+                      textAlign: 'left', cursor: 'pointer', display: 'flex',
+                      alignItems: 'center', justifyContent: 'space-between',
                     }}
                   >
                     <span>Episodio {ep.number}</span>
-                    {isCurrent && <span style={{ fontSize: 10, fontWeight: 800 }}>ACTUAL</span>}
+                    {isCurrent && <Play size={13} fill="white" />}
                   </button>
                 );
               })}
@@ -1414,96 +1373,53 @@ export function PlayerPage() {
         )}
       </AnimatePresence>
 
-      {/* Side Drawer: Settings & Servers Detailed */}
+      {/* ── Drawer Lateral de Ajustes ── */}
       <AnimatePresence>
         {activeDrawer === 'settings' && (
           <motion.div
+            data-interactive
             initial={{ x: '100%' }}
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
-            transition={{ type: 'spring', damping: 25 }}
-            data-drawer="true"
-            className="drawer-panel"
+            transition={{ type: 'spring', damping: 25, stiffness: 300 }}
             style={{
-              position: 'absolute', top: 0, right: 0, bottom: 0, width: isMobile ? '80vw' : 340,
-              background: 'rgba(10,11,15,0.95)', backdropFilter: 'blur(24px)',
+              position: 'absolute', top: 0, right: 0, bottom: 0,
+              width: isMobile ? '80%' : 320, maxWidth: '100%',
+              background: 'rgba(12, 13, 18, 0.96)', backdropFilter: 'blur(24px)',
               borderLeft: '1px solid var(--border-moderate)',
-              zIndex: 30,
-              paddingTop: isMobile ? 'calc(20px + env(safe-area-inset-top, 0px))' : 20,
-              paddingBottom: isMobile ? 'calc(20px + env(safe-area-inset-bottom, 0px))' : 20,
-              paddingRight: isMobile ? 'calc(20px + env(safe-area-inset-right, 0px))' : 20,
-              paddingLeft: isMobile ? 'calc(20px + env(safe-area-inset-left, 0px))' : 20,
-              display: 'flex', flexDirection: 'column', gap: 20,
-              overflowY: 'auto',
+              zIndex: 35, display: 'flex', flexDirection: 'column',
+              padding: 16, gap: 16, boxShadow: 'var(--shadow-2xl)',
             }}
             onClick={e => e.stopPropagation()}
-            onWheel={e => e.stopPropagation()}
-            onTouchStart={e => e.stopPropagation()}
-            onTouchMove={e => e.stopPropagation()}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h3 style={{ fontSize: 16, fontWeight: 800, color: 'white', margin: 0 }}>Ajustes de Reproducción</h3>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <h3 style={{ fontSize: 15, fontWeight: 700, color: 'white', margin: 0 }}>Ajustes de Video</h3>
               <button
                 onClick={() => setActiveDrawer('none')}
-                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}
               >
-                ✕
+                Cerrar
               </button>
             </div>
 
-            {/* Brillo del Video */}
+            {/* Brillo */}
             <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <Sun size={14} color="#fbbf24" /> Brillo del Video
-                </span>
-                <span style={{ fontSize: 12, color: 'white', fontWeight: 700 }}>{Math.round(brightness * 100)}%</span>
-              </div>
+              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                Brillo ({Math.round(brightness * 100)}%)
+              </span>
               <input
-                type="range"
-                min={0.1}
-                max={1.5}
-                step={0.05}
-                value={brightness}
+                type="range" min={0.2} max={1.5} step={0.05} value={brightness}
                 onChange={e => setBrightness(parseFloat(e.target.value))}
-                style={{ width: '100%', marginTop: 8, accentColor: '#fbbf24', cursor: 'pointer' }}
+                style={{ width: '100%', marginTop: 6, accentColor: '#fbbf24' }}
               />
-              <span style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
-                Luminosidad del reproductor (no altera el brillo de tu monitor). Desliza verticalmente en la mitad izquierda.
-              </span>
             </div>
 
-            {/* Volumen del Reproductor */}
+            {/* Velocidad de Reproducción */}
             <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <Volume2 size={14} color="var(--accent-primary)" /> Volumen del Reproductor
-                </span>
-                <span style={{ fontSize: 12, color: 'white', fontWeight: 700 }}>{isMuted ? 'Muted' : `${Math.round(volume * 100)}%`}</span>
-              </div>
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.05}
-                value={isMuted ? 0 : volume}
-                onChange={e => {
-                  setVolume(parseFloat(e.target.value));
-                  setIsMuted(false);
-                }}
-                style={{ width: '100%', marginTop: 8, accentColor: 'var(--accent-primary)', cursor: 'pointer' }}
-              />
-              <span style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
-                Volumen del video independiente del volumen maestro de Windows. Desliza verticalmente en la mitad derecha.
+              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                Velocidad
               </span>
-            </div>
-
-            {/* Velocidad */}
-            <div>
-              <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                Velocidad de reproducción
-              </span>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginTop: 8 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginTop: 6 }}>
                 {SPEED_OPTIONS.map(s => (
                   <button
                     key={s}
@@ -1523,10 +1439,10 @@ export function PlayerPage() {
 
             {/* Escalado de Video */}
             <div>
-              <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                Escalado de Video
+              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                Escalado
               </span>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 }}>
                 {ASPECT_OPTIONS.map(opt => (
                   <button
                     key={opt.id}
@@ -1536,11 +1452,10 @@ export function PlayerPage() {
                       background: aspectRatio === opt.id ? 'rgba(59,130,246,0.2)' : 'var(--bg-elevated)',
                       border: `1px solid ${aspectRatio === opt.id ? 'var(--accent-primary)' : 'var(--border-subtle)'}`,
                       color: 'white', fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                      textAlign: 'left',
                     }}
                   >
-                    <span>{opt.label}</span>
-                    {aspectRatio === opt.id && <Check size={14} color="var(--accent-primary)" />}
+                    {opt.label}
                   </button>
                 ))}
               </div>

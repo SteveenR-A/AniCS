@@ -5,6 +5,26 @@ El formato está basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1
 
 ---
 
+## [0.1.4] - 2026-08-28
+
+### 🎬 Reproductor Limpio (Estilo C#) y Servidor Local de Streaming
+- **Servidor HTTP Local de Streaming con Rango (`206 Partial Content`):**
+  - Servidor interno en Rust corriendo en `127.0.0.1` para transmitir videos descargados directamente al reproductor HTML5 sin restricciones de WebView ni fallos de permisos en Android y Windows.
+- **Rediseño Minimalista y Elegante (Sin saturación ni emojis):**
+  - Barra superior simplificada: botón Volver, título limpio del episodio, indicador sutil de estado, selector de servidor y ajustes.
+  - Barra inferior estilizada: barra de progreso delgada de alta precisión, controles multimedia esenciales (anterior, -10s, play/pause circular, +10s, siguiente, tiempo transcurrido/total) y selector rápido de velocidad `1.0X`.
+- **Control de Gestos Táctiles Perfeccionado:**
+  - **1 solo clic/toque:** Alterna la visibilidad de los controles (HUD) sin pausar el video.
+  - **Doble clic en el centro:** Pausa o reanuda la reproducción.
+  - **Doble clic a la izquierda:** Retrocede 10 segundos (-10s).
+  - **Doble clic a la derecha:** Avanza 10 segundos (+10s).
+- **Corrección de Transición entre Animes y Fuentes (Mundo Donghua / JKAnime):**
+  - Se corrigió el error donde el reproductor mantenía cargado el stream o episodio de un anime anterior al cambiar de serie o de catálogo.
+- **Instalación Fluida de Actualizaciones APK:**
+  - Descarga directa en la caché interna de la aplicación y cierre limpio del proceso al invocar el instalador de paquetes de Android para evitar bloqueos de ejecución.
+
+---
+
 ## [0.1.3] - 2026-08-27
 
 ### 📱 Mejoras Móviles (Android), Descargas y Barra de Navegación

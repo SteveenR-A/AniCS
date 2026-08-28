@@ -10,7 +10,7 @@ import { convertFileSrc } from '@tauri-apps/api/core';
 import { getHistory, clearHistory, getFavorites, removeFavorite } from '@/services/storageService';
 import {
   scanLocalDownloads, deleteLocalDownload, deleteLocalAnimeFolder,
-  getDefaultDownloadDir
+  getDefaultDownloadDir, getLocalMediaUrl
 } from '@/services/downloadService';
 import { useDownloadStore } from '@/stores/useDownloadStore';
 import { usePlayerStore } from '@/stores/usePlayerStore';
@@ -226,7 +226,9 @@ export function MobileFavoritesPage() {
 export function MobileDownloadsPage() {
   const navigate = useNavigate();
   const { tasks, cancelTask, removeTask, expandedFolders, toggleFolder } = useDownloadStore();
-  const { setCurrentAnime, setCurrentEpisode, setResolvedMedia, setServers, openPlayer } = usePlayerStore();
+  const {
+    openPlayer, setCurrentEpisode, setCurrentAnime, setServers, setResolvedMedia, resetPlayback
+  } = usePlayerStore();
 
   const [activeTab, setActiveTab] = useState<'local' | 'active'>('local');
   const [downloadFolder, setDownloadFolder] = useState<string>('');
@@ -281,8 +283,14 @@ export function MobileDownloadsPage() {
     }
   };
 
-  const handlePlayEpisode = (ep: LocalEpisodeItem, anime: LocalAnimeFolder) => {
-    const assetUrl = convertFileSrc(ep.filePath);
+  const handlePlayEpisode = async (ep: LocalEpisodeItem, anime: LocalAnimeFolder) => {
+    resetPlayback();
+    let streamUrl = '';
+    try {
+      streamUrl = await getLocalMediaUrl(ep.filePath);
+    } catch {
+      streamUrl = convertFileSrc(ep.filePath);
+    }
     const isTs = ep.filePath.toLowerCase().endsWith('.ts');
     setCurrentAnime({
       title: anime.animeTitle,
@@ -307,7 +315,7 @@ export function MobileDownloadsPage() {
       watchProgress: ep.watchProgress,
     });
     setResolvedMedia({
-      directUrl: assetUrl,
+      directUrl: streamUrl,
       mediaType: isTs ? 'hls' : 'mp4',
       qualities: [],
     });
