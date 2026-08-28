@@ -8,7 +8,7 @@ use crate::core::*;
 
 static DB: OnceCell<Mutex<Connection>> = OnceCell::new();
 
-pub fn init_database(app_data_dir: PathBuf) -> AppResult<()> {
+pub fn init_database_inner(app_data_dir: &PathBuf) -> AppResult<Connection> {
     let db_path = app_data_dir.join("anics.db");
     let conn = Connection::open(db_path).map_err(AppError::Database)?;
 
@@ -77,6 +77,11 @@ pub fn init_database(app_data_dir: PathBuf) -> AppResult<()> {
         CREATE INDEX IF NOT EXISTS idx_image_cache_access_count ON image_cache(access_count DESC);
     ").map_err(AppError::Database)?;
 
+    Ok(conn)
+}
+
+pub fn init_database(app_data_dir: PathBuf) -> AppResult<()> {
+    let conn = init_database_inner(&app_data_dir)?;
     DB.set(Mutex::new(conn))
         .map_err(|_| AppError::Generic("Database already initialized".to_string()))?;
 
@@ -516,3 +521,56 @@ pub fn reset_database() -> AppResult<()> {
     })
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::env;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn get_unique_id() -> String {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_micros()
+            .to_string()
+    }
+
+    #[test]
+    fn test_init_database_inner() {
+        let base_temp_dir = env::temp_dir();
+
+        // 1. Error Case: use an invalid path that cannot possibly be created or written to
+        let file_path = base_temp_dir.join(format!("anics_test_file_{}", get_unique_id()));
+        fs::write(&file_path, "dummy content").unwrap();
+
+        // Use init_database_inner to avoid setting global DB OnceCell
+        let result_err = init_database_inner(&file_path);
+        assert!(result_err.is_err(), "init_database_inner should fail with invalid path (file as directory)");
+        let _ = fs::remove_file(&file_path);
+
+        // 2. Success Case: Initial creation in a valid temporary directory
+        let mut valid_dir = base_temp_dir.clone();
+        valid_dir.push(format!("anics_test_db_{}", get_unique_id()));
+        fs::create_dir_all(&valid_dir).unwrap();
+
+        {
+            let conn = init_database_inner(&valid_dir).expect("init_database_inner should succeed");
+            let db_path = valid_dir.join("anics.db");
+            assert!(db_path.exists(), "Database file should be created");
+
+            let tables_count: u32 = conn.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table'",
+                [],
+                |row| row.get(0)
+            ).unwrap();
+            assert!(tables_count >= 4, "Should create required tables");
+
+            // Connection is closed when conn is dropped at the end of this block, releasing the file lock on Windows
+        }
+
+        // Cleanup
+        let _ = fs::remove_dir_all(valid_dir);
+    }
+}
