@@ -248,21 +248,35 @@ export function PlayerPage() {
         };
         setCurrentEpisode(targetEp);
 
-        const srvs = await getServers(targetEp.url, querySource);
-        setServers(srvs);
+        setIsResolving(true);
+        if (querySource === 'local' || details.source === 'local' || (!targetEp.url.startsWith('http://') && !targetEp.url.startsWith('https://'))) {
+          try {
+            const streamUrl = await getLocalMediaUrl(targetEp.url);
+            const isTs = targetEp.url.toLowerCase().endsWith('.ts');
+            setResolvedMedia({
+              directUrl: streamUrl,
+              mediaType: isTs ? 'hls' : 'mp4',
+              qualities: [],
+            });
+          } catch (err) {
+            console.error('Failed to load local episode on init:', err);
+          }
+        } else {
+          const srvs = await getServers(targetEp.url, querySource);
+          setServers(srvs);
 
-        const preferred = srvs.find(s => s.name.toLowerCase().includes('magi'))
-          ?? srvs.find(s => s.name.toLowerCase().includes('desu'))
-          ?? srvs.find(s => s.isDirect)
-          ?? srvs[0];
+          const preferred = srvs.find(s => s.name.toLowerCase().includes('magi'))
+            ?? srvs.find(s => s.name.toLowerCase().includes('desu'))
+            ?? srvs.find(s => s.isDirect)
+            ?? srvs[0];
 
-        if (preferred) {
-          setSelectedServer(preferred);
-          setIsResolving(true);
-          const media = await resolveStream(preferred, querySource);
-          setResolvedMedia(media);
-          setIsResolving(false);
+          if (preferred) {
+            setSelectedServer(preferred);
+            const media = await resolveStream(preferred, querySource);
+            setResolvedMedia(media);
+          }
         }
+        setIsResolving(false);
       } catch (err: any) {
         console.error('Failed to init player from URL params:', err);
         setLoadError(err?.message || 'No se pudo cargar el anime');
@@ -294,7 +308,23 @@ export function PlayerPage() {
   // Resolver stream resuelto en el elemento de video
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !resolvedMedia || !resolvedMedia.directUrl) return;
+    if (!video || !resolvedMedia || !resolvedMedia.directUrl) {
+      if (video) {
+        video.pause();
+        video.removeAttribute('src');
+        video.load();
+      }
+      return;
+    }
+
+    // Cleanup previous hls instance and video state
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
+      hlsRef.current = null;
+    }
+    video.pause();
+    video.removeAttribute('src');
+    video.load();
 
     let sourceUrl = resolvedMedia.directUrl;
     let isHls = resolvedMedia.mediaType === 'hls' || sourceUrl.includes('.m3u8');
@@ -308,7 +338,6 @@ export function PlayerPage() {
     }
 
     if (isHls && Hls.isSupported()) {
-      hlsRef.current?.destroy();
       const hls = new Hls({
         enableWorker: true,
         maxBufferLength: 30,
@@ -474,6 +503,17 @@ export function PlayerPage() {
     if (!ep) return;
 
     saveProgress();
+
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
+      hlsRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.pause();
+      videoRef.current.removeAttribute('src');
+      videoRef.current.load();
+    }
+
     setCurrentEpisode(ep);
     setResolvedMedia(null);
     setPlaybackTime(0);
@@ -545,19 +585,15 @@ export function PlayerPage() {
 
     const x = e.clientX;
     const screenWidth = window.innerWidth;
-    clickCountRef.current += 1;
+    const now = Date.now();
+    const doubleTapDiff = now - lastTapTime.current;
 
-    if (clickCountRef.current === 1) {
-      clickTimeoutRef.current = setTimeout(() => {
-        toggleControlsManual();
-        clickCountRef.current = 0;
-      }, 260);
-    } else if (clickCountRef.current === 2) {
+    if (doubleTapDiff < 300) {
+      // It's a double click
       if (clickTimeoutRef.current) {
         clearTimeout(clickTimeoutRef.current);
         clickTimeoutRef.current = null;
       }
-      clickCountRef.current = 0;
 
       if (x < screenWidth * 0.35) {
         seekRelative(-10);
@@ -570,6 +606,17 @@ export function PlayerPage() {
       } else {
         togglePlay();
       }
+      lastTapTime.current = 0;
+    } else {
+      // First click
+      lastTapTime.current = now;
+      if (clickTimeoutRef.current) {
+        clearTimeout(clickTimeoutRef.current);
+      }
+      clickTimeoutRef.current = setTimeout(() => {
+        toggleControlsManual();
+        clickTimeoutRef.current = null;
+      }, 300);
     }
   };
 
@@ -646,6 +693,11 @@ export function PlayerPage() {
       const screenWidth = window.innerWidth;
 
       if (doubleTapDiff < 300) {
+        if (clickTimeoutRef.current) {
+          clearTimeout(clickTimeoutRef.current);
+          clickTimeoutRef.current = null;
+        }
+
         if (x < screenWidth * 0.35) {
           seekRelative(-10);
           setDoubleTapSide('left');
@@ -660,7 +712,13 @@ export function PlayerPage() {
         lastTapTime.current = 0;
       } else {
         lastTapTime.current = now;
-        toggleControlsManual();
+        if (clickTimeoutRef.current) {
+          clearTimeout(clickTimeoutRef.current);
+        }
+        clickTimeoutRef.current = setTimeout(() => {
+          toggleControlsManual();
+          clickTimeoutRef.current = null;
+        }, 300);
       }
     }
 

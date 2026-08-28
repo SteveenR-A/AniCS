@@ -45,6 +45,7 @@ export function DesktopTopAnimePage() {
   useEffect(() => {
     const cached = getTopList(activeSource);
     if (!cached || cached.length === 0) {
+      setLocalTopList([]);
       setIsLoading(true);
       loadTop();
     }
