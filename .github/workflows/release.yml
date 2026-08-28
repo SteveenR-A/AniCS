@@ -205,7 +205,9 @@ jobs:
         id: release_tag
         shell: bash
         run: |
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            TAG="${{ github.event.inputs.version }}"
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
             TAG="${{ github.ref_name }}"
           else
             VERSION=$(node -p "require('./package.json').version")
@@ -213,18 +215,27 @@ jobs:
           fi
           echo "tag=$TAG" >> $GITHUB_OUTPUT
 
-      - name: Create or Update GitHub Release
-        uses: softprops/action-gh-release@v2
+      - name: Publish GitHub Release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ steps.release_tag.outputs.tag }}
-          name: 'AniCS ${{ steps.release_tag.outputs.tag }}'
-          body_path: CHANGELOG.md
-          files: |
-            final-assets/*
-          draft: false
-          prerelease: false
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.release_tag.outputs.tag }}"
+          TITLE="AniCS $TAG"
 
+          echo "Publicando release con tag: $TAG"
 
-
+          # Verificar si el release ya existe en GitHub
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "El release $TAG ya existe. Actualizando notas y reemplazando archivos..."
+            if [ -f CHANGELOG.md ]; then
+              gh release edit "$TAG" --title "$TITLE" --notes-file CHANGELOG.md || true
+            fi
+            gh release upload "$TAG" final-assets/* --clobber
+          else
+            echo "Creando nuevo release $TAG..."
+            if [ -f CHANGELOG.md ]; then
+              gh release create "$TAG" final-assets/* --title "$TITLE" --notes-file CHANGELOG.md
+            else
+              gh release create "$TAG" final-assets/* --title "$TITLE" --generate-notes
+            fi
+          fi
