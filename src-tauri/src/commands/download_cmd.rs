@@ -69,7 +69,11 @@ pub async fn start_download(
 
     // Determinar directorio de descarga
     let base_dir = if let Some(dir) = output_dir {
-        PathBuf::from(dir)
+        if !dir.trim().is_empty() {
+            PathBuf::from(dir)
+        } else {
+            PathBuf::from(get_default_download_dir(app_handle.clone())?)
+        }
     } else {
         PathBuf::from(get_default_download_dir(app_handle.clone())?)
     };
@@ -80,8 +84,8 @@ pub async fn start_download(
         .collect();
 
     let anime_folder = base_dir.join(&safe_title);
-    if !anime_folder.exists() {
-        let _ = fs::create_dir_all(&anime_folder);
+    if let Err(e) = fs::create_dir_all(&anime_folder) {
+        log::warn!("No se pudo crear la carpeta {}: {}", anime_folder.display(), e);
     }
 
     let is_mp4 = stream_url.contains(".mp4")
@@ -388,9 +392,11 @@ pub async fn cancel_download(
 /// - Android:    /storage/emulated/0/Anime        (crea si no existe)
 #[tauri::command]
 pub fn get_default_download_dir(app_handle: AppHandle) -> Result<String, String> {
-    // 1. Si el usuario ya guardó una carpeta personalizada válida, usarla
+    // 1. Si el usuario ya guardó una carpeta personalizada, usarla y asegurar que exista
     if let Ok(Some(saved_dir)) = storage::get_setting("download_dir") {
-        if !saved_dir.trim().is_empty() && Path::new(&saved_dir).exists() {
+        if !saved_dir.trim().is_empty() {
+            let p = Path::new(&saved_dir);
+            let _ = fs::create_dir_all(p);
             return Ok(saved_dir);
         }
     }

@@ -5,6 +5,28 @@ El formato está basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1
 
 ---
 
+## [0.1.3] - 2026-08-27
+
+### 📱 Mejoras Móviles (Android), Descargas y Barra de Navegación
+- **Ocultamiento Automático de Barras del Sistema (Modo Inmersivo):**
+  - Al reproducir cualquier video en Android, se ocultan por completo tanto la barra de estado superior (batería, wifi, reloj, notificaciones) como la barra de navegación inferior (botones/gestos del sistema).
+  - La visualización es 100% inmersiva (`edge-to-edge`) para disfrutar de los episodios sin distracciones ni barras fijas en pantalla.
+- **Corrección de la Barra de Navegación Inferior Móvil:**
+  - Los iconos del menú inferior (Inicio, Buscar, Horarios, Top, Descargas, Historial) ahora calculan la zona segura (`safe-area-inset-bottom`), evitando que los botones de navegación de Android o la barra de gestos los tapen o corten.
+- **Ruta de Descargas en `/storage/emulated/0/Anime` y Detección de Animes Existentes:**
+  - En Android, la ruta predeterminada de descargas se establece en `/storage/emulated/0/Anime`.
+  - Al abrir la sección de Descargas o recargar, AniCS escanea automáticamente `/storage/emulated/0/Anime` y carga todos los animes y episodios ya descargados con sus carátulas y progreso, exactamente igual que en PC.
+- **Permisos de Almacenamiento Android:**
+  - Inclusión de permisos `MANAGE_EXTERNAL_STORAGE` y `READ/WRITE_EXTERNAL_STORAGE` con solicitud automática en el inicio para permitir guardar y leer animes en `/storage/emulated/0/Anime` sin errores de permisos.
+- **Configuración de Carpeta de Descargas en Ajustes Móviles:**
+  - Nuevo panel en Ajustes de Móvil para personalizar o restablecer la ruta de descargas a `/storage/emulated/0/Anime`, además de configurar descargas simultáneas y URLs de fuentes.
+- **Icono Oficial de la Aplicación en Android:**
+  - Se corrigió el flujo de empaquetado APK en CI para inyectar automáticamente el icono oficial de AniCS (`app-icon.png`) en todas las densidades mipmap (`mdpi`, `hdpi`, `xhdpi`, `xxhdpi`, `xxxhdpi` y adaptive icons), reemplazando el icono genérico por defecto de Tauri.
+- **Comando Nativo Tauri `set_fullscreen`:**
+  - Nuevo comando en el backend Rust para forzar y sincronizar el estado de pantalla completa multiplataforma de forma inmediata.
+
+---
+
 ## [0.1.2] - 2026-08-27
 
 ### ⚡ Sincronización Offline y Detección Local

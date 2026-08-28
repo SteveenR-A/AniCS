@@ -1,5 +1,19 @@
 [
   {
+    "version": "0.1.3",
+    "date": "2026-08-28",
+    "title": "Modo Inmersivo Completo en Móvil y Correcciones",
+    "type": "patch",
+    "highlights": [
+      "Modo pantalla completa inmersivo automático en Android ocultando barra de estado y barra de navegación",
+      "Corrección de barra de navegación inferior móvil para no ser tapada por los botones del sistema",
+      "Descargas en Android en /storage/emulated/0/Anime con detección de animes existentes y permisos",
+      "Panel de configuración de carpeta de descargas en Ajustes de móvil",
+      "Reemplazo del icono genérico de Tauri por el icono oficial de AniCS en Android",
+      "Comando nativo Tauri set_fullscreen multiplataforma"
+    ]
+  },
+  {
     "version": "0.1.2",
     "date": "2026-08-28",
     "title": "Sincronización Offline, Optimización SQLite, Descargas y Soporte Android",

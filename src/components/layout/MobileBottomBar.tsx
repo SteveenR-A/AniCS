@@ -13,14 +13,16 @@ const navItems = [
 export function MobileBottomBar() {
   return (
     <nav style={{
-      height: 'var(--bottombar-height)',
+      minHeight: 'calc(var(--bottombar-height) + env(safe-area-inset-bottom, 0px))',
+      height: 'auto',
       background: 'var(--bg-surface)',
       borderTop: '1px solid var(--border-subtle)',
       display: 'flex',
-      alignItems: 'center',
+      alignItems: 'flex-start',
       justifyContent: 'space-around',
       flexShrink: 0,
-      paddingBottom: 'env(safe-area-inset-bottom)',
+      paddingTop: 6,
+      paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 6px)',
       backdropFilter: 'blur(20px)',
       WebkitBackdropFilter: 'blur(20px)',
       zIndex: 100,

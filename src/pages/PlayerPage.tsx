@@ -9,6 +9,7 @@ import {
   Sparkles, Check, Sun, ListVideo, Zap, Server, AlertCircle,
   Eye, EyeOff, ChevronDown, ChevronUp
 } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
 import { usePlayerStore } from '@/stores/usePlayerStore';
 import { useAnimeStore } from '@/stores/useAnimeStore';
 import { resolveStream, getServers, getDetails } from '@/services/animeService';
@@ -96,7 +97,49 @@ export function PlayerPage() {
     centerAnimTimeout.current = setTimeout(() => setCenterPlayPulse(null), 500);
   };
 
-  // Orientación automática a horizontal y Screen Wake Lock en Android al reproducir
+  // Métodos de control de Pantalla Completa e Inmersión total
+  const enterFullscreen = useCallback(async () => {
+    try {
+      await invoke('set_fullscreen', { fullscreen: true });
+    } catch {}
+    try {
+      const elem = document.documentElement as any;
+      if (elem.requestFullscreen) {
+        await elem.requestFullscreen();
+      } else if (elem.webkitRequestFullscreen) {
+        elem.webkitRequestFullscreen();
+      }
+    } catch {}
+  }, []);
+
+  const exitFullscreen = useCallback(async () => {
+    try {
+      if (document.fullscreenElement || (document as any).webkitFullscreenElement) {
+        const doc = document as any;
+        if (doc.exitFullscreen) {
+          await doc.exitFullscreen();
+        } else if (doc.webkitExitFullscreen) {
+          doc.webkitExitFullscreen();
+        }
+      }
+    } catch {}
+    try {
+      await invoke('set_fullscreen', { fullscreen: false });
+    } catch {}
+  }, []);
+
+  const toggleFullscreen = useCallback(async () => {
+    const isCurrentlyFull = !!(document.fullscreenElement || (document as any).webkitFullscreenElement || isFullscreen);
+    if (!isCurrentlyFull) {
+      await enterFullscreen();
+      setIsFullscreen(true);
+    } else {
+      await exitFullscreen();
+      setIsFullscreen(false);
+    }
+  }, [isFullscreen, enterFullscreen, exitFullscreen]);
+
+  // Orientación horizontal automática, Pantalla Completa inmersiva y Screen Wake Lock en Android/móvil
   useEffect(() => {
     try {
       if (typeof window !== 'undefined' && window.screen && 'orientation' in window.screen) {
@@ -106,6 +149,9 @@ export function PlayerPage() {
         }
       }
     } catch {}
+
+    // Entrar en modo pantalla completa inmersiva para ocultar barra de estado (batería/wifi) y navegación
+    enterFullscreen().catch(() => {});
 
     // Wake Lock: Mantener pantalla encendida en Android
     let wakeLockSentinel: any = null;
@@ -124,16 +170,30 @@ export function PlayerPage() {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         requestWakeLock();
+        enterFullscreen().catch(() => {});
       }
     };
 
+    const handleFullscreenChange = () => {
+      const isFull = !!(document.fullscreenElement || (document as any).webkitFullscreenElement);
+      setIsFullscreen(isFull);
+    };
+
     document.addEventListener('visibilitychange', handleVisibilityChange);
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+
       if (wakeLockSentinel && typeof wakeLockSentinel.release === 'function') {
         wakeLockSentinel.release().catch(() => {});
       }
+
+      exitFullscreen().catch(() => {});
+
       try {
         if (typeof window !== 'undefined' && window.screen && 'orientation' in window.screen) {
           const orient = window.screen.orientation as any;
@@ -143,7 +203,7 @@ export function PlayerPage() {
         }
       } catch {}
     };
-  }, []);
+  }, [enterFullscreen, exitFullscreen]);
 
   // Recuperación automática de estado desde URL si se refresca
   useEffect(() => {
@@ -463,18 +523,13 @@ export function PlayerPage() {
     showControlsTemp();
   };
 
-  const toggleFullscreen = () => {
-    if (!document.fullscreenElement) {
-      containerRef.current?.requestFullscreen().catch(() => {});
-      setIsFullscreen(true);
-    } else {
-      document.exitFullscreen().catch(() => {});
-      setIsFullscreen(false);
-    }
-  };
-
   // Gestos táctiles aislados
   const handleTouchStart = (e: React.TouchEvent) => {
+    // Si no está en pantalla completa, intentar activarla en la primera interacción táctil
+    if (!document.fullscreenElement && !(document as any).webkitFullscreenElement) {
+      enterFullscreen().catch(() => {});
+    }
+
     const target = e.target as HTMLElement;
     if (
       activeDrawer !== 'none' ||
@@ -691,8 +746,6 @@ export function PlayerPage() {
         position: 'relative', overflow: 'hidden', userSelect: 'none',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         cursor: showControls ? 'default' : 'none',
-        paddingTop: isMobile ? 'env(safe-area-inset-top, 0px)' : 0,
-        paddingBottom: isMobile ? 'env(safe-area-inset-bottom, 0px)' : 0,
       }}
       onMouseMove={showControlsTemp}
       onClick={showControlsTemp}
@@ -846,7 +899,7 @@ export function PlayerPage() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -20, scale: 0.9 }}
             style={{
-              position: 'absolute', top: isMobile ? 40 : 70,
+              position: 'absolute', top: isMobile ? 'calc(24px + env(safe-area-inset-top, 0px))' : 70,
               background: 'rgba(10, 11, 15, 0.88)', backdropFilter: 'blur(20px)',
               border: '1px solid var(--border-moderate)',
               borderRadius: 'var(--radius-full)', padding: '8px 20px',
@@ -896,7 +949,10 @@ export function PlayerPage() {
               position: 'absolute', inset: 0,
               background: 'linear-gradient(to bottom, rgba(0,0,0,0.85) 0%, transparent 20%, transparent 70%, rgba(0,0,0,0.92) 100%)',
               display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
-              padding: isMobile ? '14px 18px' : '20px 24px',
+              paddingTop: isMobile ? 'calc(12px + env(safe-area-inset-top, 0px))' : '20px',
+              paddingBottom: isMobile ? 'calc(12px + env(safe-area-inset-bottom, 0px))' : '20px',
+              paddingLeft: isMobile ? 'calc(16px + env(safe-area-inset-left, 0px))' : '24px',
+              paddingRight: isMobile ? 'calc(16px + env(safe-area-inset-right, 0px))' : '24px',
               zIndex: 20, pointerEvents: 'auto',
             }}
             onClick={togglePlay}
@@ -1271,7 +1327,12 @@ export function PlayerPage() {
               position: 'absolute', top: 0, right: 0, bottom: 0, width: isMobile ? '80vw' : 340,
               background: 'rgba(10,11,15,0.95)', backdropFilter: 'blur(24px)',
               borderLeft: '1px solid var(--border-moderate)',
-              zIndex: 30, padding: 20, display: 'flex', flexDirection: 'column',
+              zIndex: 30,
+              paddingTop: isMobile ? 'calc(20px + env(safe-area-inset-top, 0px))' : 20,
+              paddingBottom: isMobile ? 'calc(20px + env(safe-area-inset-bottom, 0px))' : 20,
+              paddingRight: isMobile ? 'calc(20px + env(safe-area-inset-right, 0px))' : 20,
+              paddingLeft: isMobile ? 'calc(20px + env(safe-area-inset-left, 0px))' : 20,
+              display: 'flex', flexDirection: 'column',
             }}
             onClick={e => e.stopPropagation()}
             onWheel={e => e.stopPropagation()}
@@ -1336,7 +1397,12 @@ export function PlayerPage() {
               position: 'absolute', top: 0, right: 0, bottom: 0, width: isMobile ? '80vw' : 340,
               background: 'rgba(10,11,15,0.95)', backdropFilter: 'blur(24px)',
               borderLeft: '1px solid var(--border-moderate)',
-              zIndex: 30, padding: 20, display: 'flex', flexDirection: 'column', gap: 20,
+              zIndex: 30,
+              paddingTop: isMobile ? 'calc(20px + env(safe-area-inset-top, 0px))' : 20,
+              paddingBottom: isMobile ? 'calc(20px + env(safe-area-inset-bottom, 0px))' : 20,
+              paddingRight: isMobile ? 'calc(20px + env(safe-area-inset-right, 0px))' : 20,
+              paddingLeft: isMobile ? 'calc(20px + env(safe-area-inset-left, 0px))' : 20,
+              display: 'flex', flexDirection: 'column', gap: 20,
               overflowY: 'auto',
             }}
             onClick={e => e.stopPropagation()}

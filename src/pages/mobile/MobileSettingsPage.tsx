@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Globe, Download, RefreshCw, Check, Undo2,
-  AlertCircle, ExternalLink, Sparkles, ShieldCheck, Palette, HardDrive, Trash2, Database, Activity
+  AlertCircle, ExternalLink, Sparkles, ShieldCheck, Palette, HardDrive, Trash2, Database, Activity, Folder
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { openUrl } from '@tauri-apps/plugin-opener';
@@ -14,7 +14,8 @@ import { clearMemoryCache } from '@/components/CachedImage';
 
 const DEFAULT_JKANIME = 'https://jkanime.net';
 const DEFAULT_MUNDODONGHUA = 'https://www.mundodonghua.com';
-const CURRENT_VERSION = '0.1.2';
+const DEFAULT_ANDROID_DOWNLOAD_DIR = '/storage/emulated/0/Anime';
+const CURRENT_VERSION = '0.1.3';
 declare const __APP_COMMIT_HASH__: string;
 
 interface GitHubRelease {
@@ -35,6 +36,7 @@ export function MobileSettingsPage() {
 
   const [jkanimeUrl, setJkanimeUrl] = useState(DEFAULT_JKANIME);
   const [donghuaUrl, setDonghuaUrl] = useState(DEFAULT_MUNDODONGHUA);
+  const [downloadDir, setDownloadDir] = useState(DEFAULT_ANDROID_DOWNLOAD_DIR);
 
   const [maxConcurrent, setMaxConcurrent] = useState('3');
   const [updateRepo] = useState('SteveenR-A/AniCS');
@@ -83,6 +85,14 @@ export function MobileSettingsPage() {
         const settings: Record<string, string> = await invoke('get_all_settings');
         if (settings.jkanime_base_url) setJkanimeUrl(settings.jkanime_base_url);
         if (settings.mundodonghua_base_url) setDonghuaUrl(settings.mundodonghua_base_url);
+        if (settings.download_dir) {
+          setDownloadDir(settings.download_dir);
+        } else {
+          try {
+            const defDir: string = await invoke('get_default_download_dir');
+            if (defDir) setDownloadDir(defDir);
+          } catch {}
+        }
         if (settings.max_concurrent_downloads) setMaxConcurrent(settings.max_concurrent_downloads);
         if (settings.max_image_cache_mb) setMaxCacheMb(settings.max_image_cache_mb);
       } catch (e) {
@@ -96,6 +106,7 @@ export function MobileSettingsPage() {
     try {
       await invoke('set_setting', { key: 'jkanime_base_url', value: jkanimeUrl.trim() });
       await invoke('set_setting', { key: 'mundodonghua_base_url', value: donghuaUrl.trim() });
+      await invoke('set_setting', { key: 'download_dir', value: downloadDir.trim() });
       await invoke('set_setting', { key: 'max_concurrent_downloads', value: maxConcurrent });
       await invoke('set_setting', { key: 'max_image_cache_mb', value: maxCacheMb });
 
@@ -206,6 +217,130 @@ export function MobileSettingsPage() {
                 </div>
               );
             })}
+          </div>
+        </div>
+
+        {/* Carpeta de Descargas Móvil */}
+        <div style={{
+          background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)',
+          border: '1px solid var(--border-subtle)', padding: 14,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Folder size={16} color="var(--accent-primary)" />
+              <h3 style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>Carpeta de Descargas</h3>
+            </div>
+
+            <button
+              onClick={() => setDownloadDir(DEFAULT_ANDROID_DOWNLOAD_DIR)}
+              title="Restablecer ruta predeterminada"
+              style={{
+                background: 'var(--bg-elevated)', border: '1px solid var(--border-moderate)',
+                borderRadius: 'var(--radius-full)', padding: '3px 8px',
+                color: 'var(--text-secondary)', fontSize: 10, fontWeight: 600,
+                display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer',
+              }}
+            >
+              <Undo2 size={10} /> Restablecer
+            </button>
+          </div>
+
+          <p style={{ color: 'var(--text-muted)', fontSize: 11, margin: '0 0 8px', lineHeight: 1.4 }}>
+            Ubicación en Android donde se guardan los animes descargados y donde AniCS los detecta para reproducir sin internet:
+          </p>
+
+          <input
+            type="text"
+            value={downloadDir}
+            onChange={(e) => setDownloadDir(e.target.value)}
+            placeholder="/storage/emulated/0/Anime"
+            style={{
+              width: '100%', padding: '8px 12px', borderRadius: 'var(--radius-md)',
+              background: 'var(--bg-elevated)', border: '1px solid var(--border-moderate)',
+              color: 'var(--text-primary)', fontSize: 12, outline: 'none',
+              fontFamily: 'monospace',
+            }}
+          />
+
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 }}>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Descargas simultáneas:</span>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {['1', '2', '3', '4'].map((val) => (
+                <button
+                  key={val}
+                  onClick={() => setMaxConcurrent(val)}
+                  style={{
+                    padding: '3px 10px', borderRadius: 'var(--radius-full)',
+                    background: maxConcurrent === val ? 'var(--accent-primary)' : 'var(--bg-elevated)',
+                    border: 'none', color: maxConcurrent === val ? 'white' : 'var(--text-secondary)',
+                    fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                  }}
+                >
+                  {val}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Fuentes Online */}
+        <div style={{
+          background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)',
+          border: '1px solid var(--border-subtle)', padding: 14,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+            <Globe size={16} color="var(--accent-primary)" />
+            <h3 style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>Fuentes Online</h3>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)' }}>JKAnime URL</span>
+                {jkanimeUrl !== DEFAULT_JKANIME && (
+                  <button
+                    onClick={() => setJkanimeUrl(DEFAULT_JKANIME)}
+                    style={{ background: 'none', border: 'none', color: 'var(--accent-primary)', fontSize: 10, fontWeight: 600, cursor: 'pointer' }}
+                  >
+                    Restablecer
+                  </button>
+                )}
+              </div>
+              <input
+                type="text"
+                value={jkanimeUrl}
+                onChange={(e) => setJkanimeUrl(e.target.value)}
+                style={{
+                  width: '100%', padding: '7px 10px', borderRadius: 'var(--radius-sm)',
+                  background: 'var(--bg-elevated)', border: '1px solid var(--border-moderate)',
+                  color: 'var(--text-primary)', fontSize: 11, outline: 'none',
+                }}
+              />
+            </div>
+
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)' }}>MundoDonghua URL</span>
+                {donghuaUrl !== DEFAULT_MUNDODONGHUA && (
+                  <button
+                    onClick={() => setDonghuaUrl(DEFAULT_MUNDODONGHUA)}
+                    style={{ background: 'none', border: 'none', color: 'var(--accent-primary)', fontSize: 10, fontWeight: 600, cursor: 'pointer' }}
+                  >
+                    Restablecer
+                  </button>
+                )}
+              </div>
+              <input
+                type="text"
+                value={donghuaUrl}
+                onChange={(e) => setDonghuaUrl(e.target.value)}
+                style={{
+                  width: '100%', padding: '7px 10px', borderRadius: 'var(--radius-sm)',
+                  background: 'var(--bg-elevated)', border: '1px solid var(--border-moderate)',
+                  color: 'var(--text-primary)', fontSize: 11, outline: 'none',
+                }}
+              />
+            </div>
           </div>
         </div>
 

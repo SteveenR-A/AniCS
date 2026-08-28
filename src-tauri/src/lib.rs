@@ -89,7 +89,8 @@ pub fn run() {
             commands::remove_favorite,
             commands::is_favorite,
             commands::get_favorites,
-            // Ajustes
+            // Ajustes y Ventana
+            commands::set_fullscreen,
             commands::get_setting,
             commands::set_setting,
             commands::get_all_settings,
