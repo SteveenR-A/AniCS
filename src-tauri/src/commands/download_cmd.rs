@@ -652,9 +652,23 @@ pub async fn scan_local_downloads(
 
 /// Elimina un archivo de episodio descargado localmente
 #[tauri::command]
-pub fn delete_local_download(file_path: String) -> Result<(), String> {
+pub fn delete_local_download(file_path: String, app_handle: AppHandle) -> Result<(), String> {
     let path = Path::new(&file_path);
     if path.exists() {
+        // Validation to prevent Path Traversal
+        let base_dir_str = get_default_download_dir(app_handle)?;
+        let base_canonical = Path::new(&base_dir_str)
+            .canonicalize()
+            .map_err(|_| "Invalid base download directory".to_string())?;
+
+        let target_canonical = path
+            .canonicalize()
+            .map_err(|_| "Invalid target path".to_string())?;
+
+        if !target_canonical.starts_with(base_canonical) {
+            return Err("Access denied: path is outside the download directory".to_string());
+        }
+
         fs::remove_file(path).map_err(|e| e.to_string())?;
     }
     Ok(())
@@ -662,9 +676,23 @@ pub fn delete_local_download(file_path: String) -> Result<(), String> {
 
 /// Elimina una carpeta completa de anime y todos sus videos
 #[tauri::command]
-pub fn delete_local_anime_folder(folder_path: String) -> Result<(), String> {
+pub fn delete_local_anime_folder(folder_path: String, app_handle: AppHandle) -> Result<(), String> {
     let path = Path::new(&folder_path);
     if path.exists() && path.is_dir() {
+        // Validation to prevent Path Traversal
+        let base_dir_str = get_default_download_dir(app_handle)?;
+        let base_canonical = Path::new(&base_dir_str)
+            .canonicalize()
+            .map_err(|_| "Invalid base download directory".to_string())?;
+
+        let target_canonical = path
+            .canonicalize()
+            .map_err(|_| "Invalid target folder path".to_string())?;
+
+        if !target_canonical.starts_with(base_canonical) {
+            return Err("Access denied: folder path is outside the download directory".to_string());
+        }
+
         fs::remove_dir_all(path).map_err(|e| e.to_string())?;
     }
     Ok(())
