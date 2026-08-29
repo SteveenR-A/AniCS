@@ -202,10 +202,8 @@ export function PlayerPage() {
         wakeLockSentinel.release().catch(() => {});
       }
 
-      // Si no hay descargas activas en curso, permitir que la pantalla se apague normalmente
-      if (useDownloadStore.getState().activeCount() === 0) {
-        setKeepScreenOn(false);
-      }
+      // Permitir que la pantalla se apague normalmente al salir del reproductor
+      setKeepScreenOn(false);
 
       exitFullscreen().catch(() => {});
 
@@ -869,9 +867,7 @@ export function PlayerPage() {
           }}
           onPause={() => {
             setIsPlaying(false);
-            if (useDownloadStore.getState().activeCount() === 0) {
-              setKeepScreenOn(false);
-            }
+            setKeepScreenOn(false);
             saveProgress();
           }}
           onLoadedMetadata={async () => {

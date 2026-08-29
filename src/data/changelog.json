@@ -1,5 +1,20 @@
 [
   {
+    "version": "0.1.6",
+    "date": "2026-08-29",
+    "title": "Descargas en Segundo Plano con Pantalla Apagada, Notificaciones Inteligentes y Archivos Temporales .part",
+    "type": "patch",
+    "highlights": [
+      "Descargas en segundo plano con pantalla apagada (Partial WakeLock en Android)",
+      "Notificaciones inteligentes agrupadas (BigTextStyle) con progreso global, velocidad y desglose multi-anime",
+      "Archivos temporales .part para descargas directas y HLS (solo se renombra a .mp4 al 100% completado)",
+      "Corrección de episodios incompletos o fallidos que aparecían falsamente como descargados",
+      "Detección de servidores estancados (Magi/Desu) con timeout de 12s y auto-reconexión HTTP Range",
+      "Control dinámico de pantalla activa solo durante la reproducción de video",
+      "Compatibilidad robusta con Android 14+ y prevención de ANR con inicio inmediato de Foreground Service"
+    ]
+  },
+  {
     "version": "0.1.5",
     "date": "2026-08-28",
     "title": "Actualizador Nativo APK, Gestos Refinados, I/O Asíncrono y Seguridad",
