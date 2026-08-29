@@ -23,7 +23,6 @@ import androidx.core.content.FileProvider
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import app.tauri.activity.TauriActivity
 import java.io.File
 import java.lang.ref.WeakReference
 
