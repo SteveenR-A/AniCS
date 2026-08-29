@@ -262,20 +262,53 @@ export function MobileDetailsPage() {
     }
 
     setIsStartingDownload(true);
+    let resolvedMedia: { directUrl: string; referer?: string } | null = null;
+    let usedServerName = selectedDownloadServer.name;
+
+    // 1. Intentar primero con el servidor elegido por el usuario
     try {
-      const media = await resolveStream(selectedDownloadServer, source);
+      resolvedMedia = await resolveStream(selectedDownloadServer, source);
+    } catch (err) {
+      console.warn(`Servidor seleccionado (${selectedDownloadServer.name}) no disponible, probando servidores de respaldo...`, err);
+    }
+
+    // 2. Si el servidor elegido falló, probar automáticamente los demás servidores disponibles
+    if (!resolvedMedia || !resolvedMedia.directUrl) {
+      const fallbackCandidates = downloadServers.filter(s => s.url !== selectedDownloadServer.url);
+      for (const candidate of fallbackCandidates) {
+        try {
+          const res = await resolveStream(candidate, source);
+          if (res && res.directUrl) {
+            resolvedMedia = res;
+            usedServerName = candidate.name;
+            break;
+          }
+        } catch (candidateErr) {
+          console.warn(`Servidor de respaldo (${candidate.name}) no disponible, probando siguiente...`, candidateErr);
+        }
+      }
+    }
+
+    if (!resolvedMedia || !resolvedMedia.directUrl) {
+      setDownloadSuccessToast(`No se pudo conectar a ningún servidor para el Ep. ${downloadModalEp.number}`);
+      setTimeout(() => setDownloadSuccessToast(null), 4000);
+      setIsStartingDownload(false);
+      return;
+    }
+
+    try {
       const downloadId = await startDownload({
         animeTitle: details.title,
         episodeNumber: downloadModalEp.number,
-        streamUrl: media.directUrl,
-        referer: media.referer,
+        streamUrl: resolvedMedia.directUrl,
+        referer: resolvedMedia.referer,
       });
 
       useDownloadStore.getState().addTask({
         id: downloadId,
         animeTitle: details.title,
         episodeNumber: downloadModalEp.number,
-        streamUrl: media.directUrl,
+        streamUrl: resolvedMedia.directUrl,
         outputPath: '',
         progress: 0,
         speedKbps: 0,
@@ -285,10 +318,17 @@ export function MobileDetailsPage() {
       });
 
       setDownloadModalEp(null);
-      setDownloadSuccessToast(`Descarga iniciada: Ep. ${downloadModalEp.number}`);
+      const isFallback = usedServerName !== selectedDownloadServer.name;
+      setDownloadSuccessToast(
+        isFallback
+          ? `Descargando Ep. ${downloadModalEp.number} con ${usedServerName} (respaldo)`
+          : `Descarga iniciada: Ep. ${downloadModalEp.number}`
+      );
       setTimeout(() => setDownloadSuccessToast(null), 3500);
     } catch (e) {
       console.error('Error starting download', e);
+      setDownloadSuccessToast(`Error iniciando descarga: Ep. ${downloadModalEp.number}`);
+      setTimeout(() => setDownloadSuccessToast(null), 3500);
     } finally {
       setIsStartingDownload(false);
     }

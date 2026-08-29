@@ -89,6 +89,72 @@ export function PlayerPage() {
   const [doubleTapSide, setDoubleTapSide] = useState<'left' | 'right' | null>(null);
   const [centerPlayPulse, setCenterPlayPulse] = useState<'play' | 'pause' | null>(null);
 
+  // Timeline scrubbing (desplazamiento continuo estilo mpv con puntero táctil/ratón)
+  const [isScrubbing, setIsScrubbing] = useState(false);
+  const [scrubTime, setScrubTime] = useState<number | null>(null);
+  const [hoverPosition, setHoverPosition] = useState<{ x: number; time: number; percent: number } | null>(null);
+  const progressBarRef = useRef<HTMLDivElement>(null);
+
+  const calculateSeekTime = useCallback((clientX: number) => {
+    if (!progressBarRef.current || !duration || duration <= 0) return { time: 0, percent: 0, x: 0 };
+    const rect = progressBarRef.current.getBoundingClientRect();
+    const x = Math.max(0, Math.min(rect.width, clientX - rect.left));
+    const percent = rect.width > 0 ? (x / rect.width) * 100 : 0;
+    const time = Math.max(0, Math.min(duration, (percent / 100) * duration));
+    return { time, percent, x };
+  }, [duration]);
+
+  const handleProgressBarPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    try {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {}
+    const { time, percent, x } = calculateSeekTime(e.clientX);
+    setIsScrubbing(true);
+    setScrubTime(time);
+    setPlaybackTime(time);
+    if (videoRef.current) {
+      videoRef.current.currentTime = time;
+    }
+    setHoverPosition({ x, time, percent });
+  };
+
+  const handleProgressBarPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const { time, percent, x } = calculateSeekTime(e.clientX);
+    if (isScrubbing) {
+      setScrubTime(time);
+      setPlaybackTime(time);
+      if (videoRef.current) {
+        videoRef.current.currentTime = time;
+      }
+      setHoverPosition({ x, time, percent });
+    } else {
+      setHoverPosition({ x, time, percent });
+    }
+  };
+
+  const handleProgressBarPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    try {
+      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch {}
+    if (isScrubbing) {
+      const { time } = calculateSeekTime(e.clientX);
+      if (videoRef.current) {
+        videoRef.current.currentTime = time;
+      }
+      setPlaybackTime(time);
+      setIsScrubbing(false);
+      setScrubTime(null);
+      saveProgress();
+    }
+  };
+
+  const handleProgressBarPointerLeave = () => {
+    if (!isScrubbing) {
+      setHoverPosition(null);
+    }
+  };
+
   const showToast = (toast: { icon: 'volume' | 'brightness' | 'seek' | 'aspect'; text: string; value?: number }) => {
     setHudToast(toast);
     if (toastTimeout.current) clearTimeout(toastTimeout.current);
@@ -1203,41 +1269,116 @@ export function PlayerPage() {
               onClick={e => e.stopPropagation()}
               style={{ display: 'flex', flexDirection: 'column', gap: 10 }}
             >
-              {/* Barra de Progreso */}
-              <div
-                style={{
-                  width: '100%', height: 18, display: 'flex', alignItems: 'center',
-                  cursor: 'pointer', position: 'relative',
-                }}
-                onClick={(e) => {
-                  const rect = e.currentTarget.getBoundingClientRect();
-                  const pos = (e.clientX - rect.left) / rect.width;
-                  const target = pos * (duration || 0);
-                  if (videoRef.current) {
-                    videoRef.current.currentTime = target;
-                    setPlaybackTime(target);
-                  }
-                }}
-              >
-                <div style={{
-                  width: '100%', height: 3, background: 'rgba(255,255,255,0.25)',
-                  borderRadius: 2, position: 'relative', overflow: 'visible',
-                }}>
-                  {/* Progreso Reproducido */}
-                  <div style={{
-                    width: `${duration > 0 ? (playbackTime / duration) * 100 : 0}%`,
-                    height: '100%', background: 'var(--accent-primary)', borderRadius: 2,
-                    position: 'relative',
-                  }}>
-                    {/* Thumb Circle */}
-                    <div style={{
-                      position: 'absolute', right: -5, top: -4,
-                      width: 11, height: 11, borderRadius: '50%',
-                      background: 'white', boxShadow: '0 0 8px rgba(0,0,0,0.6)',
-                    }} />
+              {/* Barra de Progreso Interactiva Estilo MPV con Scrubbing / Arrastre Continuo */}
+              {(() => {
+                const currentDisplayTime = isScrubbing && scrubTime !== null ? scrubTime : playbackTime;
+                const currentPercent = duration > 0 ? (currentDisplayTime / duration) * 100 : 0;
+
+                return (
+                  <div
+                    ref={progressBarRef}
+                    data-interactive
+                    style={{
+                      width: '100%',
+                      height: 24,
+                      display: 'flex',
+                      alignItems: 'center',
+                      cursor: 'pointer',
+                      position: 'relative',
+                      touchAction: 'none',
+                      userSelect: 'none',
+                    }}
+                    onPointerDown={handleProgressBarPointerDown}
+                    onPointerMove={handleProgressBarPointerMove}
+                    onPointerUp={handleProgressBarPointerUp}
+                    onPointerCancel={handleProgressBarPointerUp}
+                    onPointerLeave={handleProgressBarPointerLeave}
+                  >
+                    {/* Tooltip flotante con marca de tiempo estilo MPV */}
+                    {hoverPosition && duration > 0 && (
+                      <div
+                        style={{
+                          position: 'absolute',
+                          left: `${Math.max(4, Math.min(96, hoverPosition.percent))}%`,
+                          bottom: 'calc(100% + 8px)',
+                          transform: 'translateX(-50%)',
+                          background: 'rgba(10, 12, 18, 0.95)',
+                          backdropFilter: 'blur(16px)',
+                          border: '1px solid rgba(255, 255, 255, 0.25)',
+                          boxShadow: '0 4px 16px rgba(0,0,0,0.7)',
+                          borderRadius: 'var(--radius-sm)',
+                          padding: '4px 8px',
+                          color: 'white',
+                          fontSize: 12,
+                          fontWeight: 700,
+                          pointerEvents: 'none',
+                          whiteSpace: 'nowrap',
+                          zIndex: 35,
+                        }}
+                      >
+                        <span>{formatTime(hoverPosition.time)}</span>
+                      </div>
+                    )}
+
+                    {/* Track Base */}
+                    <div
+                      style={{
+                        width: '100%',
+                        height: isScrubbing || hoverPosition ? 6 : 4,
+                        background: 'rgba(255, 255, 255, 0.22)',
+                        borderRadius: 3,
+                        position: 'relative',
+                        overflow: 'visible',
+                        transition: 'height 0.15s ease',
+                      }}
+                    >
+                      {/* Ghost / Hover Preview Track */}
+                      {hoverPosition && (
+                        <div
+                          style={{
+                            position: 'absolute',
+                            left: 0,
+                            top: 0,
+                            width: `${hoverPosition.percent}%`,
+                            height: '100%',
+                            background: 'rgba(255, 255, 255, 0.35)',
+                            borderRadius: 3,
+                            pointerEvents: 'none',
+                          }}
+                        />
+                      )}
+
+                      {/* Progreso Reproducido / Scrubbed */}
+                      <div
+                        style={{
+                          width: `${Math.min(100, Math.max(0, currentPercent))}%`,
+                          height: '100%',
+                          background: 'linear-gradient(90deg, #3b82f6 0%, #60a5fa 100%)',
+                          borderRadius: 3,
+                          position: 'relative',
+                          boxShadow: isScrubbing ? '0 0 12px rgba(59, 130, 246, 0.8)' : 'none',
+                        }}
+                      >
+                        {/* Indicador Thumb / Tirador redondo con resplandor */}
+                        <div
+                          style={{
+                            position: 'absolute',
+                            right: -6,
+                            top: '50%',
+                            transform: `translateY(-50%) scale(${isScrubbing || hoverPosition ? 1.35 : 1})`,
+                            width: 12,
+                            height: 12,
+                            borderRadius: '50%',
+                            background: 'white',
+                            boxShadow: '0 0 8px rgba(0,0,0,0.8), 0 0 10px rgba(59,130,246,0.9)',
+                            transition: 'transform 0.15s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
+                          }}
+                        />
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
+                );
+              })()}
 
               {/* Fila Inferior de Controles */}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -1310,7 +1451,7 @@ export function PlayerPage() {
 
                   {/* Timestamp */}
                   <span style={{ fontSize: 12, fontWeight: 700, color: 'white', marginLeft: 6 }}>
-                    {formatTime(playbackTime)} / {formatTime(duration)}
+                    {formatTime(isScrubbing && scrubTime !== null ? scrubTime : playbackTime)} / {formatTime(duration)}
                   </span>
                 </div>
 

@@ -1,3 +1,4 @@
+#[cfg(desktop)]
 use tauri::Manager;
 
 /// Control de pantalla completa multiplataforma (Windows y Android)

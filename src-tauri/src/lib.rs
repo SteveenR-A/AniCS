@@ -4,6 +4,7 @@ pub mod downloader;
 pub mod scrapers;
 pub mod storage;
 
+#[cfg(desktop)]
 use tauri::{Emitter, Manager};
 use commands::download_cmd::DownloadManager;
 
