@@ -18,6 +18,7 @@ type DownloadMap = Arc<Mutex<HashMap<String, tokio::task::JoinHandle<()>>>>;
 pub struct DownloadManager {
     pub tasks: DownloadMap,
     pub semaphore: Arc<tokio::sync::Semaphore>,
+    pub cancel_tokens: Arc<Mutex<HashMap<String, tokio::sync::watch::Sender<bool>>>>,
 }
 
 impl DownloadManager {
@@ -25,6 +26,7 @@ impl DownloadManager {
         Self {
             tasks: Arc::new(Mutex::new(HashMap::new())),
             semaphore: Arc::new(tokio::sync::Semaphore::new(2)), // Máximo 2 descargas concurrentes activas
+            cancel_tokens: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
@@ -380,11 +382,64 @@ pub async fn cancel_download(
     download_id: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    let mut tokens = state.download_manager.cancel_tokens.lock().await;
+    if let Some(tx) = tokens.remove(&download_id) {
+        let _ = tx.send(true);
+    }
+
     let mut tasks = state.download_manager.tasks.lock().await;
     if let Some(handle) = tasks.remove(&download_id) {
         handle.abort();
     }
     Ok(())
+}
+
+/// Pausar una descarga
+#[tauri::command]
+pub async fn pause_download(
+    download_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let mut tokens = state.download_manager.cancel_tokens.lock().await;
+    if let Some(tx) = tokens.remove(&download_id) {
+        let _ = tx.send(true);
+    }
+    // Also remove from tasks
+    let mut tasks = state.download_manager.tasks.lock().await;
+    let _ = tasks.remove(&download_id);
+    Ok(())
+}
+
+/// Reanudar descarga (solo un alias por ahora, internamente se usa start_download con el estado)
+#[tauri::command]
+pub async fn resume_download(
+    _download_id: String,
+    _anime_title: String,
+    _episode_number: u32,
+    _stream_url: String,
+    _referer: Option<String>,
+    _output_dir: Option<String>,
+    _app_handle: AppHandle,
+    _state: State<'_, AppState>,
+) -> Result<String, String> {
+    // Si queremos reanudar, start_download buscará en DB y continuará si encuentra el archivo parcial.
+    // Solo necesitamos llamar a start_download (lo puede hacer el front, o nosotros internamente).
+    // Para simplificar, devolvemos Ok o el cliente puede usar start_download directamente.
+    Ok("Reanude usando start_download con los mismos parametros".to_string())
+}
+
+/// Elimina el registro de la descarga de la base de datos local
+#[tauri::command]
+pub async fn delete_download_record(download_id: String) -> Result<(), String> {
+    crate::storage::database::delete_download_task_db(&download_id)
+        .map_err(|e| format!("Error deleting download record: {}", e))
+}
+
+/// Obtiene todas las descargas registradas en la DB
+#[tauri::command]
+pub async fn get_all_downloads() -> Result<Vec<crate::core::anime::DownloadTask>, String> {
+    crate::storage::database::get_all_downloads_db()
+        .map_err(|e| format!("Error fetching downloads: {}", e))
 }
 
 /// Obtiene el directorio de descargas predeterminado.

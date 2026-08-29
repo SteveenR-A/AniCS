@@ -76,6 +76,10 @@ pub fn run() {
             // Descargas y Archivos Locales
             commands::start_download,
             commands::cancel_download,
+            commands::get_all_downloads,
+            commands::pause_download,
+            commands::resume_download,
+            commands::delete_download_record,
             commands::scan_local_downloads,
             commands::delete_local_download,
             commands::delete_local_anime_folder,

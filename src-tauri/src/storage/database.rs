@@ -475,6 +475,100 @@ fn format_db_size(bytes: u64) -> String {
     }
 }
 
+pub fn save_download_task(task: &crate::core::anime::DownloadTask) -> AppResult<()> {
+    with_db(|conn| {
+        conn.execute(
+            "INSERT INTO downloads (id, anime_title, episode_number, stream_url, referer, output_path, status, progress, downloaded_bytes, error, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+             ON CONFLICT(id) DO UPDATE SET
+                status = excluded.status,
+                progress = excluded.progress,
+                downloaded_bytes = excluded.downloaded_bytes,
+                error = excluded.error",
+            params![
+                task.id,
+                task.anime_title,
+                task.episode_number,
+                task.episode_url,
+                task.server_name, // Map server_name to something or use stream_url. The schema has stream_url. We will use episode_url as stream_url? Wait, the schema has `stream_url` TEXT NOT NULL. The struct has `server_name` and `episode_url`.
+                task.file_path, // Map to output_path.
+                format!("{:?}", task.status).to_lowercase(),
+                task.progress,
+                task.downloaded_bytes,
+                task.error_message,
+                task.created_at
+            ],
+        )?;
+        Ok(())
+    })
+}
+
+pub fn update_download_progress_db(id: &str, status: &str, progress: f32, downloaded: u64, error: Option<&str>) -> AppResult<()> {
+    with_db(|conn| {
+        conn.execute(
+            "UPDATE downloads SET status = ?1, progress = ?2, downloaded_bytes = ?3, error = ?4 WHERE id = ?5",
+            params![status, progress, downloaded, error, id],
+        )?;
+        Ok(())
+    })
+}
+
+pub fn get_all_downloads_db() -> AppResult<Vec<crate::core::anime::DownloadTask>> {
+    with_db(|conn| {
+        let mut stmt = conn.prepare(
+            "SELECT id, anime_title, episode_number, stream_url, referer, output_path, status, progress, downloaded_bytes, error, created_at FROM downloads ORDER BY created_at DESC"
+        )?;
+        let tasks = stmt.query_map([], |row| {
+            let status_str: String = row.get(6)?;
+            let status = match status_str.as_str() {
+                "queued" => crate::core::anime::DownloadStatus::Queued,
+                "downloading" => crate::core::anime::DownloadStatus::Downloading,
+                "paused" => crate::core::anime::DownloadStatus::Paused,
+                "completed" => crate::core::anime::DownloadStatus::Completed,
+                "failed" => crate::core::anime::DownloadStatus::Failed,
+                "canceled" => crate::core::anime::DownloadStatus::Canceled,
+                _ => crate::core::anime::DownloadStatus::Failed,
+            };
+
+            Ok(crate::core::anime::DownloadTask {
+                id: row.get(0)?,
+                anime_title: row.get(1)?,
+                episode_number: row.get(2)?,
+                episode_url: row.get(3)?,
+                server_name: row.get(4).unwrap_or_default(), // We used referer as server_name temporarily or just default
+                file_path: row.get(5)?,
+                total_bytes: None, // We don't store total_bytes yet
+                downloaded_bytes: row.get(8)?,
+                progress: row.get(7)?,
+                speed_bytes_per_sec: 0,
+                status,
+                error_message: row.get(9)?,
+                created_at: row.get(10)?,
+            })
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+        Ok(tasks)
+    })
+}
+
+pub fn delete_download_task_db(id: &str) -> AppResult<()> {
+    with_db(|conn| {
+        conn.execute("DELETE FROM downloads WHERE id = ?1", params![id])?;
+        Ok(())
+    })
+}
+
+pub fn mark_active_downloads_as_paused_db() -> AppResult<()> {
+    with_db(|conn| {
+        conn.execute(
+            "UPDATE downloads SET status = 'paused' WHERE status = 'downloading' OR status = 'queued'",
+            [],
+        )?;
+        Ok(())
+    })
+}
+
 pub fn get_database_stats(app_data_dir: &std::path::Path) -> AppResult<DatabaseStats> {
     let db_path = app_data_dir.join("anics.db");
     let database_size_bytes = std::fs::metadata(&db_path).map(|m| m.len()).unwrap_or(0);

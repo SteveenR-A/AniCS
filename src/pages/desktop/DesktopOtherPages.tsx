@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Clock, Trash2, Film, Bookmark, BookmarkX, Download, Inbox, History,
   ArrowDownCircle, HardDrive, Play, FolderOpen, RefreshCw, Search, Folder, FileVideo,
-  ChevronDown, ChevronUp, Check, Eye, EyeOff
+  ChevronDown, ChevronUp, Check, Eye, EyeOff, Pause, RotateCcw
 } from 'lucide-react';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { convertFileSrc } from '@tauri-apps/api/core';
@@ -809,17 +809,36 @@ export function DesktopDownloadsPage() {
                       </div>
                     </div>
 
-                    <div>
-                      {isDownloading || isQueued ? (
+                    <div style={{ display: 'flex', gap: 10 }}>
+                      {isDownloading ? (
+                        <button
+                          onClick={() => useDownloadStore.getState().pauseTask(task.id)}
+                          style={{ background: 'rgba(59, 130, 246, 0.15)', border: '1px solid rgba(59, 130, 246, 0.3)', borderRadius: 'var(--radius-md)', padding: '8px 16px', color: 'var(--accent-primary)', cursor: 'pointer', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}
+                        >
+                          <Pause size={14} /> Pausar
+                        </button>
+                      ) : task.status === 'paused' ? (
+                        <button
+                          onClick={() => useDownloadStore.getState().resumeTask(task.id)}
+                          style={{ background: 'rgba(16, 185, 129, 0.15)', border: '1px solid rgba(16, 185, 129, 0.3)', borderRadius: 'var(--radius-md)', padding: '8px 16px', color: 'var(--accent-success)', cursor: 'pointer', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}
+                        >
+                          <Play size={14} /> Reanudar
+                        </button>
+                      ) : isError ? (
+                        <button
+                          onClick={() => useDownloadStore.getState().retryTask(task.id)}
+                          style={{ background: 'rgba(245, 158, 11, 0.15)', border: '1px solid rgba(245, 158, 11, 0.3)', borderRadius: 'var(--radius-md)', padding: '8px 16px', color: '#f59e0b', cursor: 'pointer', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}
+                        >
+                          <RotateCcw size={14} /> Reintentar
+                        </button>
+                      ) : null}
+
+                      {isDownloading || isQueued || task.status === 'paused' ? (
                         <button
                           onClick={() => cancelTask(task.id)}
-                          style={{
-                            background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.3)',
-                            borderRadius: 'var(--radius-md)', padding: '8px 16px',
-                            color: 'var(--accent-error)', cursor: 'pointer', fontSize: 13, fontWeight: 600,
-                          }}
+                          style={{ background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: 'var(--radius-md)', padding: '8px 16px', color: 'var(--accent-error)', cursor: 'pointer', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}
                         >
-                          Cancelar
+                          <Trash2 size={14} /> Cancelar
                         </button>
                       ) : (
                         <button
@@ -833,8 +852,8 @@ export function DesktopDownloadsPage() {
                   </div>
 
                   {isQueued && (
-                    <div style={{ fontSize: 12, color: '#f59e0b', background: 'rgba(245, 158, 11, 0.1)', padding: '8px 12px', borderRadius: 'var(--radius-sm)' }}>
-                      ⏳ En cola de espera (máx. 2 descargas simultáneas). Iniciará automáticamente...
+                    <div style={{ fontSize: 13, color: '#f59e0b', background: 'rgba(245, 158, 11, 0.1)', padding: '10px 14px', borderRadius: 'var(--radius-md)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <Clock size={15} /> En espera de recursos. Máximo 2 descargas concurrentes simultáneas.
                     </div>
                   )}
 

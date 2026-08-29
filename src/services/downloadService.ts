@@ -22,6 +22,29 @@ export const startDownload = (params: {
 export const cancelDownload = (downloadId: string): Promise<void> =>
   invoke('cancel_download', { downloadId });
 
+/** Pausar una descarga en curso */
+export const pauseDownload = (downloadId: string): Promise<void> =>
+  invoke('pause_download', { downloadId });
+
+/** Reanudar una descarga pausada */
+export const resumeDownload = (
+  downloadId: string,
+  animeTitle: string,
+  episodeNumber: number,
+  streamUrl: string,
+  referer?: string,
+  outputDir?: string
+): Promise<string> =>
+  invoke('resume_download', { downloadId, animeTitle, episodeNumber, streamUrl, referer, outputDir });
+
+/** Eliminar el registro de descarga de la base de datos */
+export const deleteDownloadRecord = (downloadId: string): Promise<void> =>
+  invoke('delete_download_record', { downloadId });
+
+/** Obtener todas las descargas de la base de datos */
+export const getAllDownloads = (): Promise<import('@/types').DownloadTask[]> =>
+  invoke('get_all_downloads');
+
 /** Suscribirse a eventos de progreso de descarga */
 export const onDownloadProgress = (
   callback: (progress: DownloadProgress) => void

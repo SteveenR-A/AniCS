@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Clock, Trash2, Film, Bookmark, BookmarkX, Download, Inbox, History,
   ArrowDownCircle, Play, FolderOpen, RefreshCw, Folder, FileVideo,
-  ChevronDown, ChevronUp, Check, Eye, EyeOff
+  ChevronDown, ChevronUp, Check, Eye, EyeOff, Pause, RotateCcw
 } from 'lucide-react';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { getHistory, clearHistory, getFavorites, removeFavorite } from '@/services/storageService';
@@ -617,34 +617,51 @@ export function MobileDownloadsPage() {
                       </div>
                     </div>
 
-                    {isDownloading || isQueued ? (
-                      <button
-                        onClick={() => cancelTask(task.id)}
-                        style={{
-                          background: 'rgba(239, 68, 68, 0.15)',
-                          border: 'none',
-                          borderRadius: 'var(--radius-sm)',
-                          padding: '4px 10px',
-                          color: 'var(--accent-error)',
-                          fontSize: 11,
-                          fontWeight: 600,
-                        }}
-                      >
-                        Cancelar
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => removeTask(task.id)}
-                        style={{ background: 'none', border: 'none', color: 'var(--text-muted)' }}
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    )}
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      {isDownloading ? (
+                        <button
+                          onClick={() => useDownloadStore.getState().pauseTask(task.id)}
+                          style={{ background: 'rgba(59, 130, 246, 0.15)', border: 'none', borderRadius: 'var(--radius-sm)', padding: '4px 10px', color: 'var(--accent-primary)', fontSize: 11, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}
+                        >
+                          <Pause size={12} /> Pausar
+                        </button>
+                      ) : task.status === 'paused' ? (
+                        <button
+                          onClick={() => useDownloadStore.getState().resumeTask(task.id)}
+                          style={{ background: 'rgba(16, 185, 129, 0.15)', border: 'none', borderRadius: 'var(--radius-sm)', padding: '4px 10px', color: 'var(--accent-success)', fontSize: 11, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}
+                        >
+                          <Play size={12} /> Reanudar
+                        </button>
+                      ) : isError ? (
+                        <button
+                          onClick={() => useDownloadStore.getState().retryTask(task.id)}
+                          style={{ background: 'rgba(245, 158, 11, 0.15)', border: 'none', borderRadius: 'var(--radius-sm)', padding: '4px 10px', color: '#f59e0b', fontSize: 11, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}
+                        >
+                          <RotateCcw size={12} /> Reintentar
+                        </button>
+                      ) : null}
+
+                      {isDownloading || isQueued || task.status === 'paused' ? (
+                        <button
+                          onClick={() => cancelTask(task.id)}
+                          style={{ background: 'rgba(239, 68, 68, 0.15)', border: 'none', borderRadius: 'var(--radius-sm)', padding: '4px 10px', color: 'var(--accent-error)', fontSize: 11, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}
+                        >
+                          <Trash2 size={12} /> Cancelar
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => removeTask(task.id)}
+                          style={{ background: 'none', border: 'none', color: 'var(--text-muted)' }}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   {isQueued && (
-                    <div style={{ fontSize: 11, color: '#f59e0b', background: 'rgba(245, 158, 11, 0.1)', padding: '6px 10px', borderRadius: 'var(--radius-sm)' }}>
-                      ⏳ En cola (máx. 2 simultáneas)...
+                    <div style={{ fontSize: 11, color: '#f59e0b', background: 'rgba(245, 158, 11, 0.1)', padding: '6px 10px', borderRadius: 'var(--radius-sm)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <Clock size={12} /> En cola (máx. 2 simultáneas)...
                     </div>
                   )}
 

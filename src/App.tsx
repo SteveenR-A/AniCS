@@ -37,12 +37,15 @@ function AppRoutes() {
 
 export default function App() {
   const { loadSources } = useAnimeStore();
-  const { updateProgress } = useDownloadStore();
+  const { updateProgress, loadDownloads } = useDownloadStore();
   const { loadTheme } = useThemeStore();
 
   useEffect(() => {
     // Cargar tema visual guardado
     loadTheme();
+
+    // Cargar historial de descargas desde DB
+    loadDownloads();
 
     // Cargar fuentes de extracción al iniciar
     loadSources();
