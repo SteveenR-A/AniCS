@@ -203,6 +203,7 @@ export const useDownloadStore = create<DownloadStore>((set, get) => ({
             status: 'completed',
             progress: 100,
             speedKbps: 0,
+            outputPath: res.path || existing.outputPath,
             error: undefined,
           });
         }

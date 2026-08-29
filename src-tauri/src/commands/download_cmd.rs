@@ -64,6 +64,20 @@ pub enum PauseReason {
     UserPaused,
 }
 
+pub fn sanitize_anime_folder_name(name: &str) -> String {
+    let invalid_chars = ['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
+    let cleaned: String = name
+        .chars()
+        .map(|c| if invalid_chars.contains(&c) { ' ' } else { c })
+        .collect();
+    let result = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
+    if result.is_empty() {
+        "Anime".to_string()
+    } else {
+        result
+    }
+}
+
 fn spawn_download(
     download_id: String,
     task_record: DownloadTask,
@@ -298,23 +312,13 @@ pub async fn start_download(
         PathBuf::from(get_default_download_dir(app_handle.clone())?)
     };
 
-    let safe_title: String = anime_title
-        .chars()
-        .map(|c| if c.is_alphanumeric() || c == ' ' || c == '-' { c } else { '_' })
-        .collect();
-
+    let safe_title = sanitize_anime_folder_name(&anime_title);
     let anime_folder = base_dir.join(&safe_title);
     if let Err(e) = fs::create_dir_all(&anime_folder) {
         log::warn!("No se pudo crear la carpeta {}: {}", anime_folder.display(), e);
     }
 
-    let is_mp4 = stream_url.contains(".mp4")
-        || stream_url.contains("mediafire.com")
-        || stream_url.contains("mp4upload")
-        || stream_url.contains("streamtape");
-
-    let ext = if is_mp4 { "mp4" } else { "ts" };
-    let output_path = anime_folder.join(format!("Ep{:03}.{}", episode_number, ext));
+    let output_path = anime_folder.join(format!("Ep{:03}.mp4", episode_number));
     let output_path_str = output_path.to_string_lossy().to_string();
 
     let task_record = DownloadTask {
@@ -635,6 +639,14 @@ async fn download_direct_mp4(
                             // Flujo finalizado con éxito: renombrar .part a .mp4 final
                             file.flush().await.map_err(AppError::Io)?;
                             drop(file);
+
+                            if downloaded < 10240 {
+                                let _ = tokio::fs::remove_file(&part_path).await;
+                                return Err(AppError::Download(
+                                    "La descarga finalizó sin datos suficientes o el archivo está incompleto".to_string(),
+                                ));
+                            }
+
                             if let Err(_) = tokio::fs::rename(&part_path, output_path).await {
                                 tokio::fs::copy(&part_path, output_path).await.map_err(AppError::Io)?;
                                 let _ = tokio::fs::remove_file(&part_path).await;
@@ -836,7 +848,7 @@ pub async fn scan_local_downloads(
             let path = entry.path();
             if path.is_dir() {
                 let folder_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("Anime").to_string();
-                let clean_title = folder_name.replace('_', " ").trim().to_string();
+                let clean_title = sanitize_anime_folder_name(&folder_name.replace('_', " "));
 
                 let mut episodes = vec![];
                 scan_episodes_in_dir(&path, &clean_title, &mut episodes, &path_history_map, &title_history_map).await;
@@ -899,7 +911,7 @@ pub async fn scan_local_downloads(
                     let path = entry.path();
                     if path.is_dir() {
                         let folder_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("Anime").to_string();
-                        let clean_title = folder_name.replace('_', " ").trim().to_string();
+                        let clean_title = sanitize_anime_folder_name(&folder_name.replace('_', " "));
                         let mut episodes = vec![];
                         scan_episodes_in_dir(&path, &clean_title, &mut episodes, &path_history_map, &title_history_map).await;
                         if !episodes.is_empty() {
@@ -1285,7 +1297,6 @@ pub async fn download_and_run_installer(
     filename: String,
     app_handle: AppHandle,
 ) -> Result<String, String> {
-    use tauri::Emitter;
     use futures::StreamExt;
     use tokio::io::AsyncWriteExt;
 

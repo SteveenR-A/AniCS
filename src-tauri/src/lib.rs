@@ -4,8 +4,10 @@ pub mod downloader;
 pub mod scrapers;
 pub mod storage;
 
+use tauri::Manager;
 #[cfg(desktop)]
-use tauri::{Emitter, Manager};
+use tauri::Emitter;
+
 use commands::download_cmd::DownloadManager;
 
 /// Estado global compartido por todos los comandos Tauri

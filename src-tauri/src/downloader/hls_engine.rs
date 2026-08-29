@@ -257,6 +257,14 @@ impl HlsEngine {
         file.flush().await.map_err(AppError::Io)?;
         drop(file);
 
+        let final_bytes = *downloaded_bytes.lock().await;
+        if final_bytes < 10240 || next_write_index == 0 {
+            let _ = tokio::fs::remove_file(&part_path).await;
+            return Err(AppError::Download(
+                "La descarga finalizó sin datos suficientes o el archivo está vacío".to_string(),
+            ));
+        }
+
         if let Err(_) = tokio::fs::rename(&part_path, &self.output_path).await {
             tokio::fs::copy(&part_path, &self.output_path).await.map_err(AppError::Io)?;
             let _ = tokio::fs::remove_file(&part_path).await;
