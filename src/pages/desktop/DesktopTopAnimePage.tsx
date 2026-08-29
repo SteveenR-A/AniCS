@@ -183,7 +183,7 @@ export function DesktopTopAnimePage() {
                     border: '1px solid rgba(255,255,255,0.2)',
                     display: 'flex', alignItems: 'center', gap: 4,
                   }}>
-                    {isGold ? '👑 #1' : isSilver ? '🥈 #2' : isBronze ? '🥉 #3' : `#${rank}`}
+                    {`#${rank}`}
                   </div>
 
                   {anime.animeType && (

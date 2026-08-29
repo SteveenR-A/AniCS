@@ -114,10 +114,11 @@ export interface DownloadTask {
   outputPath: string;
   status: DownloadStatus;
   progress: number;
-  speedKbps: number;
+  speedKbps?: number;
   downloadedBytes: number;
   totalBytes?: number;
   error?: string;
+  createdAt?: string;
 }
 
 export interface DownloadProgress {

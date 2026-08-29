@@ -37,7 +37,7 @@ function AppRoutes() {
 
 export default function App() {
   const { loadSources } = useAnimeStore();
-  const { updateProgress } = useDownloadStore();
+  const { init: initDownloads, cleanup: cleanupDownloads } = useDownloadStore();
   const { loadTheme } = useThemeStore();
 
   useEffect(() => {
@@ -46,6 +46,9 @@ export default function App() {
 
     // Cargar fuentes de extracción al iniciar
     loadSources();
+
+    // Hidratar descargas de SQLite y activar listeners
+    initDownloads();
 
     // Solicitar permisos de notificación al inicio (Android necesita POST_NOTIFICATIONS desde API 33)
     (async () => {
@@ -60,29 +63,10 @@ export default function App() {
       }
     })();
 
-    // Suscribirse a eventos de descarga globales
-    const unsubProgress = onDownloadProgress((progress) => {
-      updateProgress(progress);
-    });
-
-    const unsubCompleted = onDownloadCompleted((result) => {
-      // Marcar la tarea como completada en el store cuando Rust confirma la descarga
-      useDownloadStore.getState().updateProgress({
-        id: result.id,
-        progress: 100,
-        speedKbps: 0,
-        downloadedBytes: 0,
-        totalBytes: undefined,
-        status: 'completed',
-        error: undefined,
-      });
-    });
-
     return () => {
-      unsubProgress.then(fn => fn());
-      unsubCompleted.then(fn => fn());
+      cleanupDownloads();
     };
-  }, []);
+  }, [loadTheme, loadSources, initDownloads, cleanupDownloads]);
 
   return (
     <BrowserRouter>

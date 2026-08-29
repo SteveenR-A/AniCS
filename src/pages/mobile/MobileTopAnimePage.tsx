@@ -168,7 +168,7 @@ export function MobileTopAnimePage() {
                     padding: '2px 7px', borderRadius: 'var(--radius-full)',
                     fontSize: 10, fontWeight: 800,
                   }}>
-                    {isGold ? '👑 #1' : isSilver ? '🥈 #2' : isBronze ? '🥉 #3' : `#${rank}`}
+                    {`#${rank}`}
                   </div>
 
                   {anime.animeType && (

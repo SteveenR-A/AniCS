@@ -12,9 +12,10 @@ import {
 import { invoke } from '@tauri-apps/api/core';
 import { usePlayerStore } from '@/stores/usePlayerStore';
 import { useAnimeStore } from '@/stores/useAnimeStore';
+import { useDownloadStore } from '@/stores/useDownloadStore';
 import { resolveStream, getServers, getDetails } from '@/services/animeService';
 import { upsertHistory, getEpisodeProgress } from '@/services/storageService';
-import { getLocalMediaUrl } from '@/services/downloadService';
+import { getLocalMediaUrl, setKeepScreenOn } from '@/services/downloadService';
 import { useResponsive } from '@/hooks/useResponsive';
 import type { VideoServer } from '@/types';
 
@@ -162,6 +163,7 @@ export function PlayerPage() {
     } catch {}
 
     enterFullscreen().catch(() => {});
+    setKeepScreenOn(true);
 
     let wakeLockSentinel: any = null;
     const requestWakeLock = async () => {
@@ -177,6 +179,7 @@ export function PlayerPage() {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         requestWakeLock();
+        setKeepScreenOn(true);
         enterFullscreen().catch(() => {});
       }
     };
@@ -197,6 +200,11 @@ export function PlayerPage() {
 
       if (wakeLockSentinel && typeof wakeLockSentinel.release === 'function') {
         wakeLockSentinel.release().catch(() => {});
+      }
+
+      // Si no hay descargas activas en curso, permitir que la pantalla se apague normalmente
+      if (useDownloadStore.getState().activeCount() === 0) {
+        setKeepScreenOn(false);
       }
 
       exitFullscreen().catch(() => {});
@@ -854,12 +862,16 @@ export function PlayerPage() {
           }}
           onPlay={() => {
             setIsPlaying(true);
+            setKeepScreenOn(true);
             if (readyToSaveRef.current) {
               saveProgress();
             }
           }}
           onPause={() => {
             setIsPlaying(false);
+            if (useDownloadStore.getState().activeCount() === 0) {
+              setKeepScreenOn(false);
+            }
             saveProgress();
           }}
           onLoadedMetadata={async () => {

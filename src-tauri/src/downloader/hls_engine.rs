@@ -146,7 +146,8 @@ impl HlsEngine {
             tokio::fs::create_dir_all(parent).await.map_err(AppError::Io)?;
         }
 
-        let mut file = File::create(&self.output_path).await.map_err(AppError::Io)?;
+        let part_path = PathBuf::from(format!("{}.part", self.output_path.to_string_lossy()));
+        let mut file = File::create(&part_path).await.map_err(AppError::Io)?;
         let total_segments = playlist.segment_urls.len();
         let downloaded_bytes = Arc::new(Mutex::new(0u64));
         let completed_segments = Arc::new(Mutex::new(0usize));
@@ -254,6 +255,13 @@ impl HlsEngine {
         }
 
         file.flush().await.map_err(AppError::Io)?;
+        drop(file);
+
+        if let Err(_) = tokio::fs::rename(&part_path, &self.output_path).await {
+            tokio::fs::copy(&part_path, &self.output_path).await.map_err(AppError::Io)?;
+            let _ = tokio::fs::remove_file(&part_path).await;
+        }
+
         Ok(self.output_path.clone())
     }
 
@@ -277,12 +285,20 @@ async fn download_segment(url: &str, referer: Option<&str>) -> AppResult<Bytes> 
         req = req.header(header::REFERER, ref_url);
     }
 
-    let resp = req.send().await.map_err(AppError::Network)?;
-    if !resp.status().is_success() {
-        return Err(AppError::Download(format!("Segment error: {}", resp.status())));
-    }
+    let fetch_fut = async {
+        let resp = req.send().await.map_err(AppError::Network)?;
+        if !resp.status().is_success() {
+            return Err(AppError::Download(format!("Segment error: {}", resp.status())));
+        }
+        resp.bytes().await.map_err(AppError::Network)
+    };
 
-    resp.bytes().await.map_err(AppError::Network)
+    match tokio::time::timeout(std::time::Duration::from_secs(12), fetch_fut).await {
+        Ok(res) => res,
+        Err(_) => Err(AppError::Download(
+            "Timeout al descargar segmento de video (el servidor dejó de responder)".to_string(),
+        )),
+    }
 }
 
 fn resolve_relative_url(url: &str, base: &str) -> String {

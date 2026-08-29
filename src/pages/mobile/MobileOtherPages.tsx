@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Clock, Trash2, Film, Bookmark, BookmarkX, Download, Inbox, History,
   ArrowDownCircle, Play, FolderOpen, RefreshCw, Folder, FileVideo,
-  ChevronDown, ChevronUp, Check, Eye, EyeOff
+  ChevronDown, ChevronUp, Check, Eye, EyeOff, Pause, RotateCcw, Loader2, AlertCircle
 } from 'lucide-react';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { getHistory, clearHistory, getFavorites, removeFavorite } from '@/services/storageService';
@@ -240,7 +240,10 @@ export function MobileFavoritesPage() {
 // ──────────────────────────────────────────
 export function MobileDownloadsPage() {
   const navigate = useNavigate();
-  const { tasks, cancelTask, removeTask, expandedFolders, toggleFolder } = useDownloadStore();
+  const {
+    tasks, pauseTask, resumeTask, retryTask, cancelTask, removeTask,
+    expandedFolders, toggleFolder
+  } = useDownloadStore();
   const {
     openPlayer, setCurrentEpisode, setCurrentAnime, setServers, setResolvedMedia, resetPlayback
   } = usePlayerStore();
@@ -378,19 +381,10 @@ export function MobileDownloadsPage() {
       {activeTab === 'local' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {animeFolders.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '50px 16px', background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)' }}>
-              <Folder size={36} color="var(--text-muted)" style={{ margin: '0 auto 8px', opacity: 0.5 }} />
-              <p style={{ fontSize: 14, fontWeight: 700, margin: '0 0 4px' }}>No hay animes descargados</p>
-              <button
-                onClick={() => loadLocalFolders()}
-                style={{
-                  marginTop: 10, background: 'var(--bg-elevated)', border: '1px solid var(--border-moderate)',
-                  borderRadius: 'var(--radius-full)', padding: '6px 14px',
-                  color: 'var(--text-primary)', fontSize: 11, fontWeight: 600,
-                }}
-              >
-                <RefreshCw size={11} style={{ display: 'inline', marginRight: 4 }} /> Recargar
-              </button>
+            <div style={{ textAlign: 'center', padding: '60px 16px', background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)' }}>
+              <Folder size={40} color="var(--text-muted)" style={{ margin: '0 auto 8px', opacity: 0.5 }} />
+              <p style={{ fontSize: 14, fontWeight: 700, margin: '0 0 4px' }}>Sin animes descargados</p>
+              <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: 0 }}>Los episodios descargados se organizarán automáticamente aquí.</p>
             </div>
           ) : (
             animeFolders.map((anime) => {
@@ -406,15 +400,12 @@ export function MobileDownloadsPage() {
                   <div
                     onClick={() => toggleFolder(anime.folderPath)}
                     style={{
-                      padding: '10px 12px', cursor: 'pointer',
-                      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+                      padding: '10px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+                      cursor: 'pointer', background: isExpanded ? 'var(--bg-elevated)' : 'transparent',
                     }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 }}>
-                      <div style={{
-                        width: 38, height: 52, borderRadius: 'var(--radius-sm)',
-                        overflow: 'hidden', flexShrink: 0, background: 'var(--bg-elevated)',
-                      }}>
+                      <div style={{ width: 38, height: 52, borderRadius: 'var(--radius-sm)', overflow: 'hidden', flexShrink: 0, background: 'var(--bg-elevated)' }}>
                         {anime.coverImage ? (
                           <CachedImage src={anime.coverImage} alt={anime.animeTitle} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                         ) : (
@@ -423,41 +414,27 @@ export function MobileDownloadsPage() {
                           </div>
                         )}
                       </div>
-
                       <div style={{ minWidth: 0 }}>
-                        <h4 style={{ fontSize: 13, fontWeight: 700, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <p style={{ fontSize: 13, fontWeight: 700, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {anime.animeTitle}
-                        </h4>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
-                          <span style={{
-                            background: 'var(--accent-primary)', color: 'white',
-                            fontSize: 10, fontWeight: 800, padding: '1px 6px', borderRadius: 'var(--radius-full)',
-                          }}>
-                            {anime.totalEpisodes} eps
+                        </p>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
+                          <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--accent-primary)' }}>
+                            {anime.totalEpisodes} ep{anime.totalEpisodes === 1 ? '' : 's'}
                           </span>
-                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                            {anime.totalSizeFormatted}
-                          </span>
+                          <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>• {anime.totalSizeFormatted}</span>
                         </div>
                       </div>
                     </div>
 
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }} onClick={e => e.stopPropagation()}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }} onClick={e => e.stopPropagation()}>
                       <button
                         onClick={() => handleDeleteAnimeFolder(anime.folderPath)}
-                        style={{
-                          background: 'rgba(239, 68, 68, 0.1)', border: 'none',
-                          borderRadius: 'var(--radius-sm)', padding: 6, color: '#f87171',
-                        }}
+                        style={{ background: 'none', border: 'none', color: 'var(--text-muted)', padding: 4, cursor: 'pointer' }}
                       >
-                        <Trash2 size={13} />
+                        <Trash2 size={14} />
                       </button>
-                      <button
-                        onClick={() => toggleFolder(anime.folderPath)}
-                        style={{ background: 'none', border: 'none', color: 'var(--text-muted)', padding: 4 }}
-                      >
-                        {isExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-                      </button>
+                      {isExpanded ? <ChevronUp size={16} color="var(--text-muted)" /> : <ChevronDown size={16} color="var(--text-muted)" />}
                     </div>
                   </div>
 
@@ -467,35 +444,25 @@ export function MobileDownloadsPage() {
                         initial={{ opacity: 0, height: 0 }}
                         animate={{ opacity: 1, height: 'auto' }}
                         exit={{ opacity: 0, height: 0 }}
-                        style={{
-                          borderTop: '1px solid var(--border-subtle)', background: 'rgba(10,11,15,0.3)',
-                          padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 6,
-                        }}
+                        style={{ borderTop: '1px solid var(--border-subtle)', background: 'var(--bg-base)' }}
                       >
                         {anime.episodes.map((ep) => {
                           const isCompleted = ep.watchStatus === 'completed';
                           const isInProgress = ep.watchStatus === 'in_progress';
-
                           return (
                             <div
                               key={ep.filePath}
                               style={{
-                                background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
-                                borderRadius: 'var(--radius-md)', padding: '10px 12px',
-                                display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+                                padding: '9px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                borderBottom: '1px solid var(--border-subtle)', gap: 8,
                               }}
                             >
                               <div style={{ minWidth: 0, flex: 1 }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                  <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
-                                    Ep. {ep.episodeNumber}
-                                  </span>
-                                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                                    {ep.fileSizeFormatted}
-                                  </span>
-                                </div>
-
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                                <p style={{ fontSize: 12, fontWeight: 600, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  Episodio {ep.episodeNumber}
+                                </p>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                                  <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{ep.fileSizeFormatted}</span>
                                   {isCompleted ? (
                                     <span style={{
                                       fontSize: 10, fontWeight: 800, color: 'var(--accent-success)',
@@ -559,21 +526,23 @@ export function MobileDownloadsPage() {
         </div>
       )}
 
-      {/* TAB 2: Cola en Móvil */}
+      {/* TAB 2: Cola en Móvil (Sin Emojis) */}
       {activeTab === 'active' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {taskList.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '50px 16px', background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)' }}>
               <ArrowDownCircle size={36} color="var(--text-muted)" style={{ margin: '0 auto 8px', opacity: 0.5 }} />
-              <p style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>No hay descargas activas</p>
+              <p style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>No hay descargas en la cola</p>
             </div>
           ) : (
             taskList.map((task) => {
               const isDownloading = task.status === 'downloading';
               const isQueued = task.status === 'queued';
+              const isPaused = task.status === 'paused';
               const isCompleted = task.status === 'completed';
               const isCanceled = task.status === 'canceled';
               const isError = task.status === 'failed';
+
               return (
                 <div
                   key={task.id}
@@ -597,58 +566,165 @@ export function MobileDownloadsPage() {
                           fontSize: 10,
                           fontWeight: 800,
                           textTransform: 'uppercase',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 4,
                           color: isCompleted
                             ? 'var(--accent-success)'
                             : isDownloading
                               ? 'var(--accent-primary)'
-                              : isQueued
-                                ? '#f59e0b'
-                                : isCanceled
-                                  ? 'var(--text-muted)'
-                                  : 'var(--accent-error)',
+                              : isPaused
+                                ? '#f97316'
+                                : isQueued
+                                  ? '#f59e0b'
+                                  : isCanceled
+                                    ? 'var(--text-muted)'
+                                    : 'var(--accent-error)',
                         }}>
-                          {isCompleted ? 'Completado' : isDownloading ? 'Descargando' : isQueued ? 'En Cola' : isCanceled ? 'Cancelado' : 'Error'}
+                          {isCompleted && <><Check size={11} /> Completado</>}
+                          {isDownloading && <><Loader2 size={11} className="animate-spin" /> Descargando</>}
+                          {isPaused && <><Pause size={11} /> Pausado</>}
+                          {isQueued && <><Clock size={11} /> En Cola</>}
+                          {isCanceled && <>Cancelado</>}
+                          {isError && <><AlertCircle size={11} /> Error</>}
                         </span>
-                        {isDownloading && task.speedKbps > 0 && (
+                        {isDownloading && (task.speedKbps ?? 0) > 0 && (
                           <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                            • {formatSpeed(task.speedKbps)}
+                            • {formatSpeed(task.speedKbps ?? 0)}
                           </span>
                         )}
                       </div>
                     </div>
 
-                    {isDownloading || isQueued ? (
-                      <button
-                        onClick={() => cancelTask(task.id)}
-                        style={{
-                          background: 'rgba(239, 68, 68, 0.15)',
-                          border: 'none',
-                          borderRadius: 'var(--radius-sm)',
-                          padding: '4px 10px',
-                          color: 'var(--accent-error)',
-                          fontSize: 11,
-                          fontWeight: 600,
-                        }}
-                      >
-                        Cancelar
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => removeTask(task.id)}
-                        style={{ background: 'none', border: 'none', color: 'var(--text-muted)' }}
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    )}
+                    {/* Botones de acción dinámicos */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      {isDownloading && (
+                        <>
+                          <button
+                            onClick={() => pauseTask(task.id)}
+                            style={{
+                              background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
+                              borderRadius: 'var(--radius-sm)', padding: '5px 9px', color: 'var(--text-primary)',
+                              display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                            }}
+                            title="Pausar descarga"
+                          >
+                            <Pause size={11} /> Pausar
+                          </button>
+                          <button
+                            onClick={() => cancelTask(task.id)}
+                            style={{
+                              background: 'rgba(239, 68, 68, 0.15)', border: 'none',
+                              borderRadius: 'var(--radius-sm)', padding: '5px 9px', color: 'var(--accent-error)',
+                              fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                            }}
+                            title="Cancelar descarga"
+                          >
+                            <Trash2 size={11} />
+                          </button>
+                        </>
+                      )}
+
+                      {isQueued && (
+                        <button
+                          onClick={() => cancelTask(task.id)}
+                          style={{
+                            background: 'rgba(239, 68, 68, 0.15)', border: 'none',
+                            borderRadius: 'var(--radius-sm)', padding: '5px 9px', color: 'var(--accent-error)',
+                            fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                          }}
+                          title="Cancelar"
+                        >
+                          <Trash2 size={11} /> Cancelar
+                        </button>
+                      )}
+
+                      {isPaused && (
+                        <>
+                          <button
+                            onClick={() => resumeTask(task.id)}
+                            style={{
+                              background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))',
+                              border: 'none', borderRadius: 'var(--radius-sm)', padding: '5px 10px',
+                              color: 'white', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                            }}
+                            title="Reanudar descarga"
+                          >
+                            <Play size={11} fill="white" /> Reanudar
+                          </button>
+                          <button
+                            onClick={() => removeTask(task.id, false)}
+                            style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 4 }}
+                            title="Eliminar de la lista"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </>
+                      )}
+
+                      {isError && (
+                        <>
+                          <button
+                            onClick={() => retryTask(task.id)}
+                            style={{
+                              background: 'rgba(59, 130, 246, 0.15)', border: '1px solid rgba(59, 130, 246, 0.3)',
+                              borderRadius: 'var(--radius-sm)', padding: '5px 10px', color: 'var(--accent-primary)',
+                              display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                            }}
+                            title="Reintentar descarga"
+                          >
+                            <RotateCcw size={11} /> Reintentar
+                          </button>
+                          <button
+                            onClick={() => removeTask(task.id, false)}
+                            style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 4 }}
+                            title="Eliminar de la lista"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </>
+                      )}
+
+                      {(isCompleted || isCanceled) && (
+                        <button
+                          onClick={() => removeTask(task.id, false)}
+                          style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 4 }}
+                          title="Eliminar de la lista"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   {isQueued && (
-                    <div style={{ fontSize: 11, color: '#f59e0b', background: 'rgba(245, 158, 11, 0.1)', padding: '6px 10px', borderRadius: 'var(--radius-sm)' }}>
-                      ⏳ En cola (máx. 2 simultáneas)...
+                    <div style={{
+                      fontSize: 11, color: '#f59e0b', background: 'rgba(245, 158, 11, 0.1)',
+                      padding: '6px 10px', borderRadius: 'var(--radius-sm)', display: 'flex', alignItems: 'center', gap: 6,
+                    }}>
+                      <Clock size={12} /> En cola (máx. 2 simultáneas)...
                     </div>
                   )}
 
-                  {isDownloading && (
+                  {isPaused && (
+                    <div style={{
+                      fontSize: 11, color: '#f97316', background: 'rgba(249, 115, 22, 0.1)',
+                      padding: '6px 10px', borderRadius: 'var(--radius-sm)', display: 'flex', alignItems: 'center', gap: 6,
+                    }}>
+                      <Pause size={12} /> Descarga pausada. Presiona Reanudar para continuar.
+                    </div>
+                  )}
+
+                  {isError && task.error && (
+                    <div style={{
+                      fontSize: 11, color: 'var(--accent-error)', background: 'rgba(239, 68, 68, 0.1)',
+                      padding: '6px 10px', borderRadius: 'var(--radius-sm)', display: 'flex', alignItems: 'center', gap: 6,
+                    }}>
+                      <AlertCircle size={12} /> {task.error}
+                    </div>
+                  )}
+
+                  {(isDownloading || isPaused) && (
                     <div>
                       {(() => {
                         const totalBytes = task.totalBytes;
@@ -664,15 +740,17 @@ export function MobileDownloadsPage() {
                             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
                               <span style={{ fontWeight: 600 }}>
                                 {totalMB ? `${dlMB} / ${totalMB} MB` : `${dlMB} MB`}
-                                {' · '}{formatSpeed(task.speedKbps)}
+                                {isDownloading && (task.speedKbps ?? 0) > 0 && ` · ${formatSpeed(task.speedKbps ?? 0)}`}
                               </span>
-                              <span style={{ color: 'var(--accent-primary)', fontWeight: 700 }}>{pct}%</span>
+                              <span style={{ color: isPaused ? '#f97316' : 'var(--accent-primary)', fontWeight: 700 }}>{pct}%</span>
                             </div>
                             <div style={{ height: 5, background: 'var(--bg-elevated)', borderRadius: 3, overflow: 'hidden' }}>
                               <div style={{
                                 width: `${pct}%`,
                                 height: '100%',
-                                background: 'linear-gradient(90deg, var(--accent-primary), var(--accent-secondary))',
+                                background: isPaused
+                                  ? '#f97316'
+                                  : 'linear-gradient(90deg, var(--accent-primary), var(--accent-secondary))',
                                 transition: 'width 0.3s ease',
                               }} />
                             </div>

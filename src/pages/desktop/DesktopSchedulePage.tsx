@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Calendar, Clock, RefreshCw } from 'lucide-react';
+import { Calendar, Clock, RefreshCw, Sparkles } from 'lucide-react';
 import { getScheduleDays as getScheduleDaysFromApi } from '@/services/animeService';
 import { useAnimeStore } from '@/stores/useAnimeStore';
 import { CachedImage } from '@/components/CachedImage';
@@ -148,9 +148,10 @@ export function DesktopSchedulePage() {
               border: selectedDay === 'all' ? '1px solid var(--accent-primary)' : '1px solid var(--border-moderate)',
               fontWeight: selectedDay === 'all' ? 700 : 500, fontSize: 13, cursor: 'pointer',
               boxShadow: selectedDay === 'all' ? 'var(--shadow-glow)' : 'none',
+              display: 'flex', alignItems: 'center', gap: 6,
             }}
           >
-            📅 Toda la semana
+            <Calendar size={14} /> Toda la semana
           </button>
 
           {DAYS_ORDER.map((day) => {
@@ -181,7 +182,8 @@ export function DesktopSchedulePage() {
             borderRadius: 'var(--radius-full)', padding: '6px 18px',
             color: 'var(--text-primary)', fontSize: 13, fontWeight: 700,
           }}>
-            <span>✨ Animación China en Emisión Continua</span>
+            <Sparkles size={14} color="var(--accent-primary)" />
+            <span>Animación China en Emisión Continua</span>
           </div>
         </div>
       )}

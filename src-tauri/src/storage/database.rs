@@ -52,8 +52,9 @@ pub fn init_database_inner(app_data_dir: &PathBuf) -> AppResult<Connection> {
             status TEXT NOT NULL DEFAULT 'queued',
             progress REAL NOT NULL DEFAULT 0.0,
             downloaded_bytes INTEGER NOT NULL DEFAULT 0,
+            total_bytes INTEGER,
             error TEXT,
-            created_at TEXT NOT NULL
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
 
         CREATE TABLE IF NOT EXISTS settings (
@@ -76,6 +77,9 @@ pub fn init_database_inner(app_data_dir: &PathBuf) -> AppResult<Connection> {
         CREATE INDEX IF NOT EXISTS idx_image_cache_last_accessed ON image_cache(last_accessed_at DESC);
         CREATE INDEX IF NOT EXISTS idx_image_cache_access_count ON image_cache(access_count DESC);
     ").map_err(AppError::Database)?;
+
+    // Migración no destructiva si la tabla downloads ya existía sin total_bytes
+    let _ = conn.execute("ALTER TABLE downloads ADD COLUMN total_bytes INTEGER", []);
 
     Ok(conn)
 }
@@ -517,6 +521,133 @@ pub fn reset_database() -> AppResult<()> {
             DELETE FROM image_cache;
             VACUUM;
         ")?;
+        Ok(())
+    })
+}
+
+// ──────────────────────────────────────────
+// Descargas Persistentes (Downloads)
+// ──────────────────────────────────────────
+
+/// Inserta o reemplaza una tarea de descarga en SQLite.
+pub fn save_download_task(task: &DownloadTask) -> AppResult<()> {
+    with_db(|conn| {
+        conn.execute(
+            "INSERT INTO downloads
+                (id, anime_title, episode_number, stream_url, referer, output_path,
+                 status, progress, downloaded_bytes, total_bytes, error, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+             ON CONFLICT(id) DO UPDATE SET
+                anime_title = excluded.anime_title,
+                episode_number = excluded.episode_number,
+                stream_url = excluded.stream_url,
+                referer = excluded.referer,
+                output_path = excluded.output_path,
+                status = excluded.status,
+                progress = excluded.progress,
+                downloaded_bytes = excluded.downloaded_bytes,
+                total_bytes = excluded.total_bytes,
+                error = excluded.error",
+            params![
+                task.id,
+                task.anime_title,
+                task.episode_number,
+                task.stream_url,
+                task.referer,
+                task.output_path,
+                task.status,
+                task.progress,
+                task.downloaded_bytes as i64,
+                task.total_bytes.map(|v| v as i64),
+                task.error,
+                task.created_at,
+            ],
+        )?;
+        Ok(())
+    })
+}
+
+/// Actualiza el progreso y estado de una descarga periódicamente.
+pub fn update_download_progress_db(
+    id: &str,
+    status: &str,
+    progress: f32,
+    downloaded_bytes: u64,
+    total_bytes: Option<u64>,
+    error: Option<&str>,
+) -> AppResult<()> {
+    with_db(|conn| {
+        conn.execute(
+            "UPDATE downloads
+             SET status = ?1, progress = ?2, downloaded_bytes = ?3,
+                 total_bytes = COALESCE(?4, total_bytes), error = ?5
+             WHERE id = ?6",
+            params![
+                status,
+                progress,
+                downloaded_bytes as i64,
+                total_bytes.map(|v| v as i64),
+                error,
+                id,
+            ],
+        )?;
+        Ok(())
+    })
+}
+
+/// Recupera todas las descargas registradas en SQLite, ordenadas cronológicamente.
+pub fn get_all_downloads_db() -> AppResult<Vec<DownloadTask>> {
+    with_db(|conn| {
+        let mut stmt = conn.prepare(
+            "SELECT id, anime_title, episode_number, stream_url, referer, output_path,
+                    status, progress, downloaded_bytes, total_bytes, error, created_at
+             FROM downloads
+             ORDER BY created_at DESC",
+        )?;
+
+        let rows = stmt.query_map([], |row| {
+            Ok(DownloadTask {
+                id: row.get(0)?,
+                anime_title: row.get(1)?,
+                episode_number: row.get::<_, i64>(2)? as u32,
+                stream_url: row.get(3)?,
+                referer: row.get(4)?,
+                output_path: row.get(5)?,
+                status: row.get(6)?,
+                progress: row.get::<_, f64>(7)? as f32,
+                downloaded_bytes: row.get::<_, i64>(8)? as u64,
+                total_bytes: row.get::<_, Option<i64>>(9)?.map(|v| v as u64),
+                error: row.get(10)?,
+                created_at: row.get(11)?,
+            })
+        })?;
+
+        let mut tasks = Vec::new();
+        for r in rows.flatten() {
+            tasks.push(r);
+        }
+        Ok(tasks)
+    })
+}
+
+/// Elimina el registro de una descarga de SQLite.
+pub fn delete_download_task_db(id: &str) -> AppResult<()> {
+    with_db(|conn| {
+        conn.execute("DELETE FROM downloads WHERE id = ?1", params![id])?;
+        Ok(())
+    })
+}
+
+/// Al iniciar la app, cualquier descarga que quedó en 'downloading' o 'queued'
+/// se marca como 'paused' para que el usuario pueda reanudarla limpiamente.
+pub fn mark_active_downloads_as_paused_db() -> AppResult<()> {
+    with_db(|conn| {
+        conn.execute(
+            "UPDATE downloads
+             SET status = 'paused', error = 'Descarga pausada al cerrar la aplicación'
+             WHERE status IN ('downloading', 'queued')",
+            [],
+        )?;
         Ok(())
     })
 }

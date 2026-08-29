@@ -128,17 +128,24 @@ jobs:
               sed -i 's|<application|<uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />\n    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />\n    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />\n    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />\n    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />\n    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />\n    <uses-permission android:name="android.permission.WAKE_LOCK" />\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />\n    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />\n    <application android:requestLegacyExternalStorage="true"|g' "$MANIFEST"
               echo "Permisos de almacenamiento añadidos al AndroidManifest.xml"
             fi
-            if ! grep -q "androidx.core.content.FileProvider" "$MANIFEST"; then
-              sed -i 's|</application>|    <provider\n        android:name="androidx.core.content.FileProvider"\n        android:authorities="${applicationId}.fileprovider"\n        android:exported="false"\n        android:grantUriPermissions="true">\n        <meta-data\n            android:name="android.support.FILE_PROVIDER_PATHS"\n            android:resource="@xml/file_paths" />\n    </provider>\n  </application>|g' "$MANIFEST"
-              echo "FileProvider añadido al AndroidManifest.xml"
+            if !grep -q "androidx.core.content.FileProvider" "$MANIFEST"; then
+              sed -i 's|</application>|    <provider\n        android:name="androidx.core.content.FileProvider"\n        android:authorities="${applicationId}.fileprovider"\n        android:exported="false"\n        android:grantUriPermissions="true">\n        <meta-data\n            android:name="android.support.FILE_PROVIDER_PATHS"\n            android:resource="@xml/file_paths" />\n    </provider>\n    <service\n        android:name=".DownloadService"\n        android:foregroundServiceType="dataSync"\n        android:exported="false" />\n  </application>|g' "$MANIFEST"
+              echo "FileProvider y DownloadService añadidos al AndroidManifest.xml"
             fi
           fi
 
-          # Configurar MainActivity.kt para renderizado edge-to-edge, recorte y permisos de almacenamiento
+          # Configurar MainActivity.kt y DownloadService.kt para Foreground Service y UI inmersiva
           MAIN_ACTIVITY=$(find src-tauri/gen/android -name "MainActivity.kt" | head -n 1)
-          if [ -n "$MAIN_ACTIVITY" ] && [ -f "scripts/android/MainActivity.kt" ]; then
-            echo "Copiando MainActivity.kt personalizado a $MAIN_ACTIVITY..."
-            cp -f scripts/android/MainActivity.kt "$MAIN_ACTIVITY"
+          if [ -n "$MAIN_ACTIVITY" ]; then
+            KOTLIN_DIR=$(dirname "$MAIN_ACTIVITY")
+            if [ -f "scripts/android/MainActivity.kt" ]; then
+              echo "Copiando MainActivity.kt personalizado a $MAIN_ACTIVITY..."
+              cp -f scripts/android/MainActivity.kt "$MAIN_ACTIVITY"
+            fi
+            if [ -f "scripts/android/DownloadService.kt" ]; then
+              echo "Copiando DownloadService.kt a $KOTLIN_DIR/DownloadService.kt..."
+              cp -f scripts/android/DownloadService.kt "$KOTLIN_DIR/DownloadService.kt"
+            fi
           fi
 
           npx @tauri-apps/cli android build --apk --target aarch64 --ci

@@ -511,7 +511,7 @@ export function MobileSettingsPage() {
 
               <button
                 onClick={async () => {
-                  if (!window.confirm('⚠️ ¿Restablecer toda la base de datos limpia?')) return;
+                  if (!window.confirm('¿Restablecer toda la base de datos limpia?')) return;
                   setIsResettingDb(true);
                   try {
                     await resetDatabase();

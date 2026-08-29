@@ -22,6 +22,60 @@ import java.io.File
 
 class AndroidNativeBridge(private val activity: android.app.Activity) {
   @JavascriptInterface
+  fun startDownloadService(title: String, subtitle: String = "Iniciando descargas...", details: String = "") {
+    activity.runOnUiThread {
+      val intent = Intent(activity, DownloadService::class.java).apply {
+        action = "START"
+        putExtra("title", title)
+        putExtra("subtitle", subtitle)
+        putExtra("details", details)
+      }
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        activity.startForegroundService(intent)
+      } else {
+        activity.startService(intent)
+      }
+    }
+  }
+
+  @JavascriptInterface
+  fun updateDownloadNotification(title: String, subtitle: String, progress: Int, details: String) {
+    val intent = Intent(activity, DownloadService::class.java).apply {
+      action = "UPDATE"
+      putExtra("title", title)
+      putExtra("subtitle", subtitle)
+      putExtra("progress", progress)
+      putExtra("details", details)
+    }
+    activity.startService(intent)
+  }
+
+  @JavascriptInterface
+  fun stopDownloadService() {
+    activity.runOnUiThread {
+      val intent = Intent(activity, DownloadService::class.java).apply {
+        action = "STOP"
+      }
+      activity.startService(intent)
+    }
+  }
+
+  @JavascriptInterface
+  fun setKeepScreenOn(enabled: Boolean) {
+    activity.runOnUiThread {
+      try {
+        if (enabled) {
+          activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+          activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+      } catch (e: Exception) {
+        Log.e("AniCS", "Error toggling FLAG_KEEP_SCREEN_ON: ${e.message}")
+      }
+    }
+  }
+
+  @JavascriptInterface
   fun installApk(filePath: String) {
     activity.runOnUiThread {
       try {
@@ -102,8 +156,6 @@ class MainActivity : TauriActivity() {
 
     @Suppress("DEPRECATION")
     window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
-    @Suppress("DEPRECATION")
-    window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
     hideSystemBars()
 

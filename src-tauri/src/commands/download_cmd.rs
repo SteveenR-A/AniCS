@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, oneshot, Mutex};
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -13,7 +13,12 @@ use crate::downloader::HlsEngine;
 use crate::storage;
 use crate::AppState;
 
-type DownloadMap = Arc<Mutex<HashMap<String, tokio::task::JoinHandle<()>>>>;
+pub struct DownloadHandle {
+    pub task: tokio::task::JoinHandle<()>,
+    pub cancel_tx: oneshot::Sender<()>,
+}
+
+type DownloadMap = Arc<Mutex<HashMap<String, DownloadHandle>>>;
 
 pub struct DownloadManager {
     pub tasks: DownloadMap,
@@ -54,7 +59,222 @@ pub struct LocalAnimeFolder {
     pub episodes: Vec<LocalEpisodeItem>,
 }
 
-/// Iniciar una descarga (soporta tanto HLS .m3u8 como archivos directos MP4/MKV)
+pub enum PauseReason {
+    Completed,
+    UserPaused,
+}
+
+fn spawn_download(
+    download_id: String,
+    task_record: DownloadTask,
+    app_handle: AppHandle,
+    semaphore: Arc<tokio::sync::Semaphore>,
+    mut cancel_rx: oneshot::Receiver<()>,
+    tasks_map: DownloadMap,
+) -> tokio::task::JoinHandle<()> {
+    let (progress_tx, mut progress_rx) = mpsc::unbounded_channel::<DownloadProgress>();
+    let app_handle_clone = app_handle.clone();
+    let app_handle_finish = app_handle.clone();
+    let dl_id_task = download_id.clone();
+    let dl_id_cleanup = download_id.clone();
+
+    // Reenviar eventos de progreso hacia Tauri Event y actualizar DB periódicamente
+    tokio::spawn(async move {
+        let mut last_db_update = std::time::Instant::now();
+        while let Some(progress) = progress_rx.recv().await {
+            let _ = app_handle_clone.emit("download-progress", &progress);
+
+            if last_db_update.elapsed().as_millis() >= 800
+                || progress.status == DownloadStatus::Completed
+                || progress.status == DownloadStatus::Failed
+                || progress.status == DownloadStatus::Paused
+            {
+                let status_str = match progress.status {
+                    DownloadStatus::Queued => "queued",
+                    DownloadStatus::Downloading => "downloading",
+                    DownloadStatus::Paused => "paused",
+                    DownloadStatus::Completed => "completed",
+                    DownloadStatus::Failed => "failed",
+                    DownloadStatus::Canceled => "canceled",
+                };
+                let _ = storage::update_download_progress_db(
+                    &progress.id,
+                    status_str,
+                    progress.progress,
+                    progress.downloaded_bytes,
+                    progress.total_bytes,
+                    progress.error.as_deref(),
+                );
+                last_db_update = std::time::Instant::now();
+            }
+        }
+    });
+
+    tokio::spawn(async move {
+        // 1. Notificar en cola
+        let _ = progress_tx.send(DownloadProgress {
+            id: dl_id_task.clone(),
+            progress: task_record.progress,
+            speed_kbps: 0.0,
+            downloaded_bytes: task_record.downloaded_bytes,
+            total_bytes: task_record.total_bytes,
+            status: DownloadStatus::Queued,
+            error: None,
+        });
+
+        // 2. Esperar turno en el semáforo
+        let _permit = tokio::select! {
+            _ = &mut cancel_rx => {
+                let _ = storage::update_download_progress_db(
+                    &dl_id_task, "paused", task_record.progress, task_record.downloaded_bytes, task_record.total_bytes, None
+                );
+                let _ = app_handle_finish.emit("download-paused", serde_json::json!({ "id": dl_id_task }));
+                tasks_map.lock().await.remove(&dl_id_cleanup);
+                return;
+            }
+            permit_res = semaphore.acquire() => {
+                match permit_res {
+                    Ok(p) => p,
+                    Err(_) => {
+                        tasks_map.lock().await.remove(&dl_id_cleanup);
+                        return;
+                    }
+                }
+            }
+        };
+
+        // 3. Notificar inicio de descarga
+        let _ = progress_tx.send(DownloadProgress {
+            id: dl_id_task.clone(),
+            progress: task_record.progress,
+            speed_kbps: 0.0,
+            downloaded_bytes: task_record.downloaded_bytes,
+            total_bytes: task_record.total_bytes,
+            status: DownloadStatus::Downloading,
+            error: None,
+        });
+
+        let output_path = PathBuf::from(&task_record.output_path);
+        let stream_url = task_record.stream_url.clone();
+        let referer = task_record.referer.clone();
+
+        let is_mp4 = stream_url.contains(".mp4")
+            || stream_url.contains("mediafire.com")
+            || stream_url.contains("mp4upload")
+            || stream_url.contains("streamtape");
+
+        if is_mp4 {
+            let is_mediafire_page = stream_url.contains("mediafire.com")
+                && !stream_url.starts_with("https://download")
+                && !stream_url.starts_with("http://download")
+                && !stream_url.ends_with(".mp4")
+                && !stream_url.ends_with(".mkv");
+
+            let actual_url = if is_mediafire_page {
+                resolve_mediafire_url(&stream_url).await.unwrap_or_else(|| stream_url.clone())
+            } else {
+                stream_url.clone()
+            };
+
+            match download_direct_mp4(
+                &dl_id_task,
+                &actual_url,
+                referer.as_deref(),
+                &output_path,
+                task_record.downloaded_bytes,
+                &progress_tx,
+                &mut cancel_rx,
+            ).await {
+                Ok(PauseReason::UserPaused) => {
+                    let _ = app_handle_finish.emit("download-paused", serde_json::json!({ "id": dl_id_task }));
+                }
+                Ok(PauseReason::Completed) => {
+                    let _ = app_handle_finish.emit("download-completed", serde_json::json!({
+                        "id": dl_id_task,
+                        "path": output_path.to_string_lossy(),
+                    }));
+                    let _ = progress_tx.send(DownloadProgress {
+                        id: dl_id_task.clone(),
+                        progress: 100.0,
+                        speed_kbps: 0.0,
+                        downloaded_bytes: task_record.downloaded_bytes,
+                        total_bytes: task_record.total_bytes,
+                        status: DownloadStatus::Completed,
+                        error: None,
+                    });
+                }
+                Err(e) => {
+                    let _ = progress_tx.send(DownloadProgress {
+                        id: dl_id_task.clone(),
+                        progress: 0.0,
+                        speed_kbps: 0.0,
+                        downloaded_bytes: task_record.downloaded_bytes,
+                        total_bytes: task_record.total_bytes,
+                        status: DownloadStatus::Failed,
+                        error: Some(e.to_string()),
+                    });
+                }
+            }
+        } else {
+            // Descarga HLS
+            let engine = HlsEngine::new(
+                dl_id_task.clone(),
+                stream_url,
+                referer,
+                output_path.clone(),
+                progress_tx.clone(),
+            );
+
+            match engine.parse_playlist().await {
+                Ok(playlist) => {
+                    match engine.download(&playlist).await {
+                        Ok(path) => {
+                            let _ = app_handle_finish.emit("download-completed", serde_json::json!({
+                                "id": dl_id_task,
+                                "path": path.to_string_lossy(),
+                            }));
+                            let _ = progress_tx.send(DownloadProgress {
+                                id: dl_id_task.clone(),
+                                progress: 100.0,
+                                speed_kbps: 0.0,
+                                downloaded_bytes: task_record.downloaded_bytes,
+                                total_bytes: task_record.total_bytes,
+                                status: DownloadStatus::Completed,
+                                error: None,
+                            });
+                        }
+                        Err(e) => {
+                            let _ = progress_tx.send(DownloadProgress {
+                                id: dl_id_task.clone(),
+                                progress: 0.0,
+                                speed_kbps: 0.0,
+                                downloaded_bytes: task_record.downloaded_bytes,
+                                total_bytes: task_record.total_bytes,
+                                status: DownloadStatus::Failed,
+                                error: Some(e.to_string()),
+                            });
+                        }
+                    }
+                }
+                Err(e) => {
+                    let _ = progress_tx.send(DownloadProgress {
+                        id: dl_id_task.clone(),
+                        progress: 0.0,
+                        speed_kbps: 0.0,
+                        downloaded_bytes: task_record.downloaded_bytes,
+                        total_bytes: task_record.total_bytes,
+                        status: DownloadStatus::Failed,
+                        error: Some(format!("Error en stream HLS: {e}")),
+                    });
+                }
+            }
+        }
+
+        tasks_map.lock().await.remove(&dl_id_cleanup);
+    })
+}
+
+/// Iniciar una descarga y persistirla en SQLite
 #[tauri::command]
 pub async fn start_download(
     anime_title: String,
@@ -95,286 +315,140 @@ pub async fn start_download(
 
     let ext = if is_mp4 { "mp4" } else { "ts" };
     let output_path = anime_folder.join(format!("Ep{:03}.{}", episode_number, ext));
+    let output_path_str = output_path.to_string_lossy().to_string();
 
-    let (progress_tx, mut progress_rx) = mpsc::unbounded_channel::<DownloadProgress>();
+    let task_record = DownloadTask {
+        id: download_id.clone(),
+        anime_title,
+        episode_number,
+        stream_url,
+        referer,
+        output_path: output_path_str,
+        status: "queued".to_string(),
+        progress: 0.0,
+        downloaded_bytes: 0,
+        total_bytes: None,
+        error: None,
+        created_at: Utc::now().to_rfc3339(),
+    };
 
-    let dl_id_clone = download_id.clone();
-    let app_handle_clone = app_handle.clone();
+    // Guardar en base de datos SQLite
+    storage::save_download_task(&task_record).map_err(|e| e.to_string())?;
 
-    // Escuchar eventos de progreso y emitirlos al frontend
-    tokio::spawn(async move {
-        while let Some(progress) = progress_rx.recv().await {
-            let _ = app_handle_clone.emit("download-progress", &progress);
-        }
-    });
+    let (cancel_tx, cancel_rx) = oneshot::channel::<()>();
+    let tasks_map = state.download_manager.tasks.clone();
+    let handle = spawn_download(
+        download_id.clone(),
+        task_record,
+        app_handle,
+        state.download_manager.semaphore.clone(),
+        cancel_rx,
+        tasks_map.clone(),
+    );
 
-    let dl_id_for_task = download_id.clone();
-    let app_handle_finish = app_handle.clone();
-    let stream_url_clone = stream_url.clone();
-    let referer_clone = referer.clone();
-    let semaphore_clone = state.download_manager.semaphore.clone();
-
-    let handle = tokio::spawn(async move {
-        // 1. Notificar inmediatamente que la tarea está en cola
-        let _ = progress_tx.send(DownloadProgress {
-            id: dl_id_for_task.clone(),
-            progress: 0.0,
-            speed_kbps: 0.0,
-            downloaded_bytes: 0,
-            total_bytes: None,
-            status: DownloadStatus::Queued,
-            error: None,
-        });
-
-        // 2. Esperar turno en el semáforo (máx 2 activas simultáneas)
-        let _permit = match semaphore_clone.acquire().await {
-            Ok(p) => p,
-            Err(_) => return,
-        };
-
-        // 3. Notificar que comienza a descargar
-        let _ = progress_tx.send(DownloadProgress {
-            id: dl_id_for_task.clone(),
-            progress: 0.0,
-            speed_kbps: 0.0,
-            downloaded_bytes: 0,
-            total_bytes: None,
-            status: DownloadStatus::Downloading,
-            error: None,
-        });
-
-        if is_mp4 {
-            // Si es un enlace de página de MediaFire (no directo aún), resolverla para obtener el link de descarga directo
-            let is_mediafire_page = stream_url_clone.contains("mediafire.com")
-                && !stream_url_clone.starts_with("https://download")
-                && !stream_url_clone.starts_with("http://download")
-                && !stream_url_clone.ends_with(".mp4")
-                && !stream_url_clone.ends_with(".mkv");
-
-            let actual_url = if is_mediafire_page {
-                resolve_mediafire_url(&stream_url_clone).await.unwrap_or_else(|| stream_url_clone.clone())
-            } else {
-                stream_url_clone.clone()
-            };
-
-            // Descarga directa MP4 con DOWNLOAD_CLIENT
-            match download_direct_mp4(&dl_id_for_task, &actual_url, referer_clone.as_deref(), &output_path, &progress_tx).await {
-                Ok(_) => {
-                    let _ = app_handle_finish.emit("download-completed", serde_json::json!({
-                        "id": dl_id_for_task,
-                        "path": output_path.to_string_lossy(),
-                    }));
-                    let _ = progress_tx.send(DownloadProgress {
-                        id: dl_id_for_task,
-                        progress: 100.0,
-                        speed_kbps: 0.0,
-                        downloaded_bytes: 0,
-                        total_bytes: None,
-                        status: DownloadStatus::Completed,
-                        error: None,
-                    });
-                }
-                Err(e) => {
-                    let _ = progress_tx.send(DownloadProgress {
-                        id: dl_id_for_task,
-                        progress: 0.0,
-                        speed_kbps: 0.0,
-                        downloaded_bytes: 0,
-                        total_bytes: None,
-                        status: DownloadStatus::Failed,
-                        error: Some(e.to_string()),
-                    });
-                }
-            }
-        } else {
-            // Descarga HLS
-            let engine = HlsEngine::new(
-                dl_id_for_task.clone(),
-                stream_url_clone,
-                referer_clone,
-                output_path.clone(),
-                progress_tx.clone(),
-            );
-
-            match engine.parse_playlist().await {
-                Ok(playlist) => {
-                    match engine.download(&playlist).await {
-                        Ok(path) => {
-                            let _ = app_handle_finish.emit("download-completed", serde_json::json!({
-                                "id": dl_id_for_task,
-                                "path": path.to_string_lossy(),
-                            }));
-                            let _ = progress_tx.send(DownloadProgress {
-                                id: dl_id_for_task,
-                                progress: 100.0,
-                                speed_kbps: 0.0,
-                                downloaded_bytes: 0,
-                                total_bytes: None,
-                                status: DownloadStatus::Completed,
-                                error: None,
-                            });
-                        }
-                        Err(e) => {
-                            let _ = progress_tx.send(DownloadProgress {
-                                id: dl_id_for_task.clone(),
-                                progress: 0.0,
-                                speed_kbps: 0.0,
-                                downloaded_bytes: 0,
-                                total_bytes: None,
-                                status: DownloadStatus::Failed,
-                                error: Some(e.to_string()),
-                            });
-                        }
-                    }
-                }
-                Err(e) => {
-                    let _ = progress_tx.send(DownloadProgress {
-                        id: dl_id_for_task.clone(),
-                        progress: 0.0,
-                        speed_kbps: 0.0,
-                        downloaded_bytes: 0,
-                        total_bytes: None,
-                        status: DownloadStatus::Failed,
-                        error: Some(format!("Error en stream HLS: {e}")),
-                    });
-                }
-            }
-        }
-    });
-
-    // Guardar handle para permitir cancelación
-    state.download_manager.tasks.lock().await.insert(dl_id_clone, handle);
-
+    tasks_map.lock().await.insert(download_id.clone(), DownloadHandle { task: handle, cancel_tx });
     Ok(download_id)
 }
 
-
-
-/// Resuelve un enlace de MediaFire obteniendo el URL de descarga directa del archivo
-async fn resolve_mediafire_url(page_url: &str) -> Option<String> {
-    use regex::Regex;
-
-    let html = crate::scrapers::HTTP_CLIENT
-        .get(page_url)
-        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-        .send()
-        .await
-        .ok()?
-        .text()
-        .await
-        .ok()?;
-
-    // Patrón 1: href con download subdomain
-    let re1 = Regex::new(r#"href=["'](https?://download\d*\.mediafire\.com/[^"']+)["']"#).ok()?;
-    if let Some(cap) = re1.captures(&html) {
-        return cap.get(1).map(|m| m.as_str().to_string());
+/// Pausar una descarga activa
+#[tauri::command]
+pub async fn pause_download(
+    download_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let mut tasks = state.download_manager.tasks.lock().await;
+    if let Some(handle) = tasks.remove(&download_id) {
+        let _ = handle.cancel_tx.send(());
+    } else {
+        // Si no estaba en el mapa de tareas en memoria, actualizar directamente en SQLite
+        let _ = storage::update_download_progress_db(&download_id, "paused", 0.0, 0, None, None);
     }
-
-    // Patrón 2: botón de descarga con aria-label
-    let re2 = Regex::new(r#"aria-label=["']Download file["']\s+href=["']([^"']+)["']"#).ok();
-    if let Some(re) = re2 {
-        if let Some(cap) = re.captures(&html) {
-            return cap.get(1).map(|m| m.as_str().to_string());
-        }
-    }
-
-    // Patrón 3: id="downloadButton"
-    let re3 = Regex::new(r#"id=["']downloadButton["'][^>]+href=["']([^"']+)["']"#).ok();
-    if let Some(re) = re3 {
-        if let Some(cap) = re.captures(&html) {
-            return cap.get(1).map(|m| m.as_str().to_string());
-        }
-    }
-
-    None
-}
-
-async fn download_direct_mp4(
-    download_id: &str,
-    url: &str,
-    referer: Option<&str>,
-    output_path: &Path,
-    progress_tx: &mpsc::UnboundedSender<DownloadProgress>,
-) -> AppResult<()> {
-    use reqwest::header;
-    use tokio::fs::File;
-    use tokio::io::AsyncWriteExt;
-    use futures::StreamExt;
-    use std::time::Instant;
-
-    let mut req = crate::scrapers::DOWNLOAD_CLIENT.get(url);
-    if let Some(r) = referer {
-        req = req.header(header::REFERER, r);
-    } else if url.contains("jkanime") {
-        req = req.header(header::REFERER, "https://jkanime.net/");
-    }
-
-    let resp = req.send().await.map_err(AppError::Network)?;
-    if !resp.status().is_success() {
-        return Err(AppError::Download(format!("HTTP error {}", resp.status())));
-    }
-
-    // Verificar que la respuesta sea un video, no HTML
-    let content_type = resp.headers()
-        .get("content-type")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("")
-        .to_lowercase();
-
-    if content_type.contains("text/html") {
-        return Err(AppError::Download(
-            "El servidor devolvió HTML en vez del archivo. La URL no es directa.".to_string()
-        ));
-    }
-
-    let total_bytes = resp.content_length();
-    let mut file = File::create(output_path).await.map_err(AppError::Io)?;
-
-    let mut stream = resp.bytes_stream();
-    let mut downloaded = 0u64;
-    let mut last_emit = Instant::now();
-    let start_time = Instant::now();
-
-    while let Some(chunk_res) = stream.next().await {
-        let chunk = chunk_res.map_err(AppError::Network)?;
-        file.write_all(&chunk).await.map_err(AppError::Io)?;
-
-        let len = chunk.len() as u64;
-        downloaded += len;
-
-        if last_emit.elapsed().as_millis() >= 300 {
-            let elapsed_secs = start_time.elapsed().as_secs_f64();
-            let speed_kbps = if elapsed_secs > 0.0 {
-                (downloaded as f64 / 1024.0) / elapsed_secs
-            } else {
-                0.0
-            };
-
-            let progress = if let Some(tot) = total_bytes {
-                if tot > 0 { (downloaded as f32 / tot as f32) * 100.0 } else { 0.0 }
-            } else {
-                0.0
-            };
-
-            let _ = progress_tx.send(DownloadProgress {
-                id: download_id.to_string(),
-                progress,
-                speed_kbps,
-                downloaded_bytes: downloaded,
-                total_bytes,
-                status: DownloadStatus::Downloading,
-                error: None,
-            });
-
-            last_emit = Instant::now();
-        }
-    }
-
-    file.flush().await.map_err(AppError::Io)?;
     Ok(())
 }
 
-/// Cancelar una descarga en curso
+/// Reanudar una descarga pausada o interrumpida
+#[tauri::command]
+pub async fn resume_download(
+    download_id: String,
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let all = storage::get_all_downloads_db().map_err(|e| e.to_string())?;
+    let task_record = all.into_iter()
+        .find(|t| t.id == download_id)
+        .ok_or_else(|| "Descarga no encontrada".to_string())?;
+
+    // Si ya está activa en memoria, no volver a iniciar
+    let mut tasks = state.download_manager.tasks.lock().await;
+    if tasks.contains_key(&download_id) {
+        return Ok(());
+    }
+
+    let mut record = task_record;
+    record.status = "queued".to_string();
+    record.error = None;
+    storage::save_download_task(&record).map_err(|e| e.to_string())?;
+
+    let (cancel_tx, cancel_rx) = oneshot::channel::<()>();
+    let tasks_map = state.download_manager.tasks.clone();
+    let handle = spawn_download(
+        download_id.clone(),
+        record,
+        app_handle,
+        state.download_manager.semaphore.clone(),
+        cancel_rx,
+        tasks_map.clone(),
+    );
+
+    tasks.insert(download_id, DownloadHandle { task: handle, cancel_tx });
+    Ok(())
+}
+
+/// Reiniciar una descarga fallida desde cero
+#[tauri::command]
+pub async fn retry_download(
+    download_id: String,
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let all = storage::get_all_downloads_db().map_err(|e| e.to_string())?;
+    let task_record = all.into_iter()
+        .find(|t| t.id == download_id)
+        .ok_or_else(|| "Descarga no encontrada".to_string())?;
+
+    // Eliminar archivo previo (.mp4 o .part) si existe
+    let p = Path::new(&task_record.output_path);
+    if p.exists() {
+        let _ = fs::remove_file(p);
+    }
+    let part_p = PathBuf::from(format!("{}.part", task_record.output_path));
+    if part_p.exists() {
+        let _ = fs::remove_file(part_p);
+    }
+
+    let mut record = task_record;
+    record.downloaded_bytes = 0;
+    record.progress = 0.0;
+    record.status = "queued".to_string();
+    record.error = None;
+    storage::save_download_task(&record).map_err(|e| e.to_string())?;
+
+    let (cancel_tx, cancel_rx) = oneshot::channel::<()>();
+    let tasks_map = state.download_manager.tasks.clone();
+    let handle = spawn_download(
+        download_id.clone(),
+        record,
+        app_handle,
+        state.download_manager.semaphore.clone(),
+        cancel_rx,
+        tasks_map.clone(),
+    );
+
+    state.download_manager.tasks.lock().await.insert(download_id, DownloadHandle { task: handle, cancel_tx });
+    Ok(())
+}
+
+/// Cancelar una descarga en curso y marcarla como cancelada
 #[tauri::command]
 pub async fn cancel_download(
     download_id: String,
@@ -382,9 +456,256 @@ pub async fn cancel_download(
 ) -> Result<(), String> {
     let mut tasks = state.download_manager.tasks.lock().await;
     if let Some(handle) = tasks.remove(&download_id) {
-        handle.abort();
+        let _ = handle.cancel_tx.send(());
     }
+    let _ = storage::delete_download_task_db(&download_id);
     Ok(())
+}
+
+/// Eliminar el registro de una descarga de SQLite (y opcionalmente su archivo)
+#[tauri::command]
+pub async fn delete_download_record(
+    download_id: String,
+    delete_file: bool,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let mut tasks = state.download_manager.tasks.lock().await;
+    if let Some(handle) = tasks.remove(&download_id) {
+        let _ = handle.cancel_tx.send(());
+    }
+    drop(tasks);
+
+    if delete_file {
+        if let Ok(all) = storage::get_all_downloads_db() {
+            if let Some(task) = all.iter().find(|t| t.id == download_id) {
+                let p = Path::new(&task.output_path);
+                if p.exists() {
+                    let _ = fs::remove_file(p);
+                }
+                let part_p = PathBuf::from(format!("{}.part", task.output_path));
+                if part_p.exists() {
+                    let _ = fs::remove_file(part_p);
+                }
+            }
+        }
+    }
+
+    storage::delete_download_task_db(&download_id).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Devuelve todas las descargas registradas en SQLite
+#[tauri::command]
+pub fn get_all_downloads() -> Result<Vec<DownloadTask>, String> {
+    storage::get_all_downloads_db().map_err(|e| e.to_string())
+}
+
+/// Descarga directa MP4 con soporte de Range Requests y señal de cancelación
+async fn download_direct_mp4(
+    download_id: &str,
+    url: &str,
+    referer: Option<&str>,
+    output_path: &Path,
+    already_downloaded: u64,
+    progress_tx: &mpsc::UnboundedSender<DownloadProgress>,
+    cancel_rx: &mut oneshot::Receiver<()>,
+) -> AppResult<PauseReason> {
+    use reqwest::header;
+    use tokio::io::AsyncWriteExt;
+    use futures::StreamExt;
+    use std::time::Instant;
+
+    let mut downloaded = already_downloaded;
+    let mut total_bytes: Option<u64> = None;
+    let mut consecutive_stalls = 0u32;
+    const MAX_STALL_RETRIES: u32 = 3;
+    let start_time = Instant::now();
+    let mut last_emit = Instant::now();
+
+    'connection_loop: loop {
+        let mut req = crate::scrapers::DOWNLOAD_CLIENT.get(url);
+
+        if let Some(r) = referer {
+            req = req.header(header::REFERER, r);
+        } else if url.contains("jkanime") {
+            req = req.header(header::REFERER, "https://jkanime.net/");
+        }
+
+        let part_path = PathBuf::from(format!("{}.part", output_path.to_string_lossy()));
+
+        let offset = if downloaded > 0 && part_path.exists() {
+            req = req.header(header::RANGE, format!("bytes={}-", downloaded));
+            downloaded
+        } else {
+            0
+        };
+
+        let connect_fut = req.send();
+        let resp = match tokio::time::timeout(std::time::Duration::from_secs(15), connect_fut).await {
+            Ok(Ok(r)) => r,
+            Ok(Err(e)) => {
+                consecutive_stalls += 1;
+                if consecutive_stalls > MAX_STALL_RETRIES {
+                    return Err(AppError::Network(e));
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(1000 * consecutive_stalls as u64)).await;
+                continue 'connection_loop;
+            }
+            Err(_) => {
+                consecutive_stalls += 1;
+                if consecutive_stalls > MAX_STALL_RETRIES {
+                    return Err(AppError::Download("El servidor no responde al conectar (Timeout)".to_string()));
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(1000 * consecutive_stalls as u64)).await;
+                continue 'connection_loop;
+            }
+        };
+
+        let status = resp.status();
+        let supports_range = status.as_u16() == 206;
+        if !status.is_success() {
+            return Err(AppError::Download(format!("HTTP error {}", status)));
+        }
+
+        let content_type = resp.headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_lowercase();
+        if content_type.contains("text/html") {
+            return Err(AppError::Download(
+                "El servidor devolvió HTML en vez del archivo. La URL ha expirado o no es directa.".to_string(),
+            ));
+        }
+
+        if total_bytes.is_none() {
+            if let Some(len) = resp.content_length() {
+                total_bytes = Some(if supports_range { len + offset } else { len });
+            }
+        }
+
+        let mut file = if supports_range && offset > 0 {
+            tokio::fs::OpenOptions::new()
+                .append(true)
+                .open(&part_path)
+                .await
+                .map_err(AppError::Io)?
+        } else {
+            downloaded = 0;
+            if let Some(parent) = part_path.parent() {
+                let _ = tokio::fs::create_dir_all(parent).await;
+            }
+            tokio::fs::File::create(&part_path)
+                .await
+                .map_err(AppError::Io)?
+        };
+
+        let mut stream = resp.bytes_stream();
+
+        loop {
+            tokio::select! {
+                _ = &mut *cancel_rx => {
+                    file.flush().await.map_err(AppError::Io)?;
+                    let _ = progress_tx.send(DownloadProgress {
+                        id: download_id.to_string(),
+                        progress: total_bytes.map(|t| (downloaded as f32 / t as f32) * 100.0).unwrap_or(0.0),
+                        speed_kbps: 0.0,
+                        downloaded_bytes: downloaded,
+                        total_bytes,
+                        status: DownloadStatus::Paused,
+                        error: None,
+                    });
+                    return Ok(PauseReason::UserPaused);
+                }
+                chunk_res = tokio::time::timeout(std::time::Duration::from_secs(12), stream.next()) => {
+                    match chunk_res {
+                        Err(_timeout) => {
+                            // No llegaron datos durante 12s
+                            let _ = file.flush().await;
+                            consecutive_stalls += 1;
+                            if consecutive_stalls > MAX_STALL_RETRIES {
+                                return Err(AppError::Download(
+                                    "El servidor de video se detuvo y no envió más datos (Timeout)".to_string(),
+                                ));
+                            }
+                            tokio::time::sleep(std::time::Duration::from_millis(800 * consecutive_stalls as u64)).await;
+                            continue 'connection_loop;
+                        }
+                        Ok(None) => {
+                            // Flujo finalizado con éxito: renombrar .part a .mp4 final
+                            file.flush().await.map_err(AppError::Io)?;
+                            drop(file);
+                            if let Err(_) = tokio::fs::rename(&part_path, output_path).await {
+                                tokio::fs::copy(&part_path, output_path).await.map_err(AppError::Io)?;
+                                let _ = tokio::fs::remove_file(&part_path).await;
+                            }
+                            return Ok(PauseReason::Completed);
+                        }
+                        Ok(Some(Err(e))) => {
+                            let _ = file.flush().await;
+                            consecutive_stalls += 1;
+                            if consecutive_stalls > MAX_STALL_RETRIES {
+                                return Err(AppError::Network(e));
+                            }
+                            tokio::time::sleep(std::time::Duration::from_millis(800 * consecutive_stalls as u64)).await;
+                            continue 'connection_loop;
+                        }
+                        Ok(Some(Ok(chunk))) => {
+                            consecutive_stalls = 0;
+                            file.write_all(&chunk).await.map_err(AppError::Io)?;
+                            downloaded += chunk.len() as u64;
+
+                            if last_emit.elapsed().as_millis() >= 300 {
+                                let elapsed = start_time.elapsed().as_secs_f64();
+                                let speed = if elapsed > 0.0 {
+                                    ((downloaded - already_downloaded) as f64 / 1024.0) / elapsed
+                                } else {
+                                    0.0
+                                };
+
+                                let progress = total_bytes
+                                    .filter(|&t| t > 0)
+                                    .map(|t| (downloaded as f32 / t as f32) * 100.0)
+                                    .unwrap_or(0.0);
+
+                                let _ = progress_tx.send(DownloadProgress {
+                                    id: download_id.to_string(),
+                                    progress,
+                                    speed_kbps: speed,
+                                    downloaded_bytes: downloaded,
+                                    total_bytes,
+                                    status: DownloadStatus::Downloading,
+                                    error: None,
+                                });
+                                last_emit = Instant::now();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Resuelve un enlace de MediaFire obteniendo el URL de descarga directa del archivo
+async fn resolve_mediafire_url(page_url: &str) -> Option<String> {
+    use regex::Regex;
+    let html = crate::scrapers::HTTP_CLIENT
+        .get(page_url)
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+        .send().await.ok()?.text().await.ok()?;
+
+    let re1 = Regex::new(r#"href=["'](https?://download\d*\.mediafire\.com/[^"']+)["']"#).ok()?;
+    if let Some(cap) = re1.captures(&html) {
+        return cap.get(1).map(|m| m.as_str().to_string());
+    }
+    let re2 = Regex::new(r#"id=["']downloadButton["'][^>]+href=["']([^"']+)["']"#).ok();
+    if let Some(re) = re2 {
+        if let Some(cap) = re.captures(&html) {
+            return cap.get(1).map(|m| m.as_str().to_string());
+        }
+    }
+    None
 }
 
 /// Obtiene el directorio de descargas predeterminado.
@@ -526,7 +847,12 @@ pub async fn scan_local_downloads(
                     groups.insert(clean_title, (path, episodes));
                 }
             } else if path.is_file() {
-                // Archivo suelto en raíz
+                // Archivo suelto en raíz (ignorar archivos temporales o incompletos)
+                let file_name_lower = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_lowercase();
+                if file_name_lower.ends_with(".part") || file_name_lower.ends_with(".tmp") || file_name_lower.ends_with(".downloading") {
+                    continue;
+                }
+
                 if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
                     if ["mp4", "mkv", "ts", "webm", "avi"].contains(&ext.to_lowercase().as_str()) {
                         let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("video").to_string();
@@ -854,6 +1180,11 @@ async fn scan_episodes_in_dir(
         while let Ok(Some(entry)) = entries.next_entry().await {
             let path = entry.path();
             if path.is_file() {
+                let file_name_lower = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_lowercase();
+                if file_name_lower.ends_with(".part") || file_name_lower.ends_with(".tmp") || file_name_lower.ends_with(".downloading") {
+                    continue;
+                }
+
                 if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
                     if ["mp4", "mkv", "ts", "webm", "avi"].contains(&ext.to_lowercase().as_str()) {
                         if let Ok(meta) = tokio::fs::metadata(&path).await {

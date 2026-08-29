@@ -688,7 +688,7 @@ export function DesktopSettingsPage() {
 
             <button
               onClick={async () => {
-                if (!window.confirm('⚠️ ¿Estás seguro de restablecer la base de datos completa? Se limpiará el historial y favoritos de forma segura y se recreará la base de datos limpia.')) return;
+                if (!window.confirm('¿Estás seguro de restablecer la base de datos completa? Se limpiará el historial y favoritos de forma segura y se recreará la base de datos limpia.')) return;
                 setIsResettingDb(true);
                 try {
                   await resetDatabase();

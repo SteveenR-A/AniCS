@@ -192,19 +192,18 @@ pub struct DownloadProgress {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[allow(dead_code)]
 pub struct DownloadTask {
     pub id: String,
     pub anime_title: String,
     pub episode_number: u32,
-    pub episode_url: String,
-    pub server_name: String,
-    pub file_path: String,
-    pub total_bytes: Option<u64>,
-    pub downloaded_bytes: u64,
+    pub stream_url: String,
+    pub referer: Option<String>,
+    pub output_path: String,
+    /// "queued" | "downloading" | "paused" | "completed" | "failed" | "canceled"
+    pub status: String,
     pub progress: f32, // 0.0 - 100.0
-    pub speed_bytes_per_sec: u64,
-    pub status: DownloadStatus,
-    pub error_message: Option<String>,
+    pub downloaded_bytes: u64,
+    pub total_bytes: Option<u64>,
+    pub error: Option<String>,
     pub created_at: String,
 }

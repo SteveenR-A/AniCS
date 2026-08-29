@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Clock, Trash2, Film, Bookmark, BookmarkX, Download, Inbox, History,
   ArrowDownCircle, HardDrive, Play, FolderOpen, RefreshCw, Search, Folder, FileVideo,
-  ChevronDown, ChevronUp, Check, Eye, EyeOff
+  ChevronDown, ChevronUp, Check, Eye, EyeOff, Pause, RotateCcw, Loader2, AlertCircle
 } from 'lucide-react';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { convertFileSrc } from '@tauri-apps/api/core';
@@ -280,7 +280,10 @@ export function DesktopFavoritesPage() {
 // ──────────────────────────────────────────
 export function DesktopDownloadsPage() {
   const navigate = useNavigate();
-  const { tasks, cancelTask, removeTask, expandedFolders, toggleFolder } = useDownloadStore();
+  const {
+    tasks, pauseTask, resumeTask, retryTask, cancelTask, removeTask,
+    expandedFolders, toggleFolder
+  } = useDownloadStore();
   const {
     openPlayer, setCurrentEpisode, setCurrentAnime, setServers, setResolvedMedia, resetPlayback
   } = usePlayerStore();
@@ -454,78 +457,71 @@ export function DesktopDownloadsPage() {
               display: 'flex', alignItems: 'center', gap: 6,
             }}
           >
-            <ArrowDownCircle size={15} /> Cola de Descargas ({activeTasks.length})
+            <ArrowDownCircle size={15} /> Cola de Descarga ({activeTasks.length})
           </button>
         </div>
       </div>
 
+      {/* TAB 1: Carpetas en Disco */}
       {activeTab === 'local' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+        <div>
+          {/* Barra de Directorio */}
           <div style={{
             background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
-            borderRadius: 'var(--radius-lg)', padding: '16px 20px',
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap',
+            borderRadius: 'var(--radius-lg)', padding: '14px 20px', marginBottom: 20,
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap',
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, flex: 1 }}>
-              <FolderOpen size={22} color="var(--accent-primary)" style={{ flexShrink: 0 }} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 }}>
+              <HardDrive size={18} color="var(--accent-primary)" />
               <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                  Directorio Local de Descargas
-                </div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {downloadFolder || 'Cargando ubicación...'}
-                </div>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', textTransform: 'uppercase', fontWeight: 700 }}>
+                  Ubicación actual de guardado
+                </span>
+                <span style={{ fontSize: 13, fontWeight: 600, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' }}>
+                  {downloadFolder || 'Cargando directorio...'}
+                </span>
               </div>
             </div>
-
             <div style={{ display: 'flex', gap: 10 }}>
-              <button
-                disabled={isScanning}
-                onClick={() => loadLocalFolders()}
-                style={{
-                  background: 'var(--bg-elevated)', border: '1px solid var(--border-moderate)',
-                  borderRadius: 'var(--radius-md)', padding: '9px 16px',
-                  color: 'var(--text-primary)', cursor: 'pointer', fontSize: 12, fontWeight: 600,
-                  display: 'flex', alignItems: 'center', gap: 6,
-                }}
-              >
-                <RefreshCw size={14} className={isScanning ? 'animate-spin' : ''} />
-                {isScanning ? 'Escaneando...' : 'Recargar Carpetas'}
-              </button>
-
               <button
                 onClick={handleSelectFolder}
                 style={{
-                  background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))',
-                  border: 'none', borderRadius: 'var(--radius-md)', padding: '9px 18px',
-                  color: 'white', cursor: 'pointer', fontSize: 12, fontWeight: 700,
-                  display: 'flex', alignItems: 'center', gap: 6,
+                  background: 'var(--bg-elevated)', border: '1px solid var(--border-moderate)',
+                  borderRadius: 'var(--radius-md)', padding: '8px 14px',
+                  color: 'var(--text-primary)', fontSize: 12, fontWeight: 600,
+                  cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
                 }}
               >
-                <FolderOpen size={14} /> Cambiar Carpeta
+                <FolderOpen size={14} /> Cambiar carpeta
+              </button>
+              <button
+                onClick={() => loadLocalFolders()}
+                disabled={isScanning}
+                style={{
+                  background: 'var(--bg-elevated)', border: '1px solid var(--border-moderate)',
+                  borderRadius: 'var(--radius-md)', padding: '8px 14px',
+                  color: 'var(--text-primary)', fontSize: 12, fontWeight: 600,
+                  cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
+                }}
+              >
+                <RefreshCw size={14} className={isScanning ? 'animate-spin' : ''} />
+                {isScanning ? 'Escaneando...' : 'Actualizar'}
               </button>
             </div>
           </div>
 
+          {/* Listado de Carpetas / Animes */}
           {animeFolders.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '80px 20px', background: 'var(--bg-surface)', borderRadius: 'var(--radius-xl)', border: '1px solid var(--border-subtle)' }}>
-              <Folder size={54} style={{ color: 'var(--text-muted)', margin: '0 auto 14px', opacity: 0.5 }} />
-              <p style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 6 }}>
-                No se encontraron carpetas de anime
+            <div style={{
+              textAlign: 'center', padding: '80px 20px',
+              background: 'var(--bg-surface)', borderRadius: 'var(--radius-xl)',
+              border: '1px dashed var(--border-subtle)',
+            }}>
+              <Folder size={48} color="var(--text-muted)" style={{ margin: '0 auto 12px', opacity: 0.5 }} />
+              <h3 style={{ fontSize: 18, fontWeight: 700, margin: '0 0 6px' }}>No hay animes descargados</h3>
+              <p style={{ color: 'var(--text-muted)', fontSize: 13, margin: 0 }}>
+                Los episodios que descargues se organizarán automáticamente en subcarpetas aquí.
               </p>
-              <p style={{ fontSize: 14, color: 'var(--text-muted)', maxWidth: 500, margin: '0 auto 20px' }}>
-                Cada anime descargado se organiza automáticamente en su propia subcarpeta con sus episodios (.mp4, .mkv, .ts).
-              </p>
-              <button
-                onClick={() => loadLocalFolders()}
-                style={{
-                  background: 'var(--bg-elevated)', border: '1px solid var(--border-moderate)',
-                  borderRadius: 'var(--radius-md)', padding: '10px 20px',
-                  color: 'var(--text-primary)', cursor: 'pointer', fontSize: 13, fontWeight: 600,
-                }}
-              >
-                <RefreshCw size={14} style={{ display: 'inline', marginRight: 6 }} /> Volver a escanear
-              </button>
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -535,208 +531,201 @@ export function DesktopDownloadsPage() {
                   <div
                     key={anime.folderPath}
                     style={{
-                      background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
-                      borderRadius: 'var(--radius-xl)', overflow: 'hidden',
-                      boxShadow: 'var(--shadow-subtle)',
+                      background: 'var(--bg-surface)',
+                      border: '1px solid var(--border-subtle)',
+                      borderRadius: 'var(--radius-lg)',
+                      overflow: 'hidden',
+                      transition: 'border-color 0.2s ease',
                     }}
                   >
+                    {/* Encabezado del Anime */}
                     <div
                       onClick={() => toggleFolder(anime.folderPath)}
                       style={{
-                        padding: '16px 20px', cursor: 'pointer',
-                        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 18,
+                        padding: '14px 20px',
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        cursor: 'pointer', gap: 16,
                         background: isExpanded ? 'var(--bg-elevated)' : 'transparent',
-                        transition: 'background 0.15s ease',
+                        borderBottom: isExpanded ? '1px solid var(--border-subtle)' : 'none',
                       }}
                     >
                       <div style={{ display: 'flex', alignItems: 'center', gap: 16, minWidth: 0, flex: 1 }}>
                         <div style={{
-                          width: 52, height: 72, borderRadius: 'var(--radius-md)',
+                          width: 48, height: 68, borderRadius: 'var(--radius-sm)',
                           overflow: 'hidden', flexShrink: 0, background: 'var(--bg-elevated)',
-                          border: '1px solid var(--border-subtle)', position: 'relative',
                         }}>
                           {anime.coverImage ? (
                             <CachedImage
                               src={anime.coverImage}
                               alt={anime.animeTitle}
-                              fallbackIconSize={24}
                               style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                             />
                           ) : (
-                            <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent-primary)' }}>
+                            <div style={{
+                              width: '100%', height: '100%', display: 'flex',
+                              alignItems: 'center', justifyContent: 'center', color: 'var(--accent-primary)',
+                            }}>
                               <Film size={24} />
                             </div>
                           )}
                         </div>
 
                         <div style={{ minWidth: 0 }}>
-                          <h3 style={{ fontSize: 17, fontWeight: 800, margin: 0, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {anime.animeTitle}
                           </h3>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8, flexWrap: 'wrap' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 6, flexWrap: 'wrap' }}>
                             <span style={{
                               background: 'var(--accent-primary)', color: 'white',
-                              fontSize: 11, fontWeight: 800, padding: '3px 10px', borderRadius: 'var(--radius-full)',
+                              fontSize: 11, fontWeight: 800, padding: '2px 8px', borderRadius: 'var(--radius-full)',
                             }}>
-                              {anime.totalEpisodes} {anime.totalEpisodes === 1 ? 'episodio' : 'episodios'}
+                              {anime.totalEpisodes} episodio{anime.totalEpisodes === 1 ? '' : 's'}
                             </span>
-                            <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>
-                              {anime.totalSizeFormatted}
+                            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                              Espacio total: <strong style={{ color: 'var(--text-secondary)' }}>{anime.totalSizeFormatted}</strong>
                             </span>
                           </div>
                         </div>
                       </div>
 
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }} onClick={e => e.stopPropagation()}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }} onClick={e => e.stopPropagation()}>
                         <button
                           onClick={() => handleSearchOnline(anime)}
-                          title="Buscar en catálogo online"
+                          title="Buscar serie online para más info/episodios"
                           style={{
-                            padding: '8px 14px', borderRadius: 'var(--radius-md)',
-                            background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
-                            color: 'var(--text-secondary)', fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                            display: 'flex', alignItems: 'center', gap: 6,
+                            background: 'var(--bg-elevated)', border: '1px solid var(--border-moderate)',
+                            borderRadius: 'var(--radius-md)', padding: '6px 12px',
+                            color: 'var(--text-secondary)', fontSize: 12, fontWeight: 600,
+                            cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5,
                           }}
                         >
-                          <Search size={14} /> Buscar online
+                          <Search size={13} /> Online
                         </button>
-
                         <button
                           onClick={() => handleDeleteAnimeFolder(anime.folderPath)}
-                          title="Eliminar carpeta de anime"
+                          title="Eliminar toda la serie descargada"
                           style={{
-                            padding: '8px 12px', borderRadius: 'var(--radius-md)',
-                            background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.25)',
+                            background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)',
+                            borderRadius: 'var(--radius-md)', padding: '6px 10px',
                             color: '#f87171', fontSize: 12, cursor: 'pointer',
-                            display: 'flex', alignItems: 'center',
                           }}
                         >
-                          <Trash2 size={15} />
+                          <Trash2 size={14} />
                         </button>
-
                         <button
                           onClick={() => toggleFolder(anime.folderPath)}
                           style={{
                             background: 'none', border: 'none', color: 'var(--text-muted)',
-                            cursor: 'pointer', padding: 4, display: 'flex', alignItems: 'center',
+                            cursor: 'pointer', padding: 6, display: 'flex', alignItems: 'center',
                           }}
                         >
-                          {isExpanded ? <ChevronUp size={22} /> : <ChevronDown size={22} />}
+                          {isExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
                         </button>
                       </div>
                     </div>
 
+                    {/* Lista desplegable de Episodios del Anime */}
                     <AnimatePresence>
                       {isExpanded && (
                         <motion.div
                           initial={{ opacity: 0, height: 0 }}
                           animate={{ opacity: 1, height: 'auto' }}
                           exit={{ opacity: 0, height: 0 }}
-                          style={{
-                            overflow: 'hidden', borderTop: '1px solid var(--border-subtle)',
-                            background: 'rgba(10,11,15,0.4)',
-                          }}
+                          style={{ background: 'rgba(10, 11, 15, 0.4)' }}
                         >
-                          <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-                            {anime.episodes.map((ep) => {
-                              const isCompleted = ep.watchStatus === 'completed';
-                              const isInProgress = ep.watchStatus === 'in_progress';
-
-                              return (
-                                <div
-                                  key={ep.filePath}
-                                  style={{
-                                    background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
-                                    borderRadius: 'var(--radius-lg)', padding: '12px 18px',
-                                    display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14,
-                                  }}
-                                >
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: 14, minWidth: 0, flex: 1 }}>
-                                    <div style={{
-                                      width: 36, height: 36, borderRadius: 'var(--radius-sm)',
-                                      background: isCompleted ? 'rgba(16,185,129,0.15)' : isInProgress ? 'rgba(59,130,246,0.15)' : 'var(--bg-elevated)',
-                                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                      color: isCompleted ? 'var(--accent-success)' : isInProgress ? 'var(--accent-primary)' : 'var(--text-muted)',
-                                      flexShrink: 0,
-                                    }}>
-                                      <FileVideo size={18} />
-                                    </div>
-
-                                    <div style={{ minWidth: 0 }}>
-                                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                        <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>
-                                          Episodio {ep.episodeNumber}
-                                        </span>
-                                        <span style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                          {ep.fileName}
-                                        </span>
-                                      </div>
-
-                                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
-                                        {isCompleted ? (
-                                          <span style={{
-                                            fontSize: 11, fontWeight: 800, color: 'var(--accent-success)',
-                                            background: 'rgba(16,185,129,0.15)', padding: '2px 8px', borderRadius: 4,
-                                            display: 'flex', alignItems: 'center', gap: 4,
-                                          }}>
-                                            <Check size={12} /> Visto
-                                          </span>
-                                        ) : isInProgress ? (
-                                          <span style={{
-                                            fontSize: 11, fontWeight: 800, color: 'var(--accent-primary)',
-                                            background: 'rgba(59,130,246,0.15)', padding: '2px 8px', borderRadius: 4,
-                                            display: 'flex', alignItems: 'center', gap: 4,
-                                          }}>
-                                            <Eye size={12} /> En progreso ({Math.round(ep.watchProgress * 100)}%)
-                                          </span>
-                                        ) : (
-                                          <span style={{
-                                            fontSize: 11, fontWeight: 700, color: 'var(--text-muted)',
-                                            background: 'var(--bg-elevated)', padding: '2px 8px', borderRadius: 4,
-                                            display: 'flex', alignItems: 'center', gap: 4,
-                                          }}>
-                                            <EyeOff size={12} /> No visto
-                                          </span>
-                                        )}
-
-                                        <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>
-                                          {ep.fileSizeFormatted}
-                                        </span>
-                                        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>• {ep.modifiedAt}</span>
-                                      </div>
-                                    </div>
+                          {anime.episodes.map((ep) => {
+                            const isCompleted = ep.watchStatus === 'completed';
+                            const isInProgress = ep.watchStatus === 'in_progress';
+                            return (
+                              <div
+                                key={ep.filePath}
+                                style={{
+                                  padding: '12px 24px',
+                                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                  borderBottom: '1px solid var(--border-subtle)',
+                                  gap: 16,
+                                }}
+                              >
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, flex: 1 }}>
+                                  <div style={{
+                                    width: 32, height: 32, borderRadius: 'var(--radius-sm)',
+                                    background: isCompleted ? 'rgba(16, 185, 129, 0.15)' : 'var(--bg-elevated)',
+                                    color: isCompleted ? '#10b981' : 'var(--text-muted)',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                                  }}>
+                                    {isCompleted ? <Check size={16} /> : <FileVideo size={16} />}
                                   </div>
 
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                    <button
-                                      onClick={() => handlePlayEpisode(ep, anime)}
-                                      style={{
-                                        padding: '8px 16px', borderRadius: 'var(--radius-md)',
-                                        background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))',
-                                        border: 'none', color: 'white',
-                                        fontSize: 13, fontWeight: 700, cursor: 'pointer',
-                                        display: 'flex', alignItems: 'center', gap: 6,
-                                      }}
-                                    >
-                                      <Play size={14} fill="white" /> Reproducir
-                                    </button>
-
-                                    <button
-                                      onClick={() => handleDeleteEpisode(ep.filePath, anime.animeTitle)}
-                                      title="Eliminar episodio del disco"
-                                      style={{
-                                        padding: '8px 10px', borderRadius: 'var(--radius-md)',
-                                        background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
-                                        color: 'var(--text-muted)', cursor: 'pointer',
-                                      }}
-                                    >
-                                      <Trash2 size={14} />
-                                    </button>
+                                  <div style={{ minWidth: 0 }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                      <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>
+                                        Episodio {ep.episodeNumber}
+                                      </span>
+                                      <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                                        ({ep.fileSizeFormatted})
+                                      </span>
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
+                                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                                        {ep.modifiedAt}
+                                      </span>
+                                      {isCompleted ? (
+                                        <span style={{
+                                          fontSize: 10, fontWeight: 800, color: 'var(--accent-success)',
+                                          background: 'rgba(16,185,129,0.15)', padding: '1px 6px', borderRadius: 4,
+                                          display: 'inline-flex', alignItems: 'center', gap: 3,
+                                        }}>
+                                          <Check size={10} /> Visto
+                                        </span>
+                                      ) : isInProgress ? (
+                                        <span style={{
+                                          fontSize: 10, fontWeight: 800, color: 'var(--accent-primary)',
+                                          background: 'rgba(59,130,246,0.15)', padding: '1px 6px', borderRadius: 4,
+                                          display: 'inline-flex', alignItems: 'center', gap: 3,
+                                        }}>
+                                          <Eye size={10} /> En progreso ({Math.round(ep.watchProgress * 100)}%)
+                                        </span>
+                                      ) : (
+                                        <span style={{
+                                          fontSize: 10, fontWeight: 700, color: 'var(--text-muted)',
+                                          background: 'var(--bg-elevated)', padding: '1px 6px', borderRadius: 4,
+                                          display: 'inline-flex', alignItems: 'center', gap: 3,
+                                        }}>
+                                          <EyeOff size={10} /> No visto
+                                        </span>
+                                      )}
+                                    </div>
                                   </div>
                                 </div>
-                              );
-                            })}
-                          </div>
+
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                  <button
+                                    onClick={() => handlePlayEpisode(ep, anime)}
+                                    style={{
+                                      background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))',
+                                      border: 'none', borderRadius: 'var(--radius-md)',
+                                      padding: '7px 16px', color: 'white',
+                                      fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                                      display: 'flex', alignItems: 'center', gap: 6,
+                                    }}
+                                  >
+                                    <Play size={13} fill="white" /> Reproducir
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteEpisode(ep.filePath, anime.animeTitle)}
+                                    title="Eliminar este episodio"
+                                    style={{
+                                      background: 'var(--bg-elevated)', border: '1px solid var(--border-moderate)',
+                                      borderRadius: 'var(--radius-md)', padding: '7px 10px',
+                                      color: 'var(--text-muted)', cursor: 'pointer',
+                                    }}
+                                  >
+                                    <Trash2 size={14} />
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
                         </motion.div>
                       )}
                     </AnimatePresence>
@@ -748,22 +737,26 @@ export function DesktopDownloadsPage() {
         </div>
       )}
 
+      {/* TAB 2: Cola de Descarga Activa (Sin Emojis) */}
       {activeTab === 'active' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {taskList.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '80px 20px', background: 'var(--bg-surface)', borderRadius: 'var(--radius-xl)', border: '1px solid var(--border-subtle)' }}>
-              <ArrowDownCircle size={54} style={{ color: 'var(--text-muted)', margin: '0 auto 14px', opacity: 0.5 }} />
-              <p style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4 }}>
-                No hay descargas activas
-              </p>
-              <p style={{ fontSize: 14, color: 'var(--text-muted)' }}>
-                Las descargas iniciadas aparecerán aquí con su monitor de velocidad y progreso.
+            <div style={{
+              textAlign: 'center', padding: '80px 20px',
+              background: 'var(--bg-surface)', borderRadius: 'var(--radius-xl)',
+              border: '1px dashed var(--border-subtle)',
+            }}>
+              <ArrowDownCircle size={48} color="var(--text-muted)" style={{ margin: '0 auto 12px', opacity: 0.5 }} />
+              <h3 style={{ fontSize: 18, fontWeight: 700, margin: '0 0 6px' }}>No hay descargas en cola</h3>
+              <p style={{ color: 'var(--text-muted)', fontSize: 13, margin: 0 }}>
+                Las descargas iniciadas aparecerán aquí con su estado y progreso en tiempo real.
               </p>
             </div>
           ) : (
             taskList.map((task) => {
               const isDownloading = task.status === 'downloading';
               const isQueued = task.status === 'queued';
+              const isPaused = task.status === 'paused';
               const isCompleted = task.status === 'completed';
               const isCanceled = task.status === 'canceled';
               const isError = task.status === 'failed';
@@ -789,28 +782,66 @@ export function DesktopDownloadsPage() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 6 }}>
                         <span style={{
                           fontSize: 12, fontWeight: 800, textTransform: 'uppercase',
+                          display: 'inline-flex', alignItems: 'center', gap: 5,
                           color: isCompleted
                             ? 'var(--accent-success)'
                             : isDownloading
                               ? 'var(--accent-secondary)'
-                              : isQueued
-                                ? '#f59e0b'
-                                : isCanceled
-                                  ? 'var(--text-muted)'
-                                  : 'var(--accent-error)',
+                              : isPaused
+                                ? '#f97316'
+                                : isQueued
+                                  ? '#f59e0b'
+                                  : isCanceled
+                                    ? 'var(--text-muted)'
+                                    : 'var(--accent-error)',
                         }}>
-                          {isCompleted ? 'Completado' : isDownloading ? 'Descargando' : isQueued ? 'En Cola' : isCanceled ? 'Cancelado' : 'Error'}
+                          {isCompleted && <><Check size={13} /> Completado</>}
+                          {isDownloading && <><Loader2 size={13} className="animate-spin" /> Descargando</>}
+                          {isPaused && <><Pause size={13} /> Pausado</>}
+                          {isQueued && <><Clock size={13} /> En Cola</>}
+                          {isCanceled && <>Cancelado</>}
+                          {isError && <><AlertCircle size={13} /> Error</>}
                         </span>
-                        {isDownloading && task.speedKbps > 0 && (
+                        {isDownloading && (task.speedKbps ?? 0) > 0 && (
                           <span style={{ fontSize: 13, color: 'var(--text-secondary)', fontWeight: 600 }}>
-                            • {formatSpeed(task.speedKbps)}
+                            • {formatSpeed(task.speedKbps ?? 0)}
                           </span>
                         )}
                       </div>
                     </div>
 
-                    <div>
-                      {isDownloading || isQueued ? (
+                    {/* Botones de acción Desktop */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      {isDownloading && (
+                        <>
+                          <button
+                            onClick={() => pauseTask(task.id)}
+                            style={{
+                              background: 'var(--bg-elevated)', border: '1px solid var(--border-moderate)',
+                              borderRadius: 'var(--radius-md)', padding: '8px 16px',
+                              color: 'var(--text-primary)', cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                              display: 'flex', alignItems: 'center', gap: 6,
+                            }}
+                            title="Pausar descarga"
+                          >
+                            <Pause size={14} /> Pausar
+                          </button>
+                          <button
+                            onClick={() => cancelTask(task.id)}
+                            style={{
+                              background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.3)',
+                              borderRadius: 'var(--radius-md)', padding: '8px 16px',
+                              color: 'var(--accent-error)', cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                              display: 'flex', alignItems: 'center', gap: 6,
+                            }}
+                            title="Cancelar descarga"
+                          >
+                            <Trash2 size={14} /> Cancelar
+                          </button>
+                        </>
+                      )}
+
+                      {isQueued && (
                         <button
                           onClick={() => cancelTask(task.id)}
                           style={{
@@ -818,32 +849,109 @@ export function DesktopDownloadsPage() {
                             borderRadius: 'var(--radius-md)', padding: '8px 16px',
                             color: 'var(--accent-error)', cursor: 'pointer', fontSize: 13, fontWeight: 600,
                           }}
+                          title="Cancelar"
                         >
-                          Cancelar
+                          <Trash2 size={14} /> Cancelar
                         </button>
-                      ) : (
+                      )}
+
+                      {isPaused && (
+                        <>
+                          <button
+                            onClick={() => resumeTask(task.id)}
+                            style={{
+                              background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))',
+                              border: 'none', borderRadius: 'var(--radius-md)', padding: '8px 18px',
+                              color: 'white', cursor: 'pointer', fontSize: 13, fontWeight: 700,
+                              display: 'flex', alignItems: 'center', gap: 6,
+                            }}
+                            title="Reanudar descarga"
+                          >
+                            <Play size={14} fill="white" /> Reanudar
+                          </button>
+                          <button
+                            onClick={() => removeTask(task.id, false)}
+                            style={{
+                              background: 'var(--bg-elevated)', border: '1px solid var(--border-moderate)',
+                              borderRadius: 'var(--radius-md)', padding: '8px 12px',
+                              color: 'var(--text-muted)', cursor: 'pointer',
+                            }}
+                            title="Eliminar de la lista"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </>
+                      )}
+
+                      {isError && (
+                        <>
+                          <button
+                            onClick={() => retryTask(task.id)}
+                            style={{
+                              background: 'rgba(59, 130, 246, 0.15)', border: '1px solid rgba(59, 130, 246, 0.3)',
+                              borderRadius: 'var(--radius-md)', padding: '8px 16px',
+                              color: 'var(--accent-primary)', cursor: 'pointer', fontSize: 13, fontWeight: 700,
+                              display: 'flex', alignItems: 'center', gap: 6,
+                            }}
+                            title="Reintentar descarga"
+                          >
+                            <RotateCcw size={14} /> Reintentar
+                          </button>
+                          <button
+                            onClick={() => removeTask(task.id, false)}
+                            style={{
+                              background: 'var(--bg-elevated)', border: '1px solid var(--border-moderate)',
+                              borderRadius: 'var(--radius-md)', padding: '8px 12px',
+                              color: 'var(--text-muted)', cursor: 'pointer',
+                            }}
+                            title="Eliminar de la lista"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </>
+                      )}
+
+                      {(isCompleted || isCanceled) && (
                         <button
-                          onClick={() => removeTask(task.id)}
-                          style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+                          onClick={() => removeTask(task.id, false)}
+                          style={{
+                            background: 'var(--bg-elevated)', border: '1px solid var(--border-moderate)',
+                            borderRadius: 'var(--radius-md)', padding: '8px 12px',
+                            color: 'var(--text-muted)', cursor: 'pointer',
+                          }}
+                          title="Eliminar de la lista"
                         >
-                          <Trash2 size={18} />
+                          <Trash2 size={16} />
                         </button>
                       )}
                     </div>
                   </div>
 
                   {isQueued && (
-                    <div style={{ fontSize: 12, color: '#f59e0b', background: 'rgba(245, 158, 11, 0.1)', padding: '8px 12px', borderRadius: 'var(--radius-sm)' }}>
-                      ⏳ En cola de espera (máx. 2 descargas simultáneas). Iniciará automáticamente...
+                    <div style={{
+                      fontSize: 12, color: '#f59e0b', background: 'rgba(245, 158, 11, 0.1)',
+                      padding: '8px 14px', borderRadius: 'var(--radius-sm)',
+                      display: 'flex', alignItems: 'center', gap: 8,
+                    }}>
+                      <Clock size={14} /> En cola de espera (máx. 2 descargas simultáneas). Iniciará automáticamente...
                     </div>
                   )}
 
-                  {isDownloading && (
+                  {isPaused && (
+                    <div style={{
+                      fontSize: 12, color: '#f97316', background: 'rgba(249, 115, 22, 0.1)',
+                      padding: '8px 14px', borderRadius: 'var(--radius-sm)',
+                      display: 'flex', alignItems: 'center', gap: 8,
+                    }}>
+                      <Pause size={14} /> Descarga pausada. Presiona Reanudar para continuar con la descarga.
+                    </div>
+                  )}
+
+                  {(isDownloading || isPaused) && (
                     <div>
                       {(() => {
                         const totalBytes = task.totalBytes;
                         const downloadedBytes = task.downloadedBytes;
-                        // Cálculo 100% exacto sincronizado con los bytes reales
                         const pct = (totalBytes && totalBytes > 0)
                           ? Math.min(100, Math.max(0, Math.round((downloadedBytes / totalBytes) * 100)))
                           : Math.min(100, Math.max(0, Math.round(task.progress)));
@@ -855,16 +963,18 @@ export function DesktopDownloadsPage() {
                             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>
                               <span>
                                 {totalMB
-                                  ? <>{dlMB} <span style={{ color: 'var(--text-secondary)' }}>MB</span> / {totalMB} <span style={{ color: 'var(--text-secondary)' }}>MB</span> · {formatSpeed(task.speedKbps)}</>
-                                  : <>{dlMB} <span style={{ color: 'var(--text-secondary)' }}>MB descargados</span> · {formatSpeed(task.speedKbps)}</>
+                                  ? <>{dlMB} <span style={{ color: 'var(--text-secondary)' }}>MB</span> / {totalMB} <span style={{ color: 'var(--text-secondary)' }}>MB</span>{isDownloading && (task.speedKbps ?? 0) > 0 && ` · ${formatSpeed(task.speedKbps ?? 0)}`}</>
+                                  : <>{dlMB} <span style={{ color: 'var(--text-secondary)' }}>MB descargados</span>{isDownloading && (task.speedKbps ?? 0) > 0 && ` · ${formatSpeed(task.speedKbps ?? 0)}`}</>
                                 }
                               </span>
-                              <span style={{ color: 'var(--accent-secondary)', fontWeight: 700 }}>{pct}%</span>
+                              <span style={{ color: isPaused ? '#f97316' : 'var(--accent-secondary)', fontWeight: 700 }}>{pct}%</span>
                             </div>
                             <div style={{ height: 8, background: 'var(--bg-elevated)', borderRadius: 4, overflow: 'hidden' }}>
                               <div style={{
                                 width: `${pct}%`, height: '100%',
-                                background: 'linear-gradient(90deg, var(--accent-primary), var(--accent-secondary))',
+                                background: isPaused
+                                  ? '#f97316'
+                                  : 'linear-gradient(90deg, var(--accent-primary), var(--accent-secondary))',
                                 transition: 'width 0.3s ease',
                               }} />
                             </div>
@@ -875,8 +985,12 @@ export function DesktopDownloadsPage() {
                   )}
 
                   {isError && task.error && (
-                    <div style={{ fontSize: 12, color: '#f87171', background: 'rgba(239, 68, 68, 0.1)', padding: '8px 12px', borderRadius: 'var(--radius-sm)' }}>
-                      {task.error}
+                    <div style={{
+                      fontSize: 12, color: '#f87171', background: 'rgba(239, 68, 68, 0.1)',
+                      padding: '8px 14px', borderRadius: 'var(--radius-sm)',
+                      display: 'flex', alignItems: 'center', gap: 8,
+                    }}>
+                      <AlertCircle size={14} /> {task.error}
                     </div>
                   )}
                 </div>

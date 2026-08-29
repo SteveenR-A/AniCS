@@ -1,8 +1,78 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import type { DownloadProgress } from '@/types';
+import type { DownloadProgress, DownloadTask, DownloadStatus } from '@/types';
 
-/** Iniciar descarga de un episodio HLS */
+// ─── Puente Android Foreground Service ──────────────────────
+
+function androidBridge() {
+  return (window as Record<string, any>)['AndroidBridge'] as
+    | {
+        startDownloadService: (title: string, subtitle?: string, details?: string) => void;
+        updateDownloadNotification: (
+          title: string,
+          subtitle: string,
+          progress: number,
+          details: string
+        ) => void;
+        stopDownloadService: () => void;
+        setKeepScreenOn: (enabled: boolean) => void;
+      }
+    | undefined;
+}
+
+export const notifyServiceStart = (
+  title: string,
+  subtitle = 'Iniciando descargas...',
+  details = ''
+): void => {
+  try {
+    androidBridge()?.startDownloadService(title, subtitle, details);
+  } catch (e) {
+    console.warn('Error starting Android DownloadService:', e);
+  }
+};
+
+export const notifyServiceUpdate = (
+  title: string,
+  subtitle: string,
+  progress: number,
+  details = ''
+): void => {
+  try {
+    androidBridge()?.updateDownloadNotification(
+      title,
+      subtitle,
+      Math.round(progress),
+      details
+    );
+  } catch (e) {
+    console.warn('Error updating Android DownloadService:', e);
+  }
+};
+
+export const notifyServiceStop = (): void => {
+  try {
+    androidBridge()?.stopDownloadService();
+  } catch (e) {
+    console.warn('Error stopping Android DownloadService:', e);
+  }
+};
+
+export const setKeepScreenOn = (enabled: boolean): void => {
+  try {
+    androidBridge()?.setKeepScreenOn(enabled);
+  } catch (e) {
+    console.warn('Error setting keep screen on:', e);
+  }
+};
+
+// ─── Comandos Tauri de Descarga ─────────────────────────────
+
+/** Obtener todas las descargas registradas en SQLite */
+export const getAllDownloads = (): Promise<DownloadTask[]> =>
+  invoke('get_all_downloads');
+
+/** Iniciar descarga de un episodio (HLS o directo MP4) */
 export const startDownload = (params: {
   animeTitle: string;
   episodeNumber: number;
@@ -18,9 +88,28 @@ export const startDownload = (params: {
     outputDir: params.outputDir,
   });
 
+/** Pausar una descarga activa limpiamente */
+export const pauseDownload = (downloadId: string): Promise<void> =>
+  invoke('pause_download', { downloadId });
+
+/** Reanudar una descarga pausada o interrumpida */
+export const resumeDownload = (downloadId: string): Promise<void> =>
+  invoke('resume_download', { downloadId });
+
+/** Reiniciar una descarga fallida desde cero */
+export const retryDownload = (downloadId: string): Promise<void> =>
+  invoke('retry_download', { downloadId });
+
 /** Cancelar una descarga en curso */
 export const cancelDownload = (downloadId: string): Promise<void> =>
   invoke('cancel_download', { downloadId });
+
+/** Eliminar el registro de descarga de SQLite y opcionalmente su archivo */
+export const deleteDownloadRecord = (
+  downloadId: string,
+  deleteFile = false
+): Promise<void> =>
+  invoke('delete_download_record', { downloadId, deleteFile });
 
 /** Suscribirse a eventos de progreso de descarga */
 export const onDownloadProgress = (
@@ -29,8 +118,24 @@ export const onDownloadProgress = (
 
 /** Suscribirse al evento de descarga completada */
 export const onDownloadCompleted = (
-  callback: (result: { id: string; path: string }) => void
-) => listen<{ id: string; path: string }>('download-completed', (event) => callback(event.payload));
+  callback: (result: { id: string; path?: string }) => void
+) => listen<{ id: string; path?: string }>('download-completed', (event) => callback(event.payload));
+
+/** Suscribirse al evento de descarga pausada */
+export const onDownloadPaused = (
+  callback: (result: { id: string }) => void
+) => listen<{ id: string }>('download-paused', (event) => callback(event.payload));
+
+/** Formatea velocidad en texto legible */
+export const formatSpeed = (kbps: number): string => {
+  if (kbps <= 0) return '0 KB/s';
+  if (kbps >= 1024) return `${(kbps / 1024).toFixed(1)} MB/s`;
+  return `${Math.round(kbps)} KB/s`;
+};
+
+/** Devuelve si el estado es activo (en curso o en cola) */
+export const isActiveStatus = (status: DownloadStatus): boolean =>
+  status === 'queued' || status === 'downloading';
 
 /** Obtener la carpeta de descargas por defecto */
 export const getDefaultDownloadDir = (): Promise<string> =>

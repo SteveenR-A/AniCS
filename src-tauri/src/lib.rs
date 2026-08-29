@@ -4,7 +4,7 @@ pub mod downloader;
 pub mod scrapers;
 pub mod storage;
 
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use commands::download_cmd::DownloadManager;
 
 /// Estado global compartido por todos los comandos Tauri
@@ -35,10 +35,42 @@ pub fn run() {
             storage::init_database(app_data_dir)
                 .expect("Failed to initialize database");
 
+            // Marcar descargas interrumpidas por cierre abrupto anterior como pausadas
+            if let Err(e) = storage::mark_active_downloads_as_paused_db() {
+                log::warn!("No se pudieron marcar descargas activas como pausadas: {}", e);
+            }
+
             #[cfg(desktop)]
             if let Some(main_win) = app.get_webview_window("main") {
                 if let Some(icon) = app.default_window_icon() {
                     let _ = main_win.set_icon(icon.clone());
+                }
+            }
+
+            // En escritorio: Si el usuario cierra la ventana mientras hay descargas activas,
+            // ocultar la ventana en lugar de matar abruptamente el proceso en segundo plano.
+            #[cfg(desktop)]
+            {
+                let app_handle = app.handle().clone();
+                if let Some(window) = app.get_webview_window("main") {
+                    window.on_window_event(move |event| {
+                        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                            let state = app_handle.state::<AppState>();
+                            let has_active = state.download_manager
+                                .tasks
+                                .try_lock()
+                                .map(|t| !t.is_empty())
+                                .unwrap_or(false);
+
+                            if has_active {
+                                api.prevent_close();
+                                if let Some(w) = app_handle.get_webview_window("main") {
+                                    let _ = w.hide();
+                                }
+                                let _ = app_handle.emit("window-hidden-downloads-active", ());
+                            }
+                        }
+                    });
                 }
             }
 
@@ -75,7 +107,12 @@ pub fn run() {
             commands::detect_media_type,
             // Descargas y Archivos Locales
             commands::start_download,
+            commands::pause_download,
+            commands::resume_download,
+            commands::retry_download,
             commands::cancel_download,
+            commands::delete_download_record,
+            commands::get_all_downloads,
             commands::scan_local_downloads,
             commands::delete_local_download,
             commands::delete_local_anime_folder,
