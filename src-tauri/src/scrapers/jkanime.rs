@@ -364,53 +364,42 @@ impl AnimeExtractor for JKAnimeExtractor {
         let mut total_pages = None;
 
         let active_genre = filters.genre.as_ref();
+        let q_trimmed = filters.query.as_deref().unwrap_or("").trim();
 
-        // Determinar URL de búsqueda o directorio según los filtros
-        let target_url = if let Some(ref q) = filters.query {
-            let q_trimmed = q.trim();
-            if !q_trimmed.is_empty() && active_genre.is_none() && filters.status.is_none() && filters.anime_type.is_none() {
-                self.url(&format!("/buscar/{}/{}/", urlencoding::encode(q_trimmed), page))
-            } else {
-                let mut params = vec![format!("p={}", page)];
-                if !q_trimmed.is_empty() {
-                    params.push(format!("filtro={}", urlencoding::encode(q_trimmed)));
-                }
-                if let Some(g) = active_genre {
-                    let g_slug = g.to_lowercase().replace(' ', "-");
-                    params.push(format!("genero={}", g_slug));
-                }
-                if let Some(ref status) = filters.status {
-                    let st = if status.to_lowercase().contains("emisi") { "en-emision" } else if status.to_lowercase().contains("conclu") || status.to_lowercase().contains("final") { "concluido" } else { status };
-                    params.push(format!("estado={}", st));
-                }
-                if let Some(ref t) = filters.anime_type {
-                    let ty = if t.to_lowercase().contains("serie") { "serie" } else if t.to_lowercase().contains("pel") { "pelicula" } else if t.to_lowercase().contains("ova") { "ova" } else { t };
-                    params.push(format!("tipo={}", ty));
-                }
-                if let Some(ref order) = filters.order_by {
-                    params.push(format!("orden={}", order));
-                }
-                self.url(&format!("/directorio/?{}", params.join("&")))
+        // Si hay una búsqueda por texto directo (nombre del anime) sin filtros adicionales
+        if !q_trimmed.is_empty() && active_genre.is_none() && filters.status.is_none() && filters.anime_type.is_none() {
+            let search_results = self.search(q_trimmed).await.unwrap_or_default();
+            if !search_results.is_empty() {
+                return Ok(SearchResultPage {
+                    results: search_results,
+                    current_page: page,
+                    total_pages: Some(1),
+                    has_next: false,
+                });
             }
-        } else {
-            let mut params = vec![format!("p={}", page)];
-            if let Some(g) = active_genre {
-                let g_slug = g.to_lowercase().replace(' ', "-");
-                params.push(format!("genero={}", g_slug));
-            }
-            if let Some(ref status) = filters.status {
-                let st = if status.to_lowercase().contains("emisi") { "en-emision" } else if status.to_lowercase().contains("conclu") || status.to_lowercase().contains("final") { "concluido" } else { status };
-                params.push(format!("estado={}", st));
-            }
-            if let Some(ref t) = filters.anime_type {
-                let ty = if t.to_lowercase().contains("serie") { "serie" } else if t.to_lowercase().contains("pel") { "pelicula" } else if t.to_lowercase().contains("ova") { "ova" } else { t };
-                params.push(format!("tipo={}", ty));
-            }
-            if let Some(ref order) = filters.order_by {
-                params.push(format!("orden={}", order));
-            }
-            self.url(&format!("/directorio/?{}", params.join("&")))
-        };
+        }
+
+        // Determinar URL de directorio con filtros y paginación
+        let mut params = vec![format!("p={}", page)];
+        if !q_trimmed.is_empty() {
+            params.push(format!("filtro={}", urlencoding::encode(q_trimmed)));
+        }
+        if let Some(g) = active_genre {
+            let g_slug = g.to_lowercase().replace(' ', "-");
+            params.push(format!("genero={}", g_slug));
+        }
+        if let Some(ref status) = filters.status {
+            let st = if status.to_lowercase().contains("emisi") { "en-emision" } else if status.to_lowercase().contains("conclu") || status.to_lowercase().contains("final") { "concluido" } else { status };
+            params.push(format!("estado={}", st));
+        }
+        if let Some(ref t) = filters.anime_type {
+            let ty = if t.to_lowercase().contains("serie") { "serie" } else if t.to_lowercase().contains("pel") { "pelicula" } else if t.to_lowercase().contains("ova") { "ova" } else { t };
+            params.push(format!("tipo={}", ty));
+        }
+        if let Some(ref order) = filters.order_by {
+            params.push(format!("orden={}", order));
+        }
+        let target_url = self.url(&format!("/directorio/?{}", params.join("&")));
 
         let html = fetch_html(&target_url, Some(&self.base_url)).await
             .map_err(AppError::Network)?;
@@ -492,6 +481,17 @@ impl AnimeExtractor for JKAnimeExtractor {
                     source: self.id().to_string(),
                     ..Default::default()
                 });
+            }
+        }
+
+        // 3. Fallback: Si no hubo resultados en directorio y hay query de texto en página 1, consultar /buscar/{query}/
+        if results.is_empty() && page == 1 && !q_trimmed.is_empty() {
+            if let Ok(search_res) = self.search(q_trimmed).await {
+                if !search_res.is_empty() {
+                    results = search_res;
+                    total_pages = Some(1);
+                    has_next = false;
+                }
             }
         }
 

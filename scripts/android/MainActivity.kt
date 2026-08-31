@@ -161,6 +161,27 @@ class AndroidNativeBridge(activity: Activity) {
     }
 
     @JavascriptInterface
+    fun setFullscreenMode(enabled: Boolean) {
+        val act = activityRef.get() ?: return
+        if (act.isFinishing || act.isDestroyed) return
+
+        act.runOnUiThread {
+            try {
+                val controller = WindowCompat.getInsetsController(act.window, act.window.decorView)
+                if (enabled) {
+                    controller.systemBarsBehavior =
+                        WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                    controller.hide(WindowInsetsCompat.Type.systemBars())
+                } else {
+                    controller.show(WindowInsetsCompat.Type.systemBars())
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error cambiando modo pantalla completa en Android: ${e.message}", e)
+            }
+        }
+    }
+
+    @JavascriptInterface
     fun installApk(filePath: String) {
         val act = activityRef.get() ?: return
         if (act.isFinishing || act.isDestroyed) return

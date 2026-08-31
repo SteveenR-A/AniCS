@@ -18,9 +18,18 @@ function androidBridge() {
         notifyDownloadComplete: (title: string, episodeInfo: string) => void;
         showUpdateNotification: (title: string, body: string) => void;
         setKeepScreenOn: (enabled: boolean) => void;
+        setFullscreenMode: (enabled: boolean) => void;
       }
     | undefined;
 }
+
+export const setNativeFullscreen = (enabled: boolean): void => {
+  try {
+    androidBridge()?.setFullscreenMode(enabled);
+  } catch (e) {
+    console.warn('Error toggling Android native fullscreen:', e);
+  }
+};
 
 export const notifyServiceStart = (
   title: string,

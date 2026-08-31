@@ -15,7 +15,7 @@ import { useAnimeStore } from '@/stores/useAnimeStore';
 import { useDownloadStore } from '@/stores/useDownloadStore';
 import { resolveStream, getServers, getDetails } from '@/services/animeService';
 import { upsertHistory, getEpisodeProgress } from '@/services/storageService';
-import { getLocalMediaUrl, setKeepScreenOn } from '@/services/downloadService';
+import { getLocalMediaUrl, setKeepScreenOn, setNativeFullscreen } from '@/services/downloadService';
 import { useResponsive } from '@/hooks/useResponsive';
 import type { VideoServer } from '@/types';
 
@@ -262,9 +262,11 @@ export function PlayerPage() {
     const isCurrentlyFull = !!(document.fullscreenElement || (document as any).webkitFullscreenElement || isFullscreen);
     if (!isCurrentlyFull) {
       await enterFullscreen();
+      setNativeFullscreen(true);
       setIsFullscreen(true);
     } else {
       await exitFullscreen();
+      setNativeFullscreen(false);
       setIsFullscreen(false);
     }
   }, [isFullscreen, enterFullscreen, exitFullscreen]);
@@ -272,10 +274,12 @@ export function PlayerPage() {
   // Pantalla Completa inmersiva sin bloqueo rígido de orientación
   useEffect(() => {
     enterFullscreen().catch(() => {});
+    setNativeFullscreen(true);
 
     const handleFullscreenChange = () => {
       const isFull = !!(document.fullscreenElement || (document as any).webkitFullscreenElement);
       setIsFullscreen(isFull);
+      setNativeFullscreen(isFull);
     };
 
     document.addEventListener('fullscreenchange', handleFullscreenChange);
@@ -285,7 +289,8 @@ export function PlayerPage() {
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
       document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
 
-      // Permitir que la pantalla se apague normalmente al salir del reproductor
+      // Restaurar barras del sistema y permitir que la pantalla se apague normalmente al salir
+      setNativeFullscreen(false);
       setKeepScreenOn(false);
       exitFullscreen().catch(() => {});
 

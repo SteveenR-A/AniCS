@@ -1,4 +1,5 @@
 use anics_lib::scrapers::{JKAnimeExtractor, MundoDonghuaExtractor, AnimeExtractor};
+use anics_lib::core::SearchFilters;
 
 #[tokio::test]
 async fn test_jkanime_get_latest() {
@@ -21,6 +22,17 @@ async fn test_jkanime_search() {
     let results = extractor.search("naruto").await.expect("Failed to search on JKAnime");
     println!("JKAnime Search results count: {}", results.len());
     assert!(!results.is_empty(), "JKAnime search returned empty results");
+
+    let adv = extractor.advanced_search(&SearchFilters {
+        query: Some("naruto".to_string()),
+        page: 1,
+        ..Default::default()
+    }).await.expect("Failed advanced search");
+    println!("JKAnime Advanced Search results count: {}, total_pages: {:?}", adv.results.len(), adv.total_pages);
+    for r in adv.results.iter().take(3) {
+        println!(" - {}", r.title);
+    }
+    assert!(!adv.results.is_empty(), "Advanced search for naruto returned empty");
 }
 
 #[tokio::test]
