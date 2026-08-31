@@ -4,6 +4,18 @@ import { getSources, getGenres } from '@/services/animeService';
 import { prefetchImage, setMemoryCacheBatch } from '@/components/CachedImage';
 import { preloadImagesBatch } from '@/services/downloadService';
 
+export interface SearchSession {
+  query: string;
+  genre: string;
+  status: string;
+  animeType: string;
+  orderBy: string;
+  results: AnimeResult[];
+  currentPage: number;
+  totalPages?: number;
+  hasNextPage: boolean;
+}
+
 interface AnimeStore {
   sources: Source[];
   activeSource: string;
@@ -17,11 +29,13 @@ interface AnimeStore {
   scheduleDaysBySource: Record<string, ScheduleDay[]>;
   topListBySource: Record<string, AnimeResult[]>;
 
-  // ── Cache de búsqueda en RAM ──
+  // ── Cache de búsqueda y sesiones independientes por fuente ──
   searchQuery: string;
   searchResults: AnimeResult[];
   lastSearchSource: string;
   isSearching: boolean;
+  searchSessionsBySource: Record<string, SearchSession>;
+  recentSearches: string[];
 
   // ── Cache de detalles en RAM (0ms instantáneo) ──
   selectedAnime: AnimeDetails | null;
@@ -49,10 +63,15 @@ interface AnimeStore {
   getTopList: (source?: string) => AnimeResult[] | undefined;
   invalidateSourceCache: (source?: string) => void;
 
-  // Búsqueda
+  // Búsqueda y sesiones
   setSearchResults: (results: AnimeResult[], query?: string, source?: string) => void;
   setSearchQuery: (query: string) => void;
   setIsSearching: (v: boolean) => void;
+  saveSearchSession: (source: string, session: Partial<SearchSession>) => void;
+  getSearchSession: (source?: string) => SearchSession | undefined;
+  addRecentSearch: (term: string) => void;
+  removeRecentSearch: (term: string) => void;
+  clearRecentSearches: () => void;
 
   // Detalles
   setSelectedAnime: (anime: AnimeDetails | null) => void;
@@ -75,6 +94,19 @@ function isItemSourceValid(item: AnimeResult, src: string): boolean {
   return true;
 }
 
+const RECENT_SEARCHES_KEY = 'anics_recent_searches';
+
+function loadInitialRecentSearches(): string[] {
+  try {
+    const raw = localStorage.getItem(RECENT_SEARCHES_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed.slice(0, 12);
+    }
+  } catch {}
+  return [];
+}
+
 export const useAnimeStore = create<AnimeStore>((set, get) => ({
   sources: [],
   activeSource: 'jkanime',
@@ -91,6 +123,8 @@ export const useAnimeStore = create<AnimeStore>((set, get) => ({
   searchResults: [],
   lastSearchSource: '',
   isSearching: false,
+  searchSessionsBySource: {},
+  recentSearches: loadInitialRecentSearches(),
 
   selectedAnime: null,
   isLoadingDetails: false,
@@ -228,6 +262,65 @@ export const useAnimeStore = create<AnimeStore>((set, get) => ({
 
   setSearchQuery: (query) => set({ searchQuery: query }),
   setIsSearching: (v) => set({ isSearching: v }),
+
+  saveSearchSession: (source, sessionData) => {
+    set((state) => {
+      const existing = state.searchSessionsBySource[source] || {
+        query: '',
+        genre: '',
+        status: '',
+        animeType: '',
+        orderBy: '',
+        results: [],
+        currentPage: 1,
+        hasNextPage: false,
+      };
+      return {
+        searchSessionsBySource: {
+          ...state.searchSessionsBySource,
+          [source]: {
+            ...existing,
+            ...sessionData,
+          },
+        },
+      };
+    });
+  },
+
+  getSearchSession: (source) => {
+    const src = source || get().activeSource;
+    return get().searchSessionsBySource[src];
+  },
+
+  addRecentSearch: (term) => {
+    const trimmed = term.trim();
+    if (!trimmed || trimmed.length < 2) return;
+    set((state) => {
+      const filtered = state.recentSearches.filter((t) => t.toLowerCase() !== trimmed.toLowerCase());
+      const updated = [trimmed, ...filtered].slice(0, 10);
+      try {
+        localStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(updated));
+      } catch {}
+      return { recentSearches: updated };
+    });
+  },
+
+  removeRecentSearch: (term) => {
+    set((state) => {
+      const updated = state.recentSearches.filter((t) => t !== term);
+      try {
+        localStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(updated));
+      } catch {}
+      return { recentSearches: updated };
+    });
+  },
+
+  clearRecentSearches: () => {
+    try {
+      localStorage.removeItem(RECENT_SEARCHES_KEY);
+    } catch {}
+    set({ recentSearches: [] });
+  },
 
   setSelectedAnime: (anime) => set({ selectedAnime: anime }),
   setIsLoadingDetails: (v) => set({ isLoadingDetails: v }),

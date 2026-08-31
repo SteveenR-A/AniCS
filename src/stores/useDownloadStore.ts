@@ -13,6 +13,7 @@ import {
   notifyServiceStart,
   notifyServiceUpdate,
   notifyServiceStop,
+  notifyDownloadComplete,
   formatSpeed,
   isActiveStatus,
 } from '@/services/downloadService';
@@ -194,21 +195,42 @@ export const useDownloadStore = create<DownloadStore>((set, get) => ({
 
     // 3. Escuchar completados
     unlistenCompleted = await onDownloadCompleted((res) => {
+      let completedTask: DownloadTask | undefined;
       set((state) => {
         const next = new Map(state.tasks);
         const existing = next.get(res.id);
         if (existing) {
-          next.set(res.id, {
+          completedTask = {
             ...existing,
             status: 'completed',
             progress: 100,
             speedKbps: 0,
             outputPath: res.path || existing.outputPath,
             error: undefined,
-          });
+          };
+          next.set(res.id, completedTask);
         }
         return { tasks: next };
       });
+
+      if (completedTask) {
+        notifyDownloadComplete(
+          (completedTask as DownloadTask).animeTitle,
+          `Episodio ${(completedTask as DownloadTask).episodeNumber}`
+        );
+
+        (async () => {
+          try {
+            const { isPermissionGranted, sendNotification } = await import('@tauri-apps/plugin-notification');
+            if (await isPermissionGranted()) {
+              sendNotification({
+                title: 'Descarga completada',
+                body: `${(completedTask as DownloadTask).animeTitle} - Ep. ${(completedTask as DownloadTask).episodeNumber}`,
+              });
+            }
+          } catch {}
+        })();
+      }
 
       triggerNotificationSync();
     });
@@ -356,8 +378,6 @@ export const useDownloadStore = create<DownloadStore>((set, get) => ({
           next.set(id, {
             ...t,
             status: 'queued',
-            progress: 0,
-            downloadedBytes: 0,
             error: undefined,
           });
         }

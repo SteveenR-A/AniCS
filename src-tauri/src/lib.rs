@@ -111,6 +111,7 @@ pub fn run() {
             // Descargas y Archivos Locales
             commands::start_download,
             commands::pause_download,
+            commands::pause_all_downloads,
             commands::resume_download,
             commands::retry_download,
             commands::cancel_download,

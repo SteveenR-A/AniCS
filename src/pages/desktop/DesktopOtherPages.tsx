@@ -40,8 +40,8 @@ export function DesktopHistoryPage() {
       const data = await getHistory(150, 0);
       const seen = new Set<string>();
       const deduplicated = data.filter((item) => {
-        const normTitle = item.animeTitle.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-        const key = `${normTitle}-ep-${item.episodeNumber}`;
+        const uniqueAnimeKey = item.animeUrl || item.id || item.animeTitle.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+        const key = `${uniqueAnimeKey}-ep-${item.episodeNumber}`;
         if (seen.has(key)) return false;
         seen.add(key);
         return true;

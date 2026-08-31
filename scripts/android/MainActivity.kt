@@ -97,6 +97,52 @@ class AndroidNativeBridge(activity: Activity) {
     }
 
     @JavascriptInterface
+    fun notifyDownloadComplete(title: String, episodeInfo: String) {
+        val act = activityRef.get() ?: return
+        if (act.isFinishing || act.isDestroyed) return
+
+        act.runOnUiThread {
+            try {
+                val intent = Intent(act, DownloadService::class.java).apply {
+                    action = DownloadService.ACTION_COMPLETE
+                    putExtra("title", title)
+                    putExtra("episodeInfo", episodeInfo)
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    act.startForegroundService(intent)
+                } else {
+                    act.startService(intent)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error notificando descarga completada: ${e.message}", e)
+            }
+        }
+    }
+
+    @JavascriptInterface
+    fun showUpdateNotification(title: String, body: String) {
+        val act = activityRef.get() ?: return
+        if (act.isFinishing || act.isDestroyed) return
+
+        act.runOnUiThread {
+            try {
+                val intent = Intent(act, DownloadService::class.java).apply {
+                    action = DownloadService.ACTION_UPDATE_NOTIF
+                    putExtra("title", title)
+                    putExtra("body", body)
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    act.startForegroundService(intent)
+                } else {
+                    act.startService(intent)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error emitiendo notificación de actualización: ${e.message}", e)
+            }
+        }
+    }
+
+    @JavascriptInterface
     fun setKeepScreenOn(enabled: Boolean) {
         val act = activityRef.get() ?: return
         if (act.isFinishing || act.isDestroyed) return
@@ -223,11 +269,23 @@ class MainActivity : TauriActivity() {
         super.onCreate(savedInstanceState)
 
         setupEdgeToEdge()
-        hideSystemBars()
 
-        // Esperar a que Tauri infle el layout para encontrar el WebView una sola vez
+        // Esperar a que Tauri infle el layout para encontrar el WebView
         window.decorView.post {
             findAndConfigureWebView()
+            if (!isWebViewConfigured) {
+                val observer = window.decorView.viewTreeObserver
+                observer.addOnGlobalLayoutListener(object : android.view.ViewTreeObserver.OnGlobalLayoutListener {
+                    override fun onGlobalLayout() {
+                        findAndConfigureWebView()
+                        if (isWebViewConfigured) {
+                            try {
+                                window.decorView.viewTreeObserver.removeOnGlobalLayoutListener(this)
+                            } catch (_: Exception) {}
+                        }
+                    }
+                })
+            }
         }
 
         requestPermissionsIfNeeded()
@@ -236,24 +294,20 @@ class MainActivity : TauriActivity() {
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) {
-            hideSystemBars()
-            if (!isWebViewConfigured) {
-                findAndConfigureWebView()
-            }
+        if (hasFocus && !isWebViewConfigured) {
+            findAndConfigureWebView()
         }
     }
 
     override fun onResume() {
         super.onResume()
-        hideSystemBars()
         if (!isWebViewConfigured) {
             findAndConfigureWebView()
         }
     }
 
     // -------------------------------------------------------------------------
-    // Edge-to-edge + inmersivo
+    // Edge-to-edge moderno sin ocultar barras de navegación del sistema
     // -------------------------------------------------------------------------
     private fun setupEdgeToEdge() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -263,30 +317,10 @@ class MainActivity : TauriActivity() {
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
         }
 
-        @Suppress("DEPRECATION")
-        window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
-    }
-
-    private fun hideSystemBars() {
-        try {
-            val controller = WindowCompat.getInsetsController(window, window.decorView)
-            controller.systemBarsBehavior =
-                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            controller.hide(WindowInsetsCompat.Type.systemBars())
-        } catch (e: Exception) {
-            Log.w(TAG, "No se pudieron ocultar system bars: ${e.message}")
-        }
-
-        // Flags universales de compatibilidad
-        @Suppress("DEPRECATION")
-        window.decorView.systemUiVisibility = (
-            View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-            or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-            or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-            or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-            or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-            or View.SYSTEM_UI_FLAG_FULLSCREEN
-        )
+        // Permitir que la barra de navegación y la barra de estado se muestren de forma estándar
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+        controller.isAppearanceLightStatusBars = false
+        controller.isAppearanceLightNavigationBars = false
     }
 
     // -------------------------------------------------------------------------

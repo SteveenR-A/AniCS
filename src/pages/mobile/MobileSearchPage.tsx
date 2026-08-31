@@ -3,11 +3,12 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search, X, Loader2, SearchX,
-  RotateCcw, ChevronDown, ChevronUp, Check, SlidersHorizontal, RefreshCw
+  RotateCcw, Check, SlidersHorizontal, RefreshCw, Clock
 } from 'lucide-react';
 import { useAnimeStore } from '@/stores/useAnimeStore';
-import { searchAnime, advancedSearch } from '@/services/animeService';
+import { advancedSearch } from '@/services/animeService';
 import { CachedImage } from '@/components/CachedImage';
+import { PaginationBar } from '@/components/PaginationBar';
 import type { AnimeResult, SearchFilters } from '@/types';
 
 function MobileResultCard({ anime, onClick }: { anime: AnimeResult; onClick: () => void }) {
@@ -67,19 +68,27 @@ export function MobileSearchPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const {
     activeSource, searchResults, setSearchResults,
-    isSearching, setIsSearching, genres, loadGenres
+    isSearching, setIsSearching, genres, loadGenres,
+    saveSearchSession, getSearchSession,
+    recentSearches, addRecentSearch, removeRecentSearch, clearRecentSearches
   } = useAnimeStore();
 
-  const [query, setQuery] = useState(searchParams.get('q') ?? '');
-  const [selectedGenre, setSelectedGenre] = useState<string>(searchParams.get('genre') ?? '');
-  const [selectedStatus, setSelectedStatus] = useState<string>(searchParams.get('status') ?? '');
-  const [selectedType, setSelectedType] = useState<string>(searchParams.get('type') ?? '');
-  const [selectedOrder, setSelectedOrder] = useState<string>(searchParams.get('order') ?? '');
-  const [showFilters, setShowFilters] = useState(Boolean(searchParams.get('genre') || searchParams.get('status') || searchParams.get('type')));
-  
-  const [currentPage, setCurrentPage] = useState(1);
+  const urlQ = searchParams.get('q') ?? '';
+  const urlPage = parseInt(searchParams.get('p') || '1', 10) || 1;
+  const urlGenre = searchParams.get('genre') ?? '';
+  const urlStatus = searchParams.get('status') ?? '';
+  const urlType = searchParams.get('type') ?? '';
+  const urlOrder = searchParams.get('order') ?? '';
+
+  const [query, setQuery] = useState(urlQ);
+  const [selectedGenre, setSelectedGenre] = useState<string>(urlGenre);
+  const [selectedStatus, setSelectedStatus] = useState<string>(urlStatus);
+  const [selectedType, setSelectedType] = useState<string>(urlType);
+  const [selectedOrder, setSelectedOrder] = useState<string>(urlOrder);
+  const [currentPage, setCurrentPage] = useState<number>(urlPage);
+  const [totalPages, setTotalPages] = useState<number | undefined>(undefined);
   const [hasNextPage, setHasNextPage] = useState(false);
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [showFilters, setShowFilters] = useState(Boolean(urlGenre || urlStatus || urlType));
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const activeFilterCount = (selectedGenre ? 1 : 0) + (selectedStatus ? 1 : 0) + (selectedType ? 1 : 0) + (selectedOrder ? 1 : 0);
@@ -87,6 +96,26 @@ export function MobileSearchPage() {
   useEffect(() => {
     loadGenres(activeSource);
   }, [activeSource, loadGenres]);
+
+  const syncUrlParams = useCallback((
+    newQ: string,
+    newGenre: string,
+    newStatus: string,
+    newType: string,
+    newOrder: string,
+    newPage: number
+  ) => {
+    const params = new URLSearchParams();
+    if (newQ.trim()) params.set('q', newQ.trim());
+    if (newGenre) params.set('genre', newGenre);
+    if (newStatus) params.set('status', newStatus);
+    if (newType) params.set('type', newType);
+    if (newOrder) params.set('order', newOrder);
+    if (newPage > 1) params.set('p', String(newPage));
+    if (activeSource) params.set('source', activeSource);
+
+    setSearchParams(params, { replace: true });
+  }, [activeSource, setSearchParams]);
 
   const executeSearch = useCallback(async (
     q: string,
@@ -99,96 +128,100 @@ export function MobileSearchPage() {
     const currentSource = activeSource;
     setIsSearching(true);
     try {
-      const hasAdvancedFilters = Boolean(genre || status || type || order);
+      const filters: SearchFilters = {
+        query: q.trim() || undefined,
+        genre: genre || undefined,
+        status: status || undefined,
+        animeType: type || undefined,
+        orderBy: order || undefined,
+        page,
+      };
 
-      if (hasAdvancedFilters) {
-        const filters: SearchFilters = {
-          query: q.trim() || undefined,
-          genre: genre || undefined,
-          status: status || undefined,
-          animeType: type || undefined,
-          orderBy: order || undefined,
-          page,
-        };
-        const res = await advancedSearch(filters, currentSource);
+      const res = await advancedSearch(filters, currentSource);
 
-        if (useAnimeStore.getState().activeSource !== currentSource) {
-          return;
-        }
+      if (useAnimeStore.getState().activeSource !== currentSource) {
+        return;
+      }
 
-        const sanitized = res.results.map((a) => ({ ...a, source: currentSource }));
-        if (page > 1) {
-          setSearchResults([...searchResults, ...sanitized]);
-        } else {
-          setSearchResults(sanitized);
-        }
-        setHasNextPage(res.hasNext);
-      } else if (q.trim()) {
-        const res = await searchAnime(q.trim(), currentSource);
+      const sanitized = res.results.map((a) => ({ ...a, source: currentSource }));
+      setSearchResults(sanitized, q, currentSource);
+      setCurrentPage(page);
+      setTotalPages(res.totalPages);
+      setHasNextPage(res.hasNext);
 
-        if (useAnimeStore.getState().activeSource !== currentSource) {
-          return;
-        }
+      // Guardar sesión
+      saveSearchSession(currentSource, {
+        query: q,
+        genre,
+        status,
+        animeType: type,
+        orderBy: order,
+        results: sanitized,
+        currentPage: page,
+        totalPages: res.totalPages,
+        hasNextPage: res.hasNext,
+      });
 
-        const sanitized = res.map((a) => ({ ...a, source: currentSource }));
-        setSearchResults(sanitized);
-        setHasNextPage(false);
-      } else {
-        const res = await advancedSearch({ page: 1 }, currentSource);
-
-        if (useAnimeStore.getState().activeSource !== currentSource) {
-          return;
-        }
-
-        const sanitized = res.results.map((a) => ({ ...a, source: currentSource }));
-        setSearchResults(sanitized);
-        setHasNextPage(res.hasNext);
+      if (q.trim()) {
+        addRecentSearch(q.trim());
       }
     } catch (e) {
-      console.error(e);
+      console.error('Mobile search execution failed', e);
       if (useAnimeStore.getState().activeSource === currentSource) {
-        setSearchResults([]);
+        setSearchResults([], q, currentSource);
+        setTotalPages(undefined);
+        setHasNextPage(false);
       }
     } finally {
       if (useAnimeStore.getState().activeSource === currentSource) {
         setIsSearching(false);
-        setIsLoadingMore(false);
       }
     }
-  }, [activeSource, searchResults, setSearchResults, setIsSearching]);
+  }, [activeSource, setSearchResults, setIsSearching, saveSearchSession, addRecentSearch]);
 
+  // Restaurar o ejecutar búsqueda inicial al cambiar fuente o montar
   useEffect(() => {
-    const genreParam = searchParams.get('genre') ?? '';
-    const qParam = searchParams.get('q') ?? '';
-    if (genreParam !== selectedGenre) setSelectedGenre(genreParam);
-    if (qParam !== query) setQuery(qParam);
+    const session = getSearchSession(activeSource);
+    const hasParams = Boolean(urlQ || urlGenre || urlStatus || urlType || urlOrder || urlPage > 1);
 
-    if (searchResults.length > 0 && query === qParam && selectedGenre === genreParam) {
+    if (!hasParams && session && session.results.length > 0) {
+      setQuery(session.query);
+      setSelectedGenre(session.genre);
+      setSelectedStatus(session.status);
+      setSelectedType(session.animeType);
+      setSelectedOrder(session.orderBy);
+      setCurrentPage(session.currentPage);
+      setTotalPages(session.totalPages);
+      setHasNextPage(session.hasNextPage);
+      setSearchResults(session.results, session.query, activeSource);
+      syncUrlParams(session.query, session.genre, session.status, session.animeType, session.orderBy, session.currentPage);
       return;
     }
 
-    executeSearch(qParam, genreParam, selectedStatus, selectedType, selectedOrder, 1);
-    setCurrentPage(1);
-  }, [activeSource, selectedGenre, selectedStatus, selectedType, selectedOrder]);
+    setQuery(urlQ);
+    setSelectedGenre(urlGenre);
+    setSelectedStatus(urlStatus);
+    setSelectedType(urlType);
+    setSelectedOrder(urlOrder);
+    setCurrentPage(urlPage);
+
+    executeSearch(urlQ, urlGenre, urlStatus, urlType, urlOrder, urlPage);
+  }, [activeSource]);
 
   const handleInput = (val: string) => {
     setQuery(val);
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
+      syncUrlParams(val, selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
       executeSearch(val, selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
-    }, 450);
+    }, 400);
   };
 
   const handleGenreToggle = (slug: string) => {
     const nextGenre = selectedGenre === slug ? '' : slug;
     setSelectedGenre(nextGenre);
-    const newParams = new URLSearchParams(searchParams);
-    if (nextGenre) {
-      newParams.set('genre', nextGenre);
-    } else {
-      newParams.delete('genre');
-    }
-    setSearchParams(newParams);
+    syncUrlParams(query, nextGenre, selectedStatus, selectedType, selectedOrder, 1);
+    executeSearch(query, nextGenre, selectedStatus, selectedType, selectedOrder, 1);
   };
 
   const handleResetFilters = () => {
@@ -197,15 +230,20 @@ export function MobileSearchPage() {
     setSelectedStatus('');
     setSelectedType('');
     setSelectedOrder('');
-    setSearchParams({});
+    setCurrentPage(1);
+    syncUrlParams('', '', '', '', '', 1);
     executeSearch('', '', '', '', '', 1);
   };
 
-  const handleLoadMore = () => {
-    const nextPage = currentPage + 1;
-    setCurrentPage(nextPage);
-    setIsLoadingMore(true);
-    executeSearch(query, selectedGenre, selectedStatus, selectedType, selectedOrder, nextPage);
+  const handlePageChange = (newPage: number) => {
+    setCurrentPage(newPage);
+    syncUrlParams(query, selectedGenre, selectedStatus, selectedType, selectedOrder, newPage);
+    executeSearch(query, selectedGenre, selectedStatus, selectedType, selectedOrder, newPage);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    const mainEl = document.querySelector('main > div');
+    if (mainEl) {
+      mainEl.scrollTo({ top: 0, behavior: 'smooth' });
+    }
   };
 
   return (
@@ -230,7 +268,11 @@ export function MobileSearchPage() {
           />
           {query && (
             <button
-              onClick={() => { setQuery(''); executeSearch('', selectedGenre, selectedStatus, selectedType, selectedOrder, 1); }}
+              onClick={() => {
+                setQuery('');
+                syncUrlParams('', selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
+                executeSearch('', selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
+              }}
               style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 0 }}
             >
               <X size={16} />
@@ -260,7 +302,7 @@ export function MobileSearchPage() {
         <button
           onClick={() => {
             loadGenres(activeSource);
-            executeSearch(query, selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
+            executeSearch(query, selectedGenre, selectedStatus, selectedType, selectedOrder, currentPage);
           }}
           disabled={isSearching}
           title="Actualizar catálogo"
@@ -274,6 +316,52 @@ export function MobileSearchPage() {
           <RefreshCw size={14} className={isSearching ? 'animate-spin' : ''} />
         </button>
       </div>
+
+      {/* Chips de Búsquedas Recientes Móvil */}
+      {recentSearches.length > 0 && !query && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 14, overflowX: 'auto', paddingBottom: 4 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 3, color: 'var(--text-muted)', fontSize: 11, fontWeight: 600, flexShrink: 0 }}>
+            <Clock size={12} />
+          </div>
+          {recentSearches.map((term) => (
+            <div
+              key={term}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 4,
+                background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
+                borderRadius: 'var(--radius-full)', padding: '3px 10px',
+                fontSize: 11, color: 'var(--text-secondary)', flexShrink: 0,
+              }}
+            >
+              <span
+                onClick={() => {
+                  setQuery(term);
+                  syncUrlParams(term, selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
+                  executeSearch(term, selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
+                }}
+                style={{ cursor: 'pointer', fontWeight: 600 }}
+              >
+                {term}
+              </span>
+              <button
+                onClick={(e) => { e.stopPropagation(); removeRecentSearch(term); }}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 0, display: 'flex' }}
+              >
+                <X size={11} />
+              </button>
+            </div>
+          ))}
+          <button
+            onClick={clearRecentSearches}
+            style={{
+              background: 'none', border: 'none', color: 'var(--accent-primary)',
+              fontSize: 10, fontWeight: 600, cursor: 'pointer', flexShrink: 0,
+            }}
+          >
+            Borrar
+          </button>
+        </div>
+      )}
 
       {/* Panel Desplegable de Filtros Móvil */}
       <AnimatePresence>
@@ -378,23 +466,14 @@ export function MobileSearchPage() {
             ))}
           </div>
 
-          {hasNextPage && (
-            <div style={{ display: 'flex', justifyContent: 'center', marginTop: 20 }}>
-              <button
-                onClick={handleLoadMore}
-                disabled={isLoadingMore}
-                style={{
-                  background: 'var(--bg-surface)', border: '1px solid var(--border-moderate)',
-                  borderRadius: 'var(--radius-full)', padding: '8px 20px',
-                  color: 'var(--text-primary)', fontSize: 12, fontWeight: 700,
-                  cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
-                }}
-              >
-                {isLoadingMore ? <Loader2 size={14} className="animate-spin" /> : <ChevronDown size={14} />}
-                {isLoadingMore ? 'Cargando...' : 'Cargar más'}
-              </button>
-            </div>
-          )}
+          {/* Paginador Numérico Móvil */}
+          <PaginationBar
+            currentPage={currentPage}
+            totalPages={totalPages}
+            hasNext={hasNextPage}
+            onPageChange={handlePageChange}
+            isLoading={isSearching}
+          />
         </>
       )}
     </div>

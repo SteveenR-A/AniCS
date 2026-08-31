@@ -7,7 +7,7 @@ import {
   Maximize, Minimize, Settings, ChevronLeft, ChevronRight,
   Loader2, SkipForward, SkipBack, RotateCcw, RotateCw,
   Sun, ListVideo, Zap, Server, AlertCircle,
-  Eye, EyeOff, Scaling
+  Eye, EyeOff, Scaling, Smartphone
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { usePlayerStore } from '@/stores/usePlayerStore';
@@ -82,6 +82,58 @@ export function PlayerPage() {
   const [autoNext, setAutoNext] = useState(true);
   const [activeDrawer, setActiveDrawer] = useState<'none' | 'servers' | 'settings'>('none');
   const [showServerDropdown, setShowServerDropdown] = useState(false);
+
+  // Detección reactiva de orientación vertical (Portrait)
+  const [isPortrait, setIsPortrait] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return window.innerHeight > window.innerWidth;
+    }
+    return false;
+  });
+  const [screenOrientation, setScreenOrientation] = useState<'auto' | 'landscape' | 'portrait'>('auto');
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsPortrait(window.innerHeight > window.innerWidth);
+    };
+    window.addEventListener('resize', handleResize);
+    window.addEventListener('orientationchange', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('orientationchange', handleResize);
+    };
+  }, []);
+
+  const toggleScreenOrientation = async () => {
+    try {
+      if (typeof window !== 'undefined' && window.screen && 'orientation' in window.screen) {
+        const orient = window.screen.orientation as any;
+        if (screenOrientation === 'auto') {
+          if (orient && orient.lock) {
+            await orient.lock('landscape');
+            setScreenOrientation('landscape');
+            showToast({ icon: 'aspect', text: 'Orientación: Horizontal' });
+          }
+        } else if (screenOrientation === 'landscape') {
+          if (orient && orient.lock) {
+            await orient.lock('portrait');
+            setScreenOrientation('portrait');
+            showToast({ icon: 'aspect', text: 'Orientación: Vertical' });
+          }
+        } else {
+          if (orient && orient.unlock) {
+            orient.unlock();
+            setScreenOrientation('auto');
+            showToast({ icon: 'aspect', text: 'Orientación: Automática' });
+          }
+        }
+      } else {
+        setScreenOrientation(prev => prev === 'landscape' ? 'auto' : 'landscape');
+      }
+    } catch {
+      setScreenOrientation(prev => prev === 'landscape' ? 'auto' : 'landscape');
+    }
+  };
 
   // Gestos & HUD Toasts
   const [hudToast, setHudToast] = useState<{ icon: 'volume' | 'brightness' | 'seek' | 'aspect'; text: string; value?: number } | null>(null);
@@ -217,60 +269,24 @@ export function PlayerPage() {
     }
   }, [isFullscreen, enterFullscreen, exitFullscreen]);
 
-  // Orientación horizontal automática, Pantalla Completa inmersiva y Screen Wake Lock
+  // Pantalla Completa inmersiva sin bloqueo rígido de orientación
   useEffect(() => {
-    try {
-      if (typeof window !== 'undefined' && window.screen && 'orientation' in window.screen) {
-        const orient = window.screen.orientation as any;
-        if (orient && orient.lock) {
-          orient.lock('landscape').catch(() => {});
-        }
-      }
-    } catch {}
-
     enterFullscreen().catch(() => {});
-    setKeepScreenOn(true);
-
-    let wakeLockSentinel: any = null;
-    const requestWakeLock = async () => {
-      try {
-        if ('wakeLock' in navigator) {
-          wakeLockSentinel = await (navigator as any).wakeLock.request('screen');
-        }
-      } catch {}
-    };
-
-    requestWakeLock();
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        requestWakeLock();
-        setKeepScreenOn(true);
-        enterFullscreen().catch(() => {});
-      }
-    };
 
     const handleFullscreenChange = () => {
       const isFull = !!(document.fullscreenElement || (document as any).webkitFullscreenElement);
       setIsFullscreen(isFull);
     };
 
-    document.addEventListener('visibilitychange', handleVisibilityChange);
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
 
     return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
       document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
 
-      if (wakeLockSentinel && typeof wakeLockSentinel.release === 'function') {
-        wakeLockSentinel.release().catch(() => {});
-      }
-
       // Permitir que la pantalla se apague normalmente al salir del reproductor
       setKeepScreenOn(false);
-
       exitFullscreen().catch(() => {});
 
       try {
@@ -283,6 +299,58 @@ export function PlayerPage() {
       } catch {}
     };
   }, [enterFullscreen, exitFullscreen]);
+
+  // Screen Wake Lock y mantenimiento de pantalla activa estrictamente reactivo a isPlaying
+  const wakeLockSentinelRef = useRef<any>(null);
+
+  useEffect(() => {
+    let isSubscribed = true;
+
+    const updateScreenLock = async () => {
+      if (isPlaying && document.visibilityState === 'visible') {
+        setKeepScreenOn(true);
+        try {
+          if ('wakeLock' in navigator && !wakeLockSentinelRef.current) {
+            const sentinel = await (navigator as any).wakeLock.request('screen');
+            if (isSubscribed) {
+              wakeLockSentinelRef.current = sentinel;
+              sentinel.addEventListener?.('release', () => {
+                if (wakeLockSentinelRef.current === sentinel) {
+                  wakeLockSentinelRef.current = null;
+                }
+              });
+            } else {
+              sentinel.release().catch(() => {});
+            }
+          }
+        } catch {}
+      } else {
+        setKeepScreenOn(false);
+        if (wakeLockSentinelRef.current && typeof wakeLockSentinelRef.current.release === 'function') {
+          wakeLockSentinelRef.current.release().catch(() => {});
+          wakeLockSentinelRef.current = null;
+        }
+      }
+    };
+
+    updateScreenLock();
+
+    const handleVisibilityChange = () => {
+      updateScreenLock();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      isSubscribed = false;
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      setKeepScreenOn(false);
+      if (wakeLockSentinelRef.current && typeof wakeLockSentinelRef.current.release === 'function') {
+        wakeLockSentinelRef.current.release().catch(() => {});
+        wakeLockSentinelRef.current = null;
+      }
+    };
+  }, [isPlaying]);
 
   // Sincronización precisa de Anime y Episodio desde URL (sin mezclar animes previos)
   const currentLoadedKey = useRef<string>('');
@@ -566,6 +634,7 @@ export function PlayerPage() {
   };
 
   const handleEnded = () => {
+    setIsPlaying(false);
     saveProgress(1.0);
     if (autoNext && currentAnime && currentEpisode) {
       const nextEp = currentAnime.episodes.find(e => e.number === currentEpisode.number + 1);
@@ -1105,14 +1174,20 @@ export function PlayerPage() {
             onTouchStart={e => e.stopPropagation()}
             onTouchMove={e => e.stopPropagation()}
           >
-            {/* ── Top Bar (Imagen 3): Volver + Título a la Izquierda | Estado + Servidor + Reload + Ajustes a la Derecha ── */}
+            {/* ── Top Bar: Volver + Título a la Izquierda | Estado + Servidor + Botones a la Derecha ── */}
             <div
               data-interactive
               onClick={e => e.stopPropagation()}
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: isPortrait ? 6 : 12,
+                flexWrap: 'nowrap',
+              }}
             >
               {/* Izquierda: Botón Volver + Título del Anime */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, flex: 1 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: isPortrait ? 8 : 12, minWidth: 0, flex: 1 }}>
                 <button
                   onClick={() => {
                     saveProgress();
@@ -1120,36 +1195,40 @@ export function PlayerPage() {
                   }}
                   style={{
                     background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.2)',
-                    borderRadius: 'var(--radius-full)', padding: '6px 14px',
-                    display: 'flex', alignItems: 'center', gap: 6,
+                    borderRadius: 'var(--radius-full)', padding: isPortrait ? '6px 10px' : '6px 14px',
+                    display: 'flex', alignItems: 'center', gap: 4,
                     color: 'white', cursor: 'pointer', backdropFilter: 'blur(10px)', flexShrink: 0,
-                    fontSize: 13, fontWeight: 700,
+                    fontSize: 12, fontWeight: 700,
                   }}
                 >
-                  <ChevronLeft size={16} /> Volver
+                  <ChevronLeft size={16} /> <span style={{ display: isPortrait && isMobile ? 'none' : 'inline' }}>Volver</span>
                 </button>
 
                 <h2 style={{
-                  fontSize: isMobile ? 13 : 15, fontWeight: 700, color: 'white', margin: 0,
+                  fontSize: isPortrait ? 12 : (isMobile ? 13 : 15),
+                  fontWeight: 700, color: 'white', margin: 0,
                   whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                  maxWidth: isPortrait ? '180px' : 'auto',
                 }}>
-                  {currentAnime.title} — Episodio {currentEpisode.number}
+                  {currentAnime.title} {isPortrait ? `E${currentEpisode.number}` : `— Episodio ${currentEpisode.number}`}
                 </h2>
               </div>
 
-              {/* Derecha: Estado + Servidor Dropdown + Botón Reload + Botón Ajustes */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end', flexShrink: 0 }}>
-                {/* Badge de Estado: Reproduciendo / Pausado */}
-                <div style={{
-                  display: 'flex', alignItems: 'center', gap: 6,
-                  background: isPlaying ? 'rgba(59, 130, 246, 0.25)' : 'rgba(251, 191, 36, 0.2)',
-                  border: isPlaying ? '1px solid rgba(59, 130, 246, 0.4)' : '1px solid rgba(251, 191, 36, 0.4)',
-                  padding: '5px 12px', borderRadius: 'var(--radius-full)',
-                  color: 'white', fontSize: 11, fontWeight: 700,
-                }}>
-                  {isPlaying ? <Play size={11} fill="white" /> : <Pause size={11} fill="white" />}
-                  <span>{isPlaying ? 'Reproduciendo' : 'Pausado'}</span>
-                </div>
+              {/* Derecha: Estado + Servidor Dropdown + Botón Reload + Episodios + Ajustes */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: isPortrait ? 5 : 8, justifyContent: 'flex-end', flexShrink: 0 }}>
+                {/* Badge de Estado: solo en landscape / pantallas amplias */}
+                {!isPortrait && (
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    background: isPlaying ? 'rgba(59, 130, 246, 0.25)' : 'rgba(251, 191, 36, 0.2)',
+                    border: isPlaying ? '1px solid rgba(59, 130, 246, 0.4)' : '1px solid rgba(251, 191, 36, 0.4)',
+                    padding: '5px 12px', borderRadius: 'var(--radius-full)',
+                    color: 'white', fontSize: 11, fontWeight: 700,
+                  }}>
+                    {isPlaying ? <Play size={11} fill="white" /> : <Pause size={11} fill="white" />}
+                    <span>{isPlaying ? 'Reproduciendo' : 'Pausado'}</span>
+                  </div>
+                )}
 
                 {/* Selector de Servidor */}
                 <div style={{ position: 'relative' }}>
@@ -1158,9 +1237,9 @@ export function PlayerPage() {
                     title="Seleccionar servidor de video"
                     style={{
                       background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.2)',
-                      borderRadius: 'var(--radius-full)', padding: '5px 12px',
-                      color: 'white', fontSize: 12, fontWeight: 700, cursor: 'pointer',
-                      display: 'flex', alignItems: 'center', gap: 6, backdropFilter: 'blur(10px)',
+                      borderRadius: 'var(--radius-full)', padding: isPortrait ? '5px 8px' : '5px 12px',
+                      color: 'white', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', gap: 4, backdropFilter: 'blur(10px)',
                     }}
                   >
                     <span>{selectedServer?.name || '1080p'}</span>
@@ -1177,7 +1256,7 @@ export function PlayerPage() {
                           background: 'rgba(15,16,22,0.96)', backdropFilter: 'blur(20px)',
                           border: '1px solid var(--border-moderate)', borderRadius: 'var(--radius-lg)',
                           padding: 8, zIndex: 50, display: 'flex', flexDirection: 'column', gap: 4,
-                          minWidth: 160, boxShadow: 'var(--shadow-lg)',
+                          minWidth: 150, boxShadow: 'var(--shadow-lg)',
                         }}
                       >
                         <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', padding: '4px 8px' }}>
@@ -1217,12 +1296,12 @@ export function PlayerPage() {
                   title="Cambiar al siguiente servidor"
                   style={{
                     background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.2)',
-                    borderRadius: 'var(--radius-full)', width: 34, height: 34,
+                    borderRadius: 'var(--radius-full)', width: isPortrait ? 30 : 34, height: isPortrait ? 30 : 34,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     color: 'white', cursor: 'pointer', backdropFilter: 'blur(10px)',
                   }}
                 >
-                  <RotateCw size={15} />
+                  <RotateCw size={isPortrait ? 13 : 15} />
                 </button>
 
                 {/* Botón Lista de Episodios */}
@@ -1235,12 +1314,12 @@ export function PlayerPage() {
                   style={{
                     background: activeDrawer === 'servers' ? 'var(--accent-primary)' : 'rgba(255,255,255,0.12)',
                     border: '1px solid rgba(255,255,255,0.2)',
-                    borderRadius: 'var(--radius-full)', width: 34, height: 34,
+                    borderRadius: 'var(--radius-full)', width: isPortrait ? 30 : 34, height: isPortrait ? 30 : 34,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     color: 'white', cursor: 'pointer', backdropFilter: 'blur(10px)',
                   }}
                 >
-                  <ListVideo size={15} />
+                  <ListVideo size={isPortrait ? 13 : 15} />
                 </button>
 
                 {/* Botón Ajustes */}
@@ -1253,21 +1332,21 @@ export function PlayerPage() {
                   style={{
                     background: activeDrawer === 'settings' ? 'var(--accent-primary)' : 'rgba(255,255,255,0.12)',
                     border: '1px solid rgba(255,255,255,0.2)',
-                    borderRadius: 'var(--radius-full)', width: 34, height: 34,
+                    borderRadius: 'var(--radius-full)', width: isPortrait ? 30 : 34, height: isPortrait ? 30 : 34,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     color: 'white', cursor: 'pointer', backdropFilter: 'blur(10px)',
                   }}
                 >
-                  <Settings size={15} />
+                  <Settings size={isPortrait ? 13 : 15} />
                 </button>
               </div>
             </div>
 
-            {/* ── Bottom Bar (Imagen 3): Barra de Progreso Delgada + Controles Izquierda / Velocidad y Opciones Derecha ── */}
+            {/* ── Bottom Bar: Barra de Progreso + Controles Multimedia Adaptativos ── */}
             <div
               data-interactive
               onClick={e => e.stopPropagation()}
-              style={{ display: 'flex', flexDirection: 'column', gap: 10 }}
+              style={{ display: 'flex', flexDirection: 'column', gap: isPortrait ? 6 : 10 }}
             >
               {/* Barra de Progreso Interactiva Estilo MPV con Scrubbing / Arrastre Continuo */}
               {(() => {
@@ -1380,147 +1459,326 @@ export function PlayerPage() {
                 );
               })()}
 
-              {/* Fila Inferior de Controles */}
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                {/* Grupo Izquierda (Imagen 3): ⏮ | ↺ 10 | ▶/⏸ | 10 ↻ | ⏭ | 0:04 / 24:16 */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  {/* Episodio Anterior */}
-                  <button
-                    disabled={!currentAnime || currentEpisode.number <= 1}
-                    onClick={() => handleLoadEpisode(currentEpisode.number - 1)}
-                    style={{
-                      background: 'none', border: 'none',
-                      color: currentEpisode.number > 1 ? 'white' : 'rgba(255,255,255,0.3)',
-                      cursor: currentEpisode.number > 1 ? 'pointer' : 'not-allowed',
-                      display: 'flex', alignItems: 'center', padding: 4,
-                    }}
-                  >
-                    <SkipBack size={18} />
-                  </button>
+              {/* Fila(s) de Controles Inferiores - Adaptativo Vertical / Horizontal */}
+              {isPortrait ? (
+                /* Estructura Móvil Vertical (2 filas limpias y balanceadas) */
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {/* Fila 1 en Vertical: Timestamp + Controles de Reproducción Centrales */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.85)' }}>
+                      {formatTime(isScrubbing && scrubTime !== null ? scrubTime : playbackTime)} / {formatTime(duration)}
+                    </span>
 
-                  {/* Retroceder 10s */}
-                  <button
-                    onClick={() => seekRelative(-10)}
-                    style={{
-                      background: 'none', border: 'none', color: 'white',
-                      cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3,
-                      fontSize: 12, fontWeight: 700, padding: 4,
-                    }}
-                  >
-                    <RotateCcw size={16} /> 10
-                  </button>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                      {/* Episodio Anterior */}
+                      <button
+                        disabled={!currentAnime || currentEpisode.number <= 1}
+                        onClick={() => handleLoadEpisode(currentEpisode.number - 1)}
+                        style={{
+                          background: 'none', border: 'none',
+                          color: currentEpisode.number > 1 ? 'white' : 'rgba(255,255,255,0.3)',
+                          cursor: currentEpisode.number > 1 ? 'pointer' : 'not-allowed',
+                          display: 'flex', alignItems: 'center', padding: 2,
+                        }}
+                      >
+                        <SkipBack size={18} />
+                      </button>
 
-                  {/* Play / Pause Botón Circular */}
-                  <button
-                    onClick={togglePlay}
-                    style={{
-                      width: 38, height: 38, borderRadius: '50%',
-                      background: 'rgba(255,255,255,0.18)', border: '1px solid rgba(255,255,255,0.25)',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      color: 'white', cursor: 'pointer', backdropFilter: 'blur(8px)',
-                    }}
-                  >
-                    {isPlaying ? <Pause size={18} fill="white" /> : <Play size={18} fill="white" style={{ marginLeft: 2 }} />}
-                  </button>
+                      {/* Retroceder 10s */}
+                      <button
+                        onClick={() => seekRelative(-10)}
+                        style={{
+                          background: 'none', border: 'none', color: 'white',
+                          cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 2,
+                          fontSize: 11, fontWeight: 700, padding: 2,
+                        }}
+                      >
+                        <RotateCcw size={15} /> 10
+                      </button>
 
-                  {/* Avanzar 10s */}
-                  <button
-                    onClick={() => seekRelative(10)}
-                    style={{
-                      background: 'none', border: 'none', color: 'white',
-                      cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3,
-                      fontSize: 12, fontWeight: 700, padding: 4,
-                    }}
-                  >
-                    10 <RotateCw size={16} />
-                  </button>
+                      {/* Play / Pause Botón Circular */}
+                      <button
+                        onClick={togglePlay}
+                        style={{
+                          width: 40, height: 40, borderRadius: '50%',
+                          background: 'rgba(255,255,255,0.22)', border: '1px solid rgba(255,255,255,0.35)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          color: 'white', cursor: 'pointer', backdropFilter: 'blur(8px)',
+                          boxShadow: '0 2px 10px rgba(0,0,0,0.5)',
+                        }}
+                      >
+                        {isPlaying ? <Pause size={18} fill="white" /> : <Play size={18} fill="white" style={{ marginLeft: 2 }} />}
+                      </button>
 
-                  {/* Episodio Siguiente */}
-                  <button
-                    disabled={!currentAnime || currentEpisode.number >= currentAnime.episodes.length}
-                    onClick={() => handleLoadEpisode(currentEpisode.number + 1)}
-                    style={{
-                      background: 'none', border: 'none',
-                      color: currentEpisode.number < currentAnime.episodes.length ? 'white' : 'rgba(255,255,255,0.3)',
-                      cursor: currentEpisode.number < currentAnime.episodes.length ? 'pointer' : 'not-allowed',
-                      display: 'flex', alignItems: 'center', padding: 4,
-                    }}
-                  >
-                    <SkipForward size={18} />
-                  </button>
+                      {/* Avanzar 10s */}
+                      <button
+                        onClick={() => seekRelative(10)}
+                        style={{
+                          background: 'none', border: 'none', color: 'white',
+                          cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 2,
+                          fontSize: 11, fontWeight: 700, padding: 2,
+                        }}
+                      >
+                        10 <RotateCw size={15} />
+                      </button>
 
-                  {/* Timestamp */}
-                  <span style={{ fontSize: 12, fontWeight: 700, color: 'white', marginLeft: 6 }}>
-                    {formatTime(isScrubbing && scrubTime !== null ? scrubTime : playbackTime)} / {formatTime(duration)}
-                  </span>
+                      {/* Episodio Siguiente */}
+                      <button
+                        disabled={!currentAnime || currentEpisode.number >= currentAnime.episodes.length}
+                        onClick={() => handleLoadEpisode(currentEpisode.number + 1)}
+                        style={{
+                          background: 'none', border: 'none',
+                          color: currentEpisode.number < currentAnime.episodes.length ? 'white' : 'rgba(255,255,255,0.3)',
+                          cursor: currentEpisode.number < currentAnime.episodes.length ? 'pointer' : 'not-allowed',
+                          display: 'flex', alignItems: 'center', padding: 2,
+                        }}
+                      >
+                        <SkipForward size={18} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Fila 2 en Vertical: Opciones Secundarias (Saltar Intro, Velocidad, Aspecto, Rotación, Fullscreen) */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, paddingTop: 2 }}>
+                    {/* Saltar Intro */}
+                    {duration > 120 ? (
+                      <button
+                        onClick={() => seekRelative(85)}
+                        style={{
+                          background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)',
+                          borderRadius: 'var(--radius-full)', padding: '4px 10px',
+                          color: 'white', fontSize: 10, fontWeight: 700, cursor: 'pointer',
+                          display: 'flex', alignItems: 'center', gap: 3,
+                        }}
+                      >
+                        +85s Intro
+                      </button>
+                    ) : <div />}
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      {/* Velocidad */}
+                      <button
+                        onClick={() => {
+                          const currentIndex = SPEED_OPTIONS.indexOf(playbackSpeed);
+                          const nextSpeed = SPEED_OPTIONS[(currentIndex + 1) % SPEED_OPTIONS.length];
+                          setPlaybackSpeed(nextSpeed);
+                          showToast({ icon: 'seek', text: `Velocidad: ${nextSpeed}x` });
+                        }}
+                        style={{
+                          background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)',
+                          borderRadius: 'var(--radius-md)', padding: '4px 8px',
+                          color: 'white', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                        }}
+                      >
+                        {playbackSpeed.toFixed(1)}X
+                      </button>
+
+                      {/* Aspecto */}
+                      <button
+                        onClick={cycleAspectRatio}
+                        title="Relación de aspecto"
+                        style={{
+                          background: aspectRatio !== 'contain' ? 'var(--accent-primary)' : 'rgba(255,255,255,0.1)',
+                          border: '1px solid rgba(255,255,255,0.2)',
+                          borderRadius: 'var(--radius-md)', padding: '4px 7px',
+                          color: 'white', fontSize: 10, fontWeight: 700, cursor: 'pointer',
+                          display: 'flex', alignItems: 'center', gap: 3,
+                        }}
+                      >
+                        <Scaling size={13} />
+                        <span>{aspectRatio === 'contain' ? '16:9' : aspectRatio === 'cover' ? 'Zoom' : 'Estirar'}</span>
+                      </button>
+
+                      {/* Rotar Orientación */}
+                      <button
+                        onClick={toggleScreenOrientation}
+                        title="Rotar pantalla"
+                        style={{
+                          background: screenOrientation !== 'auto' ? 'var(--accent-primary)' : 'rgba(255,255,255,0.1)',
+                          border: '1px solid rgba(255,255,255,0.2)',
+                          borderRadius: 'var(--radius-md)', padding: '4px 7px',
+                          color: 'white', fontSize: 10, fontWeight: 700, cursor: 'pointer',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        }}
+                      >
+                        <Smartphone size={13} />
+                      </button>
+
+                      {/* Fullscreen */}
+                      <button
+                        onClick={toggleFullscreen}
+                        title={isFullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'}
+                        style={{
+                          background: isFullscreen ? 'var(--accent-primary)' : 'rgba(255,255,255,0.1)',
+                          border: '1px solid rgba(255,255,255,0.2)',
+                          borderRadius: 'var(--radius-md)', padding: '4px 7px',
+                          color: 'white', fontSize: 10, fontWeight: 700, cursor: 'pointer',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        }}
+                      >
+                        {isFullscreen ? <Minimize size={13} /> : <Maximize size={13} />}
+                      </button>
+                    </div>
+                  </div>
                 </div>
-
-                {/* Grupo Derecha (Imagen 3): Saltar Intro + Velocidad 1.0X + Aspecto / Fullscreen */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  {/* Saltar Intro */}
-                  {duration > 120 && (
+              ) : (
+                /* Estructura Horizontal (1 fila elegante tradicional) */
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  {/* Grupo Izquierda: ⏮ | ↺ 10 | ▶/⏸ | 10 ↻ | ⏭ | 0:04 / 24:16 */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    {/* Episodio Anterior */}
                     <button
-                      onClick={() => seekRelative(85)}
+                      disabled={!currentAnime || currentEpisode.number <= 1}
+                      onClick={() => handleLoadEpisode(currentEpisode.number - 1)}
+                      style={{
+                        background: 'none', border: 'none',
+                        color: currentEpisode.number > 1 ? 'white' : 'rgba(255,255,255,0.3)',
+                        cursor: currentEpisode.number > 1 ? 'pointer' : 'not-allowed',
+                        display: 'flex', alignItems: 'center', padding: 4,
+                      }}
+                    >
+                      <SkipBack size={18} />
+                    </button>
+
+                    {/* Retroceder 10s */}
+                    <button
+                      onClick={() => seekRelative(-10)}
+                      style={{
+                        background: 'none', border: 'none', color: 'white',
+                        cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3,
+                        fontSize: 12, fontWeight: 700, padding: 4,
+                      }}
+                    >
+                      <RotateCcw size={16} /> 10
+                    </button>
+
+                    {/* Play / Pause Botón Circular */}
+                    <button
+                      onClick={togglePlay}
+                      style={{
+                        width: 38, height: 38, borderRadius: '50%',
+                        background: 'rgba(255,255,255,0.18)', border: '1px solid rgba(255,255,255,0.25)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        color: 'white', cursor: 'pointer', backdropFilter: 'blur(8px)',
+                      }}
+                    >
+                      {isPlaying ? <Pause size={18} fill="white" /> : <Play size={18} fill="white" style={{ marginLeft: 2 }} />}
+                    </button>
+
+                    {/* Avanzar 10s */}
+                    <button
+                      onClick={() => seekRelative(10)}
+                      style={{
+                        background: 'none', border: 'none', color: 'white',
+                        cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3,
+                        fontSize: 12, fontWeight: 700, padding: 4,
+                      }}
+                    >
+                      10 <RotateCw size={16} />
+                    </button>
+
+                    {/* Episodio Siguiente */}
+                    <button
+                      disabled={!currentAnime || currentEpisode.number >= currentAnime.episodes.length}
+                      onClick={() => handleLoadEpisode(currentEpisode.number + 1)}
+                      style={{
+                        background: 'none', border: 'none',
+                        color: currentEpisode.number < currentAnime.episodes.length ? 'white' : 'rgba(255,255,255,0.3)',
+                        cursor: currentEpisode.number < currentAnime.episodes.length ? 'pointer' : 'not-allowed',
+                        display: 'flex', alignItems: 'center', padding: 4,
+                      }}
+                    >
+                      <SkipForward size={18} />
+                    </button>
+
+                    {/* Timestamp */}
+                    <span style={{ fontSize: 12, fontWeight: 700, color: 'white', marginLeft: 6 }}>
+                      {formatTime(isScrubbing && scrubTime !== null ? scrubTime : playbackTime)} / {formatTime(duration)}
+                    </span>
+                  </div>
+
+                  {/* Grupo Derecha: Saltar Intro + Velocidad + Aspecto + Rotar + Fullscreen */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    {/* Saltar Intro */}
+                    {duration > 120 && (
+                      <button
+                        onClick={() => seekRelative(85)}
+                        style={{
+                          background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)',
+                          borderRadius: 'var(--radius-full)', padding: '5px 12px',
+                          color: 'white', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                          display: 'flex', alignItems: 'center', gap: 4,
+                        }}
+                      >
+                        Saltar Intro (+85s)
+                      </button>
+                    )}
+
+                    {/* Selector de Velocidad */}
+                    <button
+                      onClick={() => {
+                        const currentIndex = SPEED_OPTIONS.indexOf(playbackSpeed);
+                        const nextSpeed = SPEED_OPTIONS[(currentIndex + 1) % SPEED_OPTIONS.length];
+                        setPlaybackSpeed(nextSpeed);
+                        showToast({ icon: 'seek', text: `Velocidad: ${nextSpeed}x` });
+                      }}
                       style={{
                         background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)',
-                        borderRadius: 'var(--radius-full)', padding: '5px 12px',
+                        borderRadius: 'var(--radius-md)', padding: '5px 10px',
+                        color: 'white', fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                      }}
+                    >
+                      {playbackSpeed.toFixed(1)}X
+                    </button>
+
+                    {/* Botón de Aspecto */}
+                    <button
+                      onClick={cycleAspectRatio}
+                      title="Relación de aspecto"
+                      style={{
+                        background: aspectRatio !== 'contain' ? 'var(--accent-primary)' : 'rgba(255,255,255,0.1)',
+                        border: '1px solid rgba(255,255,255,0.2)',
+                        borderRadius: 'var(--radius-md)', padding: '5px 8px',
                         color: 'white', fontSize: 11, fontWeight: 700, cursor: 'pointer',
                         display: 'flex', alignItems: 'center', gap: 4,
                       }}
                     >
-                      Saltar Intro (+85s)
+                      <Scaling size={14} />
+                      <span>{aspectRatio === 'contain' ? '16:9' : aspectRatio === 'cover' ? 'Zoom' : 'Estirar'}</span>
                     </button>
-                  )}
 
-                  {/* Selector de Velocidad (1.0X estilo Imagen 3) */}
-                  <button
-                    onClick={() => {
-                      const currentIndex = SPEED_OPTIONS.indexOf(playbackSpeed);
-                      const nextSpeed = SPEED_OPTIONS[(currentIndex + 1) % SPEED_OPTIONS.length];
-                      setPlaybackSpeed(nextSpeed);
-                      showToast({ icon: 'seek', text: `Velocidad: ${nextSpeed}x` });
-                    }}
-                    style={{
-                      background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)',
-                      borderRadius: 'var(--radius-md)', padding: '5px 10px',
-                      color: 'white', fontSize: 12, fontWeight: 700, cursor: 'pointer',
-                    }}
-                  >
-                    {playbackSpeed.toFixed(1)}X
-                  </button>
+                    {/* Botón de Rotación */}
+                    <button
+                      onClick={toggleScreenOrientation}
+                      title="Rotar orientación de pantalla"
+                      style={{
+                        background: screenOrientation !== 'auto' ? 'var(--accent-primary)' : 'rgba(255,255,255,0.1)',
+                        border: '1px solid rgba(255,255,255,0.2)',
+                        borderRadius: 'var(--radius-md)', padding: '5px 8px',
+                        color: 'white', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      }}
+                    >
+                      <Smartphone size={14} />
+                    </button>
 
-                  {/* Botón de Aspecto */}
-                  <button
-                    onClick={cycleAspectRatio}
-                    title="Relación de aspecto"
-                    style={{
-                      background: aspectRatio !== 'contain' ? 'var(--accent-primary)' : 'rgba(255,255,255,0.1)',
-                      border: '1px solid rgba(255,255,255,0.2)',
-                      borderRadius: 'var(--radius-md)', padding: '5px 8px',
-                      color: 'white', fontSize: 11, fontWeight: 700, cursor: 'pointer',
-                      display: 'flex', alignItems: 'center', gap: 4,
-                    }}
-                  >
-                    <Scaling size={14} />
-                    <span>{aspectRatio === 'contain' ? '16:9' : aspectRatio === 'cover' ? 'Zoom' : 'Estirar'}</span>
-                  </button>
-
-                  {/* Botón de Pantalla Completa (Fullscreen) */}
-                  <button
-                    onClick={toggleFullscreen}
-                    title={isFullscreen ? 'Salir de pantalla completa (F)' : 'Pantalla completa (F)'}
-                    style={{
-                      background: isFullscreen ? 'var(--accent-primary)' : 'rgba(255,255,255,0.1)',
-                      border: '1px solid rgba(255,255,255,0.2)',
-                      borderRadius: 'var(--radius-md)', padding: '5px 8px',
-                      color: 'white', fontSize: 11, fontWeight: 700, cursor: 'pointer',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    }}
-                  >
-                    {isFullscreen ? <Minimize size={14} /> : <Maximize size={14} />}
-                  </button>
+                    {/* Botón de Pantalla Completa */}
+                    <button
+                      onClick={toggleFullscreen}
+                      title={isFullscreen ? 'Salir de pantalla completa (F)' : 'Pantalla completa (F)'}
+                      style={{
+                        background: isFullscreen ? 'var(--accent-primary)' : 'rgba(255,255,255,0.1)',
+                        border: '1px solid rgba(255,255,255,0.2)',
+                        borderRadius: 'var(--radius-md)', padding: '5px 8px',
+                        color: 'white', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      }}
+                    >
+                      {isFullscreen ? <Minimize size={14} /> : <Maximize size={14} />}
+                    </button>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           </motion.div>
         )}

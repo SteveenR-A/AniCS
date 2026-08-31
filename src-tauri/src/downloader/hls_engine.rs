@@ -1,6 +1,5 @@
 use bytes::Bytes;
 use futures::future::join_all;
-use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -140,35 +139,97 @@ impl HlsEngine {
         })
     }
 
-    /// Descarga todos los segmentos con ventana deslizante concurrente
-    pub async fn download(&self, playlist: &ParsedPlaylist) -> AppResult<PathBuf> {
+    /// Descarga todos los segmentos con persistencia granular de fragmentos y ventana deslizante concurrente
+    pub async fn download(
+        &self,
+        playlist: &ParsedPlaylist,
+        cancel_rx: &mut tokio::sync::oneshot::Receiver<()>,
+    ) -> AppResult<crate::commands::download_cmd::PauseReason> {
+        use crate::commands::download_cmd::PauseReason;
+
         if let Some(parent) = self.output_path.parent() {
             tokio::fs::create_dir_all(parent).await.map_err(AppError::Io)?;
         }
 
-        let part_path = PathBuf::from(format!("{}.part", self.output_path.to_string_lossy()));
-        let mut file = File::create(&part_path).await.map_err(AppError::Io)?;
+        let parts_dir = PathBuf::from(format!("{}.hls_parts", self.output_path.to_string_lossy()));
+        tokio::fs::create_dir_all(&parts_dir).await.map_err(AppError::Io)?;
+
         let total_segments = playlist.segment_urls.len();
-        let downloaded_bytes = Arc::new(Mutex::new(0u64));
-        let completed_segments = Arc::new(Mutex::new(0usize));
-        let buffer: Arc<Mutex<BTreeMap<usize, Bytes>>> = Arc::new(Mutex::new(BTreeMap::new()));
-        let mut next_write_index = 0usize;
+        if total_segments == 0 {
+            return Err(AppError::Download("La playlist HLS no contiene fragmentos".to_string()));
+        }
+
+        // 1. Escanear fragmentos preexistentes en disco para reanudación instantánea sin descargar desde cero
+        let mut initial_downloaded_bytes = 0u64;
+        let mut initial_completed = 0usize;
+        let mut existing_map = std::collections::HashSet::new();
+
+        for seg_idx in 0..total_segments {
+            let seg_path = parts_dir.join(format!("seg_{:05}.ts", seg_idx));
+            if let Ok(meta) = tokio::fs::metadata(&seg_path).await {
+                if meta.len() > 0 {
+                    initial_downloaded_bytes += meta.len();
+                    initial_completed += 1;
+                    existing_map.insert(seg_idx);
+                }
+            }
+        }
+
+        let downloaded_bytes = Arc::new(Mutex::new(initial_downloaded_bytes));
+        let completed_segments = Arc::new(Mutex::new(initial_completed));
 
         let start_time = Instant::now();
         let last_emit = Arc::new(Mutex::new(Instant::now()));
 
+        // Emitir progreso inicial si ya teníamos segmentos guardados de intentos anteriores
+        if initial_completed > 0 {
+            let initial_progress = (initial_completed as f32 / total_segments as f32) * 100.0;
+            let estimated_total = Some((initial_downloaded_bytes / initial_completed as u64) * total_segments as u64);
+            let _ = self.progress_tx.send(DownloadProgress {
+                id: self.download_id.clone(),
+                progress: initial_progress,
+                speed_kbps: 0.0,
+                downloaded_bytes: initial_downloaded_bytes,
+                total_bytes: estimated_total,
+                status: DownloadStatus::Downloading,
+                error: None,
+            });
+        }
+
         let referer = self.referer.clone();
         let segments = playlist.segment_urls.clone();
 
+        // 2. Descargar fragmentos faltantes
         for chunk_start in (0..total_segments).step_by(WINDOW_SIZE) {
+            // Comprobar señal de cancelación antes de iniciar cada lote
+            if let Ok(Some(())) = cancel_rx.try_recv().map(Some) {
+                let cur_bytes = *downloaded_bytes.lock().await;
+                let cur_comp = *completed_segments.lock().await;
+                let cur_prog = (cur_comp as f32 / total_segments as f32) * 100.0;
+                let _ = self.progress_tx.send(DownloadProgress {
+                    id: self.download_id.clone(),
+                    progress: cur_prog,
+                    speed_kbps: 0.0,
+                    downloaded_bytes: cur_bytes,
+                    total_bytes: None,
+                    status: DownloadStatus::Paused,
+                    error: None,
+                });
+                return Ok(PauseReason::UserPaused);
+            }
+
             let chunk_end = (chunk_start + WINDOW_SIZE).min(total_segments);
             let mut tasks = vec![];
 
             for (offset, seg_url) in segments[chunk_start..chunk_end].iter().enumerate() {
                 let seg_idx = chunk_start + offset;
+                if existing_map.contains(&seg_idx) {
+                    continue;
+                }
+
                 let url = seg_url.clone();
                 let ref_url = referer.clone();
-                let buf = buffer.clone();
+                let seg_path = parts_dir.join(format!("seg_{:05}.ts", seg_idx));
                 let dl_bytes = downloaded_bytes.clone();
                 let comp_segs = completed_segments.clone();
                 let tx = self.progress_tx.clone();
@@ -176,17 +237,15 @@ impl HlsEngine {
                 let last_e = last_emit.clone();
 
                 tasks.push(tokio::spawn(async move {
-                    // Reintentos automáticos
                     let mut attempts = 0;
                     loop {
                         attempts += 1;
                         match download_segment(&url, ref_url.as_deref()).await {
                             Ok(bytes) => {
                                 let byte_len = bytes.len() as u64;
-                                {
-                                    let mut b = buf.lock().await;
-                                    b.insert(seg_idx, bytes);
-                                }
+                                // Guardar fragmento individual en disco inmediatamente
+                                tokio::fs::write(&seg_path, &bytes).await.map_err(AppError::Io)?;
+
                                 {
                                     let mut db = dl_bytes.lock().await;
                                     *db += byte_len;
@@ -207,7 +266,6 @@ impl HlsEngine {
                                             0.0
                                         };
 
-                                        // Estimar el peso total del episodio basado en el promedio de bytes por segmento
                                         let estimated_total = if completed > 0 {
                                             Some((current_bytes / completed as u64) * total_segments as u64)
                                         } else {
@@ -240,37 +298,45 @@ impl HlsEngine {
                 }));
             }
 
-            // Esperar que termine el lote actual
-            let results = join_all(tasks).await;
-            for res in results {
-                res.map_err(|e| AppError::Download(e.to_string()))??;
-            }
-
-            // Escribir en orden secuencial
-            let mut b = buffer.lock().await;
-            while let Some(bytes) = b.remove(&next_write_index) {
-                file.write_all(&bytes).await.map_err(AppError::Io)?;
-                next_write_index += 1;
+            if !tasks.is_empty() {
+                let results = join_all(tasks).await;
+                for res in results {
+                    res.map_err(|e| AppError::Download(e.to_string()))??;
+                }
             }
         }
 
-        file.flush().await.map_err(AppError::Io)?;
-        drop(file);
+        // 3. Ensamblar todos los fragmentos en orden secuencial en el archivo .part final
+        let part_path = PathBuf::from(format!("{}.part", self.output_path.to_string_lossy()));
+        let mut final_file = File::create(&part_path).await.map_err(AppError::Io)?;
+
+        for seg_idx in 0..total_segments {
+            let seg_path = parts_dir.join(format!("seg_{:05}.ts", seg_idx));
+            let seg_bytes = tokio::fs::read(&seg_path).await.map_err(AppError::Io)?;
+            final_file.write_all(&seg_bytes).await.map_err(AppError::Io)?;
+        }
+
+        final_file.flush().await.map_err(AppError::Io)?;
+        drop(final_file);
 
         let final_bytes = *downloaded_bytes.lock().await;
-        if final_bytes < 10240 || next_write_index == 0 {
+        if final_bytes < 10240 {
             let _ = tokio::fs::remove_file(&part_path).await;
             return Err(AppError::Download(
-                "La descarga finalizó sin datos suficientes o el archivo está vacío".to_string(),
+                "La descarga finalizó sin datos suficientes o el archivo está incompleto".to_string(),
             ));
         }
 
+        // Renombrar .part a .mp4
         if let Err(_) = tokio::fs::rename(&part_path, &self.output_path).await {
             tokio::fs::copy(&part_path, &self.output_path).await.map_err(AppError::Io)?;
             let _ = tokio::fs::remove_file(&part_path).await;
         }
 
-        Ok(self.output_path.clone())
+        // Limpiar la carpeta temporal de fragmentos solo al completarse el 100%
+        let _ = tokio::fs::remove_dir_all(&parts_dir).await;
+
+        Ok(PauseReason::Completed)
     }
 
     async fn fetch_url(&self, url: &str) -> AppResult<String> {

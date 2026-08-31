@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { AppShell } from '@/components/layout/AppShell';
 import { HomePage } from '@/pages/HomePage';
 import { SearchPage } from '@/pages/SearchPage';
@@ -9,10 +9,11 @@ import { SchedulePage } from '@/pages/SchedulePage';
 import { TopAnimePage } from '@/pages/TopAnimePage';
 import { HistoryPage, FavoritesPage, DownloadsPage } from '@/pages/OtherPages';
 import { SettingsPage } from '@/pages/SettingsPage';
+import { ChangelogModal } from '@/components/ChangelogModal';
 import { useAnimeStore } from '@/stores/useAnimeStore';
-import { onDownloadProgress, onDownloadCompleted } from '@/services/downloadService';
 import { useDownloadStore } from '@/stores/useDownloadStore';
 import { useThemeStore } from '@/stores/useThemeStore';
+import { checkForAppUpdates, CURRENT_VERSION } from '@/services/updateService';
 
 function AppRoutes() {
   return (
@@ -39,6 +40,7 @@ export default function App() {
   const { loadSources } = useAnimeStore();
   const { init: initDownloads, cleanup: cleanupDownloads } = useDownloadStore();
   const { loadTheme } = useThemeStore();
+  const [showPatchNotes, setShowPatchNotes] = useState(false);
 
   useEffect(() => {
     // Cargar tema visual guardado
@@ -49,6 +51,14 @@ export default function App() {
 
     // Hidratar descargas de SQLite y activar listeners
     initDownloads();
+
+    // Comprobar si es la primera vez que se abre esta versión para mostrar notas de parche
+    try {
+      const lastSeenVersion = localStorage.getItem('anics_last_seen_version');
+      if (lastSeenVersion !== CURRENT_VERSION) {
+        setShowPatchNotes(true);
+      }
+    } catch {}
 
     // Solicitar permisos de notificación al inicio (Android necesita POST_NOTIFICATIONS desde API 33)
     (async () => {
@@ -63,14 +73,28 @@ export default function App() {
       }
     })();
 
+    // Comprobación de nuevas versiones en segundo plano tras inicializar la UI
+    const timer = setTimeout(() => {
+      checkForAppUpdates(true);
+    }, 3000);
+
     return () => {
+      clearTimeout(timer);
       cleanupDownloads();
     };
   }, [loadTheme, loadSources, initDownloads, cleanupDownloads]);
 
+  const handleClosePatchNotes = () => {
+    try {
+      localStorage.setItem('anics_last_seen_version', CURRENT_VERSION);
+    } catch {}
+    setShowPatchNotes(false);
+  };
+
   return (
     <BrowserRouter>
       <AppRoutes />
+      <ChangelogModal isOpen={showPatchNotes} onClose={handleClosePatchNotes} />
     </BrowserRouter>
   );
 }

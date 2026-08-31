@@ -78,6 +78,37 @@ pub fn sanitize_anime_folder_name(name: &str) -> String {
     }
 }
 
+/// Obtiene los bytes reales ya descargados en disco (.part o fragmentos .hls_parts)
+pub async fn get_existing_download_progress(output_path: &Path) -> u64 {
+    // 1. Comprobar si existe archivo parcial .part (MP4 directo o ensamblado)
+    let part_path = PathBuf::from(format!("{}.part", output_path.to_string_lossy()));
+    if let Ok(meta) = tokio::fs::metadata(&part_path).await {
+        if meta.len() > 0 {
+            return meta.len();
+        }
+    }
+
+    // 2. Comprobar si existe carpeta de fragmentos HLS
+    let hls_parts_dir = PathBuf::from(format!("{}.hls_parts", output_path.to_string_lossy()));
+    if hls_parts_dir.is_dir() {
+        let mut total = 0u64;
+        if let Ok(mut entries) = tokio::fs::read_dir(&hls_parts_dir).await {
+            while let Ok(Some(entry)) = entries.next_entry().await {
+                if let Ok(meta) = entry.metadata().await {
+                    if meta.is_file() {
+                        total += meta.len();
+                    }
+                }
+            }
+        }
+        if total > 0 {
+            return total;
+        }
+    }
+
+    0
+}
+
 fn spawn_download(
     download_id: String,
     task_record: DownloadTask,
@@ -218,11 +249,20 @@ fn spawn_download(
                     });
                 }
                 Err(e) => {
+                    let current_bytes = get_existing_download_progress(&output_path).await;
+                    let prog = if current_bytes > 0 && task_record.total_bytes.unwrap_or(0) > 0 {
+                        ((current_bytes as f32 / task_record.total_bytes.unwrap() as f32) * 100.0).min(99.0)
+                    } else if current_bytes > 0 {
+                        task_record.progress.max(1.0)
+                    } else {
+                        task_record.progress
+                    };
+
                     let _ = progress_tx.send(DownloadProgress {
                         id: dl_id_task.clone(),
-                        progress: 0.0,
+                        progress: prog,
                         speed_kbps: 0.0,
-                        downloaded_bytes: task_record.downloaded_bytes,
+                        downloaded_bytes: current_bytes,
                         total_bytes: task_record.total_bytes,
                         status: DownloadStatus::Failed,
                         error: Some(e.to_string()),
@@ -241,11 +281,14 @@ fn spawn_download(
 
             match engine.parse_playlist().await {
                 Ok(playlist) => {
-                    match engine.download(&playlist).await {
-                        Ok(path) => {
+                    match engine.download(&playlist, &mut cancel_rx).await {
+                        Ok(PauseReason::UserPaused) => {
+                            let _ = app_handle_finish.emit("download-paused", serde_json::json!({ "id": dl_id_task }));
+                        }
+                        Ok(PauseReason::Completed) => {
                             let _ = app_handle_finish.emit("download-completed", serde_json::json!({
                                 "id": dl_id_task,
-                                "path": path.to_string_lossy(),
+                                "path": output_path.to_string_lossy(),
                             }));
                             let _ = progress_tx.send(DownloadProgress {
                                 id: dl_id_task.clone(),
@@ -258,11 +301,20 @@ fn spawn_download(
                             });
                         }
                         Err(e) => {
+                            let current_bytes = get_existing_download_progress(&output_path).await;
+                            let prog = if current_bytes > 0 && task_record.total_bytes.unwrap_or(0) > 0 {
+                                ((current_bytes as f32 / task_record.total_bytes.unwrap() as f32) * 100.0).min(99.0)
+                            } else if current_bytes > 0 {
+                                task_record.progress.max(1.0)
+                            } else {
+                                task_record.progress
+                            };
+
                             let _ = progress_tx.send(DownloadProgress {
                                 id: dl_id_task.clone(),
-                                progress: 0.0,
+                                progress: prog,
                                 speed_kbps: 0.0,
-                                downloaded_bytes: task_record.downloaded_bytes,
+                                downloaded_bytes: current_bytes,
                                 total_bytes: task_record.total_bytes,
                                 status: DownloadStatus::Failed,
                                 error: Some(e.to_string()),
@@ -271,11 +323,12 @@ fn spawn_download(
                     }
                 }
                 Err(e) => {
+                    let current_bytes = get_existing_download_progress(&output_path).await;
                     let _ = progress_tx.send(DownloadProgress {
                         id: dl_id_task.clone(),
-                        progress: 0.0,
+                        progress: task_record.progress,
                         speed_kbps: 0.0,
-                        downloaded_bytes: task_record.downloaded_bytes,
+                        downloaded_bytes: current_bytes,
                         total_bytes: task_record.total_bytes,
                         status: DownloadStatus::Failed,
                         error: Some(format!("Error en stream HLS: {e}")),
@@ -370,6 +423,20 @@ pub async fn pause_download(
     Ok(())
 }
 
+/// Pausar todas las descargas activas (e.g. al salir del foco de la app)
+#[tauri::command]
+pub async fn pause_all_downloads(
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let mut tasks = state.download_manager.tasks.lock().await;
+    for (_id, handle) in tasks.drain() {
+        let _ = handle.cancel_tx.send(());
+    }
+    drop(tasks);
+    let _ = storage::mark_active_downloads_as_paused_db();
+    Ok(())
+}
+
 /// Reanudar una descarga pausada o interrumpida
 #[tauri::command]
 pub async fn resume_download(
@@ -408,7 +475,7 @@ pub async fn resume_download(
     Ok(())
 }
 
-/// Reiniciar una descarga fallida desde cero
+/// Reiniciar/Reintentar una descarga fallida (reanudando inteligentemente desde disco si hay fragmentos previos)
 #[tauri::command]
 pub async fn retry_download(
     download_id: String,
@@ -420,19 +487,19 @@ pub async fn retry_download(
         .find(|t| t.id == download_id)
         .ok_or_else(|| "Descarga no encontrada".to_string())?;
 
-    // Eliminar archivo previo (.mp4 o .part) si existe
+    // No borramos .part ni .hls_parts: comprobamos bytes existentes en disco para reanudar
     let p = Path::new(&task_record.output_path);
-    if p.exists() {
-        let _ = fs::remove_file(p);
-    }
-    let part_p = PathBuf::from(format!("{}.part", task_record.output_path));
-    if part_p.exists() {
-        let _ = fs::remove_file(part_p);
-    }
+    let existing_bytes = get_existing_download_progress(p).await;
 
     let mut record = task_record;
-    record.downloaded_bytes = 0;
-    record.progress = 0.0;
+    if existing_bytes > 0 {
+        record.downloaded_bytes = existing_bytes;
+        if let Some(tot) = record.total_bytes {
+            if tot > 0 {
+                record.progress = ((existing_bytes as f32 / tot as f32) * 100.0).min(99.0);
+            }
+        }
+    }
     record.status = "queued".to_string();
     record.error = None;
     storage::save_download_task(&record).map_err(|e| e.to_string())?;
@@ -466,7 +533,7 @@ pub async fn cancel_download(
     Ok(())
 }
 
-/// Eliminar el registro de una descarga de SQLite (y opcionalmente su archivo)
+/// Eliminar el registro de una descarga de SQLite (y opcionalmente sus archivos parciales o finales)
 #[tauri::command]
 pub async fn delete_download_record(
     download_id: String,
@@ -489,6 +556,10 @@ pub async fn delete_download_record(
                 let part_p = PathBuf::from(format!("{}.part", task.output_path));
                 if part_p.exists() {
                     let _ = fs::remove_file(part_p);
+                }
+                let hls_parts_dir = PathBuf::from(format!("{}.hls_parts", task.output_path));
+                if hls_parts_dir.exists() {
+                    let _ = fs::remove_dir_all(hls_parts_dir);
                 }
             }
         }

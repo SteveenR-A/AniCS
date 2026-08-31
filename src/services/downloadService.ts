@@ -15,6 +15,8 @@ function androidBridge() {
           details: string
         ) => void;
         stopDownloadService: () => void;
+        notifyDownloadComplete: (title: string, episodeInfo: string) => void;
+        showUpdateNotification: (title: string, body: string) => void;
         setKeepScreenOn: (enabled: boolean) => void;
       }
     | undefined;
@@ -58,6 +60,28 @@ export const notifyServiceStop = (): void => {
   }
 };
 
+export const notifyDownloadComplete = (
+  title: string,
+  episodeInfo: string
+): void => {
+  try {
+    androidBridge()?.notifyDownloadComplete(title, episodeInfo);
+  } catch (e) {
+    console.warn('Error notifying download complete:', e);
+  }
+};
+
+export const showUpdateNotification = (
+  title: string,
+  body: string
+): void => {
+  try {
+    androidBridge()?.showUpdateNotification(title, body);
+  } catch (e) {
+    console.warn('Error showing update notification:', e);
+  }
+};
+
 export const setKeepScreenOn = (enabled: boolean): void => {
   try {
     androidBridge()?.setKeepScreenOn(enabled);
@@ -91,6 +115,10 @@ export const startDownload = (params: {
 /** Pausar una descarga activa limpiamente */
 export const pauseDownload = (downloadId: string): Promise<void> =>
   invoke('pause_download', { downloadId });
+
+/** Pausar todas las descargas activas en curso */
+export const pauseAllDownloads = (): Promise<void> =>
+  invoke('pause_all_downloads');
 
 /** Reanudar una descarga pausada o interrumpida */
 export const resumeDownload = (downloadId: string): Promise<void> =>

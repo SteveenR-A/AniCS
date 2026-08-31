@@ -109,31 +109,36 @@ export function MobileDetailsPage() {
       .trim();
   };
 
-  const titlesMatch = (a: string, b: string): boolean => {
+  const strictTitlesMatch = (a: string, b: string): boolean => {
     const normA = normalizeTitle(a);
     const normB = normalizeTitle(b);
     if (!normA || !normB) return false;
     if (normA === normB) return true;
-    if (normA.includes(normB) || normB.includes(normA)) return true;
 
-    const wordsA = normA.split(' ').filter(w => w.length > 2);
-    const wordsB = normB.split(' ').filter(w => w.length > 2);
-    if (wordsA.length >= 2 && wordsB.length >= 2) {
-      const common = wordsA.filter(w => wordsB.includes(w));
-      if (common.length >= Math.min(wordsA.length, wordsB.length) - 1 && common.length >= 2) {
-        return true;
-      }
-    }
-    return false;
+    // Normalizar sufijos de temporadas comunes
+    const cleanSeasonTokens = (str: string) => {
+      return str
+        .replace(/\b(1st|first|primer[ao]?)\s+season\b/g, 'season 1')
+        .replace(/\b(2nd|second|segund[ao]?)\s+season\b/g, 'season 2')
+        .replace(/\b(3rd|third|tercer[ao]?)\s+season\b/g, 'season 3')
+        .replace(/\b(4th|fourth|cuart[ao]?)\s+season\b/g, 'season 4')
+        .replace(/\b(5th|fifth|quint[ao]?)\s+season\b/g, 'season 5')
+        .replace(/\btemporada\s+(\d+)\b/g, 'season $1')
+        .replace(/\btemp\s+(\d+)\b/g, 'season $1')
+        .replace(/\bs(\d+)\b/g, 'season $1')
+        .trim();
+    };
+
+    return cleanSeasonTokens(normA) === cleanSeasonTokens(normB);
   };
 
   // Sincronizar descargas locales e historial cada vez que cambien los detalles del anime
   useEffect(() => {
     if (!details?.title) return;
 
-    // 1. Sincronizar episodios descargados en disco
+    // 1. Sincronizar episodios descargados en disco con validación estricta de temporada
     scanLocalDownloads().then((folders) => {
-      const match = folders.find(f => titlesMatch(f.animeTitle, details.title));
+      const match = folders.find(f => strictTitlesMatch(f.animeTitle, details.title));
 
       const map = new Map<number, LocalEpisodeItem>();
       if (match) {
@@ -148,11 +153,14 @@ export function MobileDetailsPage() {
       setLocalEpisodesMap(map);
     }).catch(console.error);
 
-    // 2. Sincronizar progreso de visualización de SQLite
+    // 2. Sincronizar progreso de visualización de SQLite priorizando URL única de anime
     getHistory(500, 0).then((history) => {
       const map = new Map<number, number>();
       for (const h of history) {
-        if (titlesMatch(h.animeTitle, details.title)) {
+        const isUrlMatch = Boolean(h.animeUrl && details.url && h.animeUrl === details.url);
+        const isTitleMatch = strictTitlesMatch(h.animeTitle, details.title);
+
+        if (isUrlMatch || isTitleMatch) {
           if (!map.has(h.episodeNumber)) {
             map.set(h.episodeNumber, h.watchProgress);
           }
@@ -160,7 +168,7 @@ export function MobileDetailsPage() {
       }
       setHistoryMap(map);
     }).catch(console.error);
-  }, [details?.title]);
+  }, [details?.title, details?.url]);
 
   const handlePlayEpisode = async (ep: Episode) => {
     if (!details) return;

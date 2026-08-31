@@ -3,11 +3,12 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search, X, Loader2, SearchX,
-  RotateCcw, ChevronDown, ChevronUp, Check, SlidersHorizontal, RefreshCw
+  RotateCcw, ChevronDown, ChevronUp, Check, SlidersHorizontal, RefreshCw, Clock
 } from 'lucide-react';
 import { useAnimeStore } from '@/stores/useAnimeStore';
-import { searchAnime, advancedSearch } from '@/services/animeService';
+import { advancedSearch } from '@/services/animeService';
 import { CachedImage } from '@/components/CachedImage';
+import { PaginationBar } from '@/components/PaginationBar';
 import type { AnimeResult, SearchFilters } from '@/types';
 
 function ResultCard({ anime, onClick }: { anime: AnimeResult; onClick: () => void }) {
@@ -98,23 +99,32 @@ export function DesktopSearchPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const {
     activeSource, setActiveSource, searchResults, setSearchResults,
-    isSearching, setIsSearching, genres, loadGenres
+    isSearching, setIsSearching, genres, loadGenres,
+    saveSearchSession, getSearchSession,
+    recentSearches, addRecentSearch, removeRecentSearch, clearRecentSearches
   } = useAnimeStore();
 
-  const [query, setQuery] = useState(searchParams.get('q') ?? '');
-  const [selectedGenre, setSelectedGenre] = useState<string>(searchParams.get('genre') ?? '');
-  const [selectedStatus, setSelectedStatus] = useState<string>(searchParams.get('status') ?? '');
-  const [selectedType, setSelectedType] = useState<string>(searchParams.get('type') ?? '');
-  const [selectedOrder, setSelectedOrder] = useState<string>(searchParams.get('order') ?? '');
-  const [showFilters, setShowFilters] = useState(Boolean(searchParams.get('genre') || searchParams.get('status') || searchParams.get('type')));
-  
-  const [currentPage, setCurrentPage] = useState(1);
+  const urlQ = searchParams.get('q') ?? '';
+  const urlPage = parseInt(searchParams.get('p') || '1', 10) || 1;
+  const urlGenre = searchParams.get('genre') ?? '';
+  const urlStatus = searchParams.get('status') ?? '';
+  const urlType = searchParams.get('type') ?? '';
+  const urlOrder = searchParams.get('order') ?? '';
+
+  const [query, setQuery] = useState(urlQ);
+  const [selectedGenre, setSelectedGenre] = useState<string>(urlGenre);
+  const [selectedStatus, setSelectedStatus] = useState<string>(urlStatus);
+  const [selectedType, setSelectedType] = useState<string>(urlType);
+  const [selectedOrder, setSelectedOrder] = useState<string>(urlOrder);
+  const [currentPage, setCurrentPage] = useState<number>(urlPage);
+  const [totalPages, setTotalPages] = useState<number | undefined>(undefined);
   const [hasNextPage, setHasNextPage] = useState(false);
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [showFilters, setShowFilters] = useState(Boolean(urlGenre || urlStatus || urlType));
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const activeFilterCount = (selectedGenre ? 1 : 0) + (selectedStatus ? 1 : 0) + (selectedType ? 1 : 0) + (selectedOrder ? 1 : 0);
 
+  // Sincronizar fuente si está en los parámetros de la URL
   useEffect(() => {
     const urlSource = searchParams.get('source');
     if (urlSource && urlSource !== activeSource) {
@@ -126,6 +136,28 @@ export function DesktopSearchPage() {
     loadGenres(activeSource);
   }, [activeSource, loadGenres]);
 
+  // Actualizar la URL de forma sincronizada
+  const syncUrlParams = useCallback((
+    newQ: string,
+    newGenre: string,
+    newStatus: string,
+    newType: string,
+    newOrder: string,
+    newPage: number
+  ) => {
+    const params = new URLSearchParams();
+    if (newQ.trim()) params.set('q', newQ.trim());
+    if (newGenre) params.set('genre', newGenre);
+    if (newStatus) params.set('status', newStatus);
+    if (newType) params.set('type', newType);
+    if (newOrder) params.set('order', newOrder);
+    if (newPage > 1) params.set('p', String(newPage));
+    if (activeSource) params.set('source', activeSource);
+
+    setSearchParams(params, { replace: true });
+  }, [activeSource, setSearchParams]);
+
+  // Ejecutar búsqueda avanzada paginada
   const executeSearch = useCallback(async (
     q: string,
     genre: string,
@@ -136,97 +168,120 @@ export function DesktopSearchPage() {
   ) => {
     const currentSource = activeSource;
     setIsSearching(true);
+
     try {
-      const hasAdvancedFilters = Boolean(genre || status || type || order);
+      const filters: SearchFilters = {
+        query: q.trim() || undefined,
+        genre: genre || undefined,
+        status: status || undefined,
+        animeType: type || undefined,
+        orderBy: order || undefined,
+        page,
+      };
 
-      if (hasAdvancedFilters) {
-        const filters: SearchFilters = {
-          query: q.trim() || undefined,
-          genre: genre || undefined,
-          status: status || undefined,
-          animeType: type || undefined,
-          orderBy: order || undefined,
-          page,
-        };
-        const res = await advancedSearch(filters, currentSource);
+      const res = await advancedSearch(filters, currentSource);
 
-        if (useAnimeStore.getState().activeSource !== currentSource) {
-          return;
-        }
+      if (useAnimeStore.getState().activeSource !== currentSource) {
+        return;
+      }
 
-        const sanitized = res.results.map((a) => ({ ...a, source: currentSource }));
-        if (page > 1) {
-          setSearchResults([...searchResults, ...sanitized]);
-        } else {
-          setSearchResults(sanitized);
-        }
-        setHasNextPage(res.hasNext);
-      } else if (q.trim()) {
-        const res = await searchAnime(q.trim(), currentSource);
+      const sanitized = res.results.map((a) => ({ ...a, source: currentSource }));
+      setSearchResults(sanitized, q, currentSource);
+      setCurrentPage(page);
+      setTotalPages(res.totalPages);
+      setHasNextPage(res.hasNext);
 
-        if (useAnimeStore.getState().activeSource !== currentSource) {
-          return;
-        }
+      // Guardar en la sesión de búsqueda de esta fuente
+      saveSearchSession(currentSource, {
+        query: q,
+        genre,
+        status,
+        animeType: type,
+        orderBy: order,
+        results: sanitized,
+        currentPage: page,
+        totalPages: res.totalPages,
+        hasNextPage: res.hasNext,
+      });
 
-        const sanitized = res.map((a) => ({ ...a, source: currentSource }));
-        setSearchResults(sanitized);
-        setHasNextPage(false);
-      } else {
-        const res = await advancedSearch({ page: 1 }, currentSource);
-
-        if (useAnimeStore.getState().activeSource !== currentSource) {
-          return;
-        }
-
-        const sanitized = res.results.map((a) => ({ ...a, source: currentSource }));
-        setSearchResults(sanitized);
-        setHasNextPage(res.hasNext);
+      if (q.trim()) {
+        addRecentSearch(q.trim());
       }
     } catch (e) {
-      console.error(e);
+      console.error('Search execution failed', e);
       if (useAnimeStore.getState().activeSource === currentSource) {
-        setSearchResults([]);
+        setSearchResults([], q, currentSource);
+        setTotalPages(undefined);
+        setHasNextPage(false);
       }
     } finally {
       if (useAnimeStore.getState().activeSource === currentSource) {
         setIsSearching(false);
-        setIsLoadingMore(false);
       }
     }
-  }, [activeSource, searchResults, setSearchResults, setIsSearching]);
+  }, [activeSource, setSearchResults, setIsSearching, saveSearchSession, addRecentSearch]);
 
+  // Restaurar o ejecutar búsqueda inicial al cambiar fuente o montar
   useEffect(() => {
-    const genreParam = searchParams.get('genre') ?? '';
-    const qParam = searchParams.get('q') ?? '';
-    if (genreParam !== selectedGenre) setSelectedGenre(genreParam);
-    if (qParam !== query) setQuery(qParam);
+    const session = getSearchSession(activeSource);
+    const hasParams = Boolean(urlQ || urlGenre || urlStatus || urlType || urlOrder || urlPage > 1);
 
-    if (searchResults.length > 0 && query === qParam && selectedGenre === genreParam) {
+    if (!hasParams && session && session.results.length > 0) {
+      setQuery(session.query);
+      setSelectedGenre(session.genre);
+      setSelectedStatus(session.status);
+      setSelectedType(session.animeType);
+      setSelectedOrder(session.orderBy);
+      setCurrentPage(session.currentPage);
+      setTotalPages(session.totalPages);
+      setHasNextPage(session.hasNextPage);
+      setSearchResults(session.results, session.query, activeSource);
+      syncUrlParams(session.query, session.genre, session.status, session.animeType, session.orderBy, session.currentPage);
       return;
     }
 
-    executeSearch(qParam, genreParam, selectedStatus, selectedType, selectedOrder, 1);
-    setCurrentPage(1);
-  }, [activeSource, selectedGenre, selectedStatus, selectedType, selectedOrder]);
+    setQuery(urlQ);
+    setSelectedGenre(urlGenre);
+    setSelectedStatus(urlStatus);
+    setSelectedType(urlType);
+    setSelectedOrder(urlOrder);
+    setCurrentPage(urlPage);
+
+    executeSearch(urlQ, urlGenre, urlStatus, urlType, urlOrder, urlPage);
+  }, [activeSource]);
 
   const handleInput = (val: string) => {
     setQuery(val);
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
+      syncUrlParams(val, selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
       executeSearch(val, selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
-    }, 450);
+    }, 400);
   };
 
   const handleGenreToggle = (slug: string) => {
     const nextGenre = selectedGenre === slug ? '' : slug;
     setSelectedGenre(nextGenre);
-    const newParams = new URLSearchParams(searchParams);
-    if (nextGenre) {
-      newParams.set('genre', nextGenre);
-    } else {
-      newParams.delete('genre');
-    }
-    setSearchParams(newParams);
+    syncUrlParams(query, nextGenre, selectedStatus, selectedType, selectedOrder, 1);
+    executeSearch(query, nextGenre, selectedStatus, selectedType, selectedOrder, 1);
+  };
+
+  const handleTypeSelect = (t: string) => {
+    setSelectedType(t);
+    syncUrlParams(query, selectedGenre, selectedStatus, t, selectedOrder, 1);
+    executeSearch(query, selectedGenre, selectedStatus, t, selectedOrder, 1);
+  };
+
+  const handleStatusSelect = (st: string) => {
+    setSelectedStatus(st);
+    syncUrlParams(query, selectedGenre, st, selectedType, selectedOrder, 1);
+    executeSearch(query, selectedGenre, st, selectedType, selectedOrder, 1);
+  };
+
+  const handleOrderChange = (ord: string) => {
+    setSelectedOrder(ord);
+    syncUrlParams(query, selectedGenre, selectedStatus, selectedType, ord, 1);
+    executeSearch(query, selectedGenre, selectedStatus, selectedType, ord, 1);
   };
 
   const handleResetFilters = () => {
@@ -235,21 +290,26 @@ export function DesktopSearchPage() {
     setSelectedStatus('');
     setSelectedType('');
     setSelectedOrder('');
-    setSearchParams({});
+    setCurrentPage(1);
+    syncUrlParams('', '', '', '', '', 1);
     executeSearch('', '', '', '', '', 1);
   };
 
-  const handleLoadMore = () => {
-    const nextPage = currentPage + 1;
-    setCurrentPage(nextPage);
-    setIsLoadingMore(true);
-    executeSearch(query, selectedGenre, selectedStatus, selectedType, selectedOrder, nextPage);
+  const handlePageChange = (newPage: number) => {
+    setCurrentPage(newPage);
+    syncUrlParams(query, selectedGenre, selectedStatus, selectedType, selectedOrder, newPage);
+    executeSearch(query, selectedGenre, selectedStatus, selectedType, selectedOrder, newPage);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    const mainEl = document.querySelector('main > div');
+    if (mainEl) {
+      mainEl.scrollTo({ top: 0, behavior: 'smooth' });
+    }
   };
 
   return (
     <div style={{ padding: '28px 36px', maxWidth: 1440, margin: '0 auto' }}>
       {/* Barra de Búsqueda Superior Desktop */}
-      <div style={{ display: 'flex', gap: 14, marginBottom: 24, alignItems: 'center' }}>
+      <div style={{ display: 'flex', gap: 14, marginBottom: 16, alignItems: 'center' }}>
         <div style={{
           flex: 1, minWidth: 300, display: 'flex', alignItems: 'center', gap: 12,
           background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
@@ -261,7 +321,7 @@ export function DesktopSearchPage() {
             type="text"
             value={query}
             onChange={(e) => handleInput(e.target.value)}
-            placeholder="Buscar anime por título (ej. Naruto, Solo Leveling, Demon Slayer)..."
+            placeholder="Buscar anime por título (ej. Naruto, Solo Leveling, Jujutsu Kaisen)..."
             style={{
               flex: 1, background: 'transparent', border: 'none',
               outline: 'none', color: 'var(--text-primary)', fontSize: 14,
@@ -269,7 +329,11 @@ export function DesktopSearchPage() {
           />
           {query && (
             <button
-              onClick={() => { setQuery(''); executeSearch('', selectedGenre, selectedStatus, selectedType, selectedOrder, 1); }}
+              onClick={() => {
+                setQuery('');
+                syncUrlParams('', selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
+                executeSearch('', selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
+              }}
               style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
             >
               <X size={18} />
@@ -330,11 +394,11 @@ export function DesktopSearchPage() {
           {showFilters ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
         </button>
 
-        {/* Botón Recargar / Actualizar Búsqueda */}
+        {/* Botón Recargar / Actualizar */}
         <button
           onClick={() => {
             loadGenres(activeSource);
-            executeSearch(query, selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
+            executeSearch(query, selectedGenre, selectedStatus, selectedType, selectedOrder, currentPage);
           }}
           disabled={isSearching}
           title="Actualizar catálogo y recargar resultados"
@@ -350,6 +414,53 @@ export function DesktopSearchPage() {
           <span>Actualizar</span>
         </button>
       </div>
+
+      {/* Búsquedas Recientes */}
+      {recentSearches.length > 0 && !query && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: 'var(--text-muted)', fontSize: 12, fontWeight: 600 }}>
+            <Clock size={13} />
+            <span>Recientes:</span>
+          </div>
+          {recentSearches.map((term) => (
+            <div
+              key={term}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
+                borderRadius: 'var(--radius-full)', padding: '4px 12px',
+                fontSize: 12, color: 'var(--text-secondary)',
+              }}
+            >
+              <span
+                onClick={() => {
+                  setQuery(term);
+                  syncUrlParams(term, selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
+                  executeSearch(term, selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
+                }}
+                style={{ cursor: 'pointer', fontWeight: 600 }}
+              >
+                {term}
+              </span>
+              <button
+                onClick={(e) => { e.stopPropagation(); removeRecentSearch(term); }}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 0, display: 'flex' }}
+              >
+                <X size={12} />
+              </button>
+            </div>
+          ))}
+          <button
+            onClick={clearRecentSearches}
+            style={{
+              background: 'none', border: 'none', color: 'var(--accent-primary)',
+              fontSize: 11, fontWeight: 600, cursor: 'pointer', marginLeft: 4,
+            }}
+          >
+            Borrar historial
+          </button>
+        </div>
+      )}
 
       {/* Panel de Filtros Desktop */}
       <AnimatePresence>
@@ -419,7 +530,7 @@ export function DesktopSearchPage() {
                 {['', 'serie', 'pelicula', 'ova'].map((t) => (
                   <button
                     key={t}
-                    onClick={() => setSelectedType(t)}
+                    onClick={() => handleTypeSelect(t)}
                     style={{
                       padding: '5px 12px', borderRadius: 'var(--radius-md)',
                       background: selectedType === t ? 'var(--bg-elevated)' : 'transparent',
@@ -438,7 +549,7 @@ export function DesktopSearchPage() {
                 {['', 'en-emision', 'concluido'].map((st) => (
                   <button
                     key={st}
-                    onClick={() => setSelectedStatus(st)}
+                    onClick={() => handleStatusSelect(st)}
                     style={{
                       padding: '5px 12px', borderRadius: 'var(--radius-md)',
                       background: selectedStatus === st ? 'var(--bg-elevated)' : 'transparent',
@@ -456,7 +567,7 @@ export function DesktopSearchPage() {
                 <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>Orden:</span>
                 <select
                   value={selectedOrder}
-                  onChange={(e) => setSelectedOrder(e.target.value)}
+                  onChange={(e) => handleOrderChange(e.target.value)}
                   style={{
                     background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
                     borderRadius: 'var(--radius-md)', padding: '5px 12px',
@@ -518,24 +629,14 @@ export function DesktopSearchPage() {
             ))}
           </div>
 
-          {hasNextPage && (
-            <div style={{ display: 'flex', justifyContent: 'center', marginTop: 36 }}>
-              <button
-                onClick={handleLoadMore}
-                disabled={isLoadingMore}
-                style={{
-                  background: 'var(--bg-surface)', border: '1px solid var(--border-moderate)',
-                  borderRadius: 'var(--radius-full)', padding: '12px 32px',
-                  color: 'var(--text-primary)', fontSize: 14, fontWeight: 700,
-                  cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8,
-                  boxShadow: 'var(--shadow-subtle)',
-                }}
-              >
-                {isLoadingMore ? <Loader2 size={16} className="animate-spin" /> : <ChevronDown size={16} />}
-                {isLoadingMore ? 'Cargando más...' : 'Cargar más animes'}
-              </button>
-            </div>
-          )}
+          {/* Paginador Numérico Completo */}
+          <PaginationBar
+            currentPage={currentPage}
+            totalPages={totalPages}
+            hasNext={hasNextPage}
+            onPageChange={handlePageChange}
+            isLoading={isSearching}
+          />
         </>
       )}
     </div>
