@@ -16,7 +16,7 @@ import { clearMemoryCache } from '@/components/CachedImage';
 
 const DEFAULT_JKANIME = 'https://jkanime.net';
 const DEFAULT_MUNDODONGHUA = 'https://www.mundodonghua.com';
-const CURRENT_VERSION = '0.1.6';
+const CURRENT_VERSION = '0.1.7';
 declare const __APP_COMMIT_HASH__: string;
 
 interface GitHubRelease {

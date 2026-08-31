@@ -1,5 +1,21 @@
 [
   {
+    "version": "0.1.7",
+    "date": "2026-08-31",
+    "title": "Paginación Numérica Completa, Navegación de Búsqueda, Reproductor Vertical y Diferenciación de Temporadas",
+    "type": "minor",
+    "highlights": [
+      "Paginación numérica completa en búsqueda y directorio (< 1 2 3 ... 163 >) con salto directo a página",
+      "Persistencia y restauración de sesiones de búsqueda con sincronización fluida en URL",
+      "Historial de búsquedas recientes interactivo con chips de acceso rápido",
+      "Reproductor adaptativo para modo vertical/portrait sin desbordamiento de controles",
+      "Botón de rotación de pantalla integrado en el HUD del reproductor (Auto / Horizontal / Vertical)",
+      "Preservación global de los botones de navegación del sistema en Android",
+      "Diferenciación estricta entre temporadas y secuelas de anime evitando colisiones de progreso y descargas",
+      "Deduplicación precisa de historial por URL única de anime y episodio"
+    ]
+  },
+  {
     "version": "0.1.6",
     "date": "2026-08-29",
     "title": "Descargas en Segundo Plano con Pantalla Apagada, Notificaciones Inteligentes y Archivos Temporales .part",

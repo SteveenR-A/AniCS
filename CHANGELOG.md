@@ -5,6 +5,53 @@ El formato está basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1
 
 ---
 
+## [0.1.7] - 2026-08-31
+
+### 📖 Paginación Numérica, Sesiones de Búsqueda, Reproductor Vertical y Diferenciación de Temporadas
+- **Paginación Numérica Completa en Búsqueda y Directorio (`< 1 2 3 ... 162 163 >`):**
+  - Implementación del componente `PaginationBar` con ventana deslizante inteligente, botones táctiles Anterior/Siguiente y formulario integrado para saltar directamente a cualquier página disponible en el catálogo de JKAnime y MundoDonghua.
+- **Navegación Fluida entre Sesiones de Búsqueda e Historial Reciente:**
+  - Sincronización bidireccional de parámetros en la URL (`q`, `p`, `genre`, `status`, `type`, `order`, `source`). Al regresar de la vista de detalles de un anime con el botón Volver, se restablece el término buscado, los filtros y la página exacta.
+  - Historial de búsquedas recientes persistente con chips interactivos para re-ejecutar búsquedas con un solo toque y opción de eliminación individual o total.
+- **Reproductor de Video Adaptativo para Modo Vertical (Portrait) y Rotación:**
+  - Eliminación del bloqueo forzado a horizontal; soporte completo para visualización cómoda en orientación vertical.
+  - Reorganización responsiva del HUD en portrait en 2 filas limpias y compactas, evitando desbordamientos o recortes en pantallas estrechas.
+  - Botón de rotación de pantalla integrado en el HUD (`Smartphone`) para alternar entre rotación automática por sensor, horizontal y vertical.
+- **Preservación Global de los Botones de Navegación del Sistema en Android:**
+  - Eliminación del ocultamiento global permanente de la barra de navegación del sistema en `MainActivity.kt`.
+  - Los botones de navegación de Android (Atrás, Inicio, Recientes) y la barra de estado permanecen siempre accesibles en toda la app fuera del reproductor en pantalla completa.
+- **Diferenciación Estricta entre Temporadas y Secuelas:**
+  - Reemplazo del algoritmo difuso por `strictTitlesMatch` y coincidencia prioritaria por `animeUrl` única, evitando que diferentes temporadas de una misma franquicia (ej. *Jujutsu Kaisen* vs *Jujutsu Kaisen 2nd Season*) colisionen en el historial, progreso de reproducción y descargas locales.
+  - Deduplicación precisa de entradas de historial por identificador único de anime y episodio.
+
+---
+
+## [0.1.6] - 2026-08-29
+
+### ⚡ Descargas en Segundo Plano con Pantalla Apagada, Notificaciones y Archivos .part
+- **Descargas en Segundo Plano Continuas:**
+  - Integración de `Partial WakeLock` en Android para evitar que el sistema suspenda el procesador con la pantalla apagada.
+- **Notificaciones Inteligentes Agrupadas (`BigTextStyle`):**
+  - Notificación enriquecida con desglose por serie, progreso global en tiempo real y velocidad de transferencia.
+- **Archivos Temporales `.part` Seguros:**
+  - Los episodios en descarga conservan la extensión `.part` y solo se renombran a `.mp4` al alcanzar el 100% verificado, impidiendo que aparezcan episodios truncados o corruptos en descargas locales.
+- **Resiliencia ante Servidores Estancados:**
+  - Timeout de 12 segundos y auto-reconexión mediante peticiones de rango HTTP (`Range Requests`).
+
+---
+
+## [0.1.5] - 2026-08-28
+
+### 📦 Actualizador Nativo APK, Gestos Refinados y Seguridad
+- **Instalador Nativo de Actualizaciones APK en Android:**
+  - Actualización directa mediante `FileProvider` e `Intent` del sistema sin bloqueos.
+- **Gestos Táctiles con Debounce:**
+  - Toque único para mostrar/ocultar controles y doble toque lateral para avanzar o retroceder 10s.
+- **Liberación Inmediata de Búfer:**
+  - Reset completo del estado y del búfer de HLS al cambiar de episodio o salir del reproductor.
+
+---
+
 ## [0.1.4] - 2026-08-28
 
 ### 🎬 Reproductor Limpio (Estilo C#) y Servidor Local de Streaming
