@@ -1,5 +1,18 @@
 [
   {
+    "version": "0.1.8",
+    "date": "2026-09-01",
+    "title": "AniCS v0.1.8 - Optimizacion de Rendimiento y Estabilidad",
+    "type": "patch",
+    "highlights": [
+      "Actualizacion de metadatos en SQLite (upsert_history)",
+      "Eliminacion de I/O sincrono en media_server.rs",
+      "Correccion de orden de inicializacion en PlayerPage y toggle de auto-siguiente",
+      "Sincronizacion reactiva de filtros de busqueda con URL",
+      "Centralizacion de constantes y limpieza de codigo"
+    ]
+  },
+  {
     "version": "0.1.7",
     "date": "2026-08-31",
     "title": "Paginación Numérica Completa, Navegación de Búsqueda, Reproductor Vertical y Diferenciación de Temporadas",

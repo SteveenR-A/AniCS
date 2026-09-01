@@ -146,8 +146,12 @@ pub fn upsert_history(entry: &HistoryEntry) -> AppResult<()> {
             "INSERT INTO watch_history (id, anime_title, anime_url, thumbnail_url, episode_number, episode_url, watch_progress, watched_at, source)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
              ON CONFLICT(id) DO UPDATE SET
+               anime_title = CASE WHEN excluded.anime_title != '' THEN excluded.anime_title ELSE watch_history.anime_title END,
+               thumbnail_url = CASE WHEN excluded.thumbnail_url != '' THEN excluded.thumbnail_url ELSE watch_history.thumbnail_url END,
+               episode_url = CASE WHEN excluded.episode_url != '' THEN excluded.episode_url ELSE watch_history.episode_url END,
                watch_progress = excluded.watch_progress,
-               watched_at = excluded.watched_at",
+               watched_at = excluded.watched_at,
+               source = CASE WHEN excluded.source != '' THEN excluded.source ELSE watch_history.source END",
             params![
                 entry.id, entry.anime_title, entry.anime_url, entry.thumbnail_url,
                 entry.episode_number, entry.episode_url, entry.watch_progress,
@@ -219,6 +223,13 @@ pub fn get_episode_progress(episode_url: &str) -> AppResult<Option<f64>> {
 pub fn clear_history() -> AppResult<()> {
     with_db(|conn| {
         conn.execute("DELETE FROM watch_history", [])?;
+        Ok(())
+    })
+}
+
+pub fn remove_history(id: &str) -> AppResult<()> {
+    with_db(|conn| {
+        conn.execute("DELETE FROM watch_history WHERE id = ?1", params![id])?;
         Ok(())
     })
 }

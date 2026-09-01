@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { convertFileSrc } from '@tauri-apps/api/core';
-import { getHistory, clearHistory, getFavorites, removeFavorite } from '@/services/storageService';
+import { getHistory, clearHistory, removeHistory, getFavorites, removeFavorite } from '@/services/storageService';
 import {
   scanLocalDownloads, deleteLocalDownload, deleteLocalAnimeFolder,
   getDefaultDownloadDir, setDownloadDir, saveLocalAnimeCover, getLocalMediaUrl
@@ -63,6 +63,16 @@ export function DesktopHistoryPage() {
     setEntries([]);
   };
 
+  const handleDeleteEntry = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await removeHistory(id);
+      setEntries((prev) => prev.filter((item) => item.id !== id));
+    } catch (err) {
+      console.error('Error removing history item:', err);
+    }
+  };
+
   return (
     <div style={{ padding: '28px 36px', maxWidth: 1440, margin: '0 auto' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 28 }}>
@@ -109,48 +119,82 @@ export function DesktopHistoryPage() {
       )}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: 14 }}>
-        {entries.map((entry) => (
-          <motion.div
-            key={entry.id}
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            whileHover={{ y: -3, scale: 1.01 }}
-            onClick={() => navigate(`/details/${encodeURIComponent(entry.animeUrl)}?source=${entry.source}`)}
-            style={{
-              background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)',
-              padding: '14px 18px', display: 'flex', alignItems: 'center', gap: 16,
-              cursor: 'pointer', border: '1px solid var(--border-subtle)',
-              boxShadow: 'var(--shadow-card)', position: 'relative',
-            }}
-          >
-            <div style={{ width: 54, height: 76, borderRadius: 'var(--radius-md)', overflow: 'hidden', flexShrink: 0, background: 'var(--bg-elevated)' }}>
-              <CachedImage src={entry.thumbnailUrl} alt={entry.animeTitle} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <p style={{ fontSize: 14, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', margin: 0 }}>
-                {entry.animeTitle}
-              </p>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 4, marginBottom: 8 }}>
-                <span style={{ fontSize: 12, color: 'var(--accent-primary)', fontWeight: 700 }}>
-                  Episodio {entry.episodeNumber}
-                </span>
-                {entry.watchProgress >= 0.85 && (
-                  <span style={{ fontSize: 10, fontWeight: 800, color: '#34d399', background: 'rgba(16, 185, 129, 0.15)', padding: '2px 6px', borderRadius: 4 }}>
-                    Visto
-                  </span>
-                )}
+        <AnimatePresence mode="popLayout">
+          {entries.map((entry) => (
+            <motion.div
+              key={entry.id}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, transition: { duration: 0.15 } }}
+              whileHover={{ y: -3, scale: 1.01 }}
+              onClick={() => navigate(`/details/${encodeURIComponent(entry.animeUrl)}?source=${entry.source}`)}
+              style={{
+                background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)',
+                padding: '14px 18px', display: 'flex', alignItems: 'center', gap: 16,
+                cursor: 'pointer', border: '1px solid var(--border-subtle)',
+                boxShadow: 'var(--shadow-card)', position: 'relative',
+              }}
+            >
+              <div style={{ width: 54, height: 76, borderRadius: 'var(--radius-md)', overflow: 'hidden', flexShrink: 0, background: 'var(--bg-elevated)' }}>
+                <CachedImage src={entry.thumbnailUrl} alt={entry.animeTitle} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div style={{ flex: 1, height: 5, background: 'var(--bg-elevated)', borderRadius: 3, overflow: 'hidden' }}>
-                  <div style={{ width: `${Math.round(entry.watchProgress * 100)}%`, height: '100%', background: entry.watchProgress >= 0.85 ? '#34d399' : 'var(--accent-primary)' }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+                  <p style={{ fontSize: 14, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', margin: 0 }}>
+                    {entry.animeTitle}
+                  </p>
+                  <button
+                    type="button"
+                    title="Eliminar del historial"
+                    aria-label="Eliminar del historial"
+                    onClick={(e) => handleDeleteEntry(entry.id, e)}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: 'var(--text-muted)',
+                      cursor: 'pointer',
+                      padding: '4px',
+                      borderRadius: 'var(--radius-sm)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0,
+                      transition: 'all 0.15s ease',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.color = 'var(--accent-error)';
+                      e.currentTarget.style.background = 'rgba(239, 68, 68, 0.12)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.color = 'var(--text-muted)';
+                      e.currentTarget.style.background = 'transparent';
+                    }}
+                  >
+                    <Trash2 size={15} />
+                  </button>
                 </div>
-                <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>
-                  {Math.round(entry.watchProgress * 100)}%
-                </span>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 4, marginBottom: 8 }}>
+                  <span style={{ fontSize: 12, color: 'var(--accent-primary)', fontWeight: 700 }}>
+                    Episodio {entry.episodeNumber}
+                  </span>
+                  {entry.watchProgress >= 0.85 && (
+                    <span style={{ fontSize: 10, fontWeight: 800, color: '#34d399', background: 'rgba(16, 185, 129, 0.15)', padding: '2px 6px', borderRadius: 4 }}>
+                      Visto
+                    </span>
+                  )}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ flex: 1, height: 5, background: 'var(--bg-elevated)', borderRadius: 3, overflow: 'hidden' }}>
+                    <div style={{ width: `${Math.round(entry.watchProgress * 100)}%`, height: '100%', background: entry.watchProgress >= 0.85 ? '#34d399' : 'var(--accent-primary)' }} />
+                  </div>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>
+                    {Math.round(entry.watchProgress * 100)}%
+                  </span>
+                </div>
               </div>
-            </div>
-          </motion.div>
-        ))}
+            </motion.div>
+          ))}
+        </AnimatePresence>
       </div>
     </div>
   );

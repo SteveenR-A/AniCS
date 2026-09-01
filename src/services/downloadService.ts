@@ -19,6 +19,7 @@ function androidBridge() {
         showUpdateNotification: (title: string, body: string) => void;
         setKeepScreenOn: (enabled: boolean) => void;
         setFullscreenMode: (enabled: boolean) => void;
+        setScreenOrientation: (orientation: string) => void;
       }
     | undefined;
 }
@@ -28,6 +29,16 @@ export const setNativeFullscreen = (enabled: boolean): void => {
     androidBridge()?.setFullscreenMode(enabled);
   } catch (e) {
     console.warn('Error toggling Android native fullscreen:', e);
+  }
+};
+
+export const setNativeScreenOrientation = (
+  orientation: 'landscape' | 'portrait' | 'auto' | 'sensor' | 'unspecified'
+): void => {
+  try {
+    androidBridge()?.setScreenOrientation(orientation);
+  } catch (e) {
+    console.warn('Error setting Android native screen orientation:', e);
   }
 };
 

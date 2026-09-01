@@ -5,10 +5,9 @@ import { Calendar, Clock, RefreshCw, Sparkles } from 'lucide-react';
 import { getScheduleDays as getScheduleDaysFromApi } from '@/services/animeService';
 import { useAnimeStore } from '@/stores/useAnimeStore';
 import { CachedImage } from '@/components/CachedImage';
-import type { ScheduleDay, AnimeResult } from '@/types';
+import type { ScheduleDay } from '@/types';
 
 const DAYS_ORDER = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
-const EMPTY_SCHEDULE_DAYS: ScheduleDay[] = [];
 
 export function DesktopSchedulePage() {
   const navigate = useNavigate();

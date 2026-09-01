@@ -13,6 +13,9 @@ export const getEpisodeProgress = (episodeUrl: string): Promise<number | null> =
 export const clearHistory = (): Promise<void> =>
   invoke('clear_history');
 
+export const removeHistory = (id: string): Promise<void> =>
+  invoke('remove_history', { id });
+
 export const addFavorite = (anime: AnimeResult): Promise<void> =>
   invoke('add_favorite', { anime });
 

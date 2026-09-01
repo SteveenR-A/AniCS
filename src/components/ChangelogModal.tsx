@@ -1,13 +1,14 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { Sparkles, X, CheckCircle2, Calendar, ShieldCheck, Tag } from 'lucide-react';
 import changelogData from '@/data/changelog.json';
+import { CURRENT_VERSION } from '@/services/updateService';
 
 interface ChangelogModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
-export function ChangelogModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
+export function ChangelogModal({ isOpen, onClose }: ChangelogModalProps) {
   if (!isOpen) return null;
 
   return (
@@ -137,7 +138,7 @@ export function ChangelogModal({ isOpen, onClose }: { isOpen: boolean; onClose: 
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-muted)', fontSize: 12 }}>
               <ShieldCheck size={14} color="var(--accent-success)" />
-              <span>AniCS v0.1.0 · Actualizado</span>
+              <span>AniCS v{CURRENT_VERSION} · Actualizado</span>
             </div>
 
             <motion.button

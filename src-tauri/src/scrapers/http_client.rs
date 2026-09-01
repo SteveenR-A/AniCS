@@ -64,6 +64,8 @@ pub static DOWNLOAD_CLIENT: Lazy<Client> = Lazy::new(|| {
     ClientBuilder::new()
         .default_headers(headers)
         .connect_timeout(std::time::Duration::from_secs(30))
+        .tcp_keepalive(Some(std::time::Duration::from_secs(15)))
+        .pool_idle_timeout(Some(std::time::Duration::from_secs(90)))
         .gzip(true)
         .redirect(reqwest::redirect::Policy::limited(10))
         .user_agent(USER_AGENTS[0])

@@ -37,6 +37,7 @@ interface DownloadStore {
   toggleFolder: (folderPath: string) => void;
   setFolderExpanded: (folderPath: string, isExpanded: boolean) => void;
   activeCount: () => number;
+  syncWithDb: () => Promise<void>;
 }
 
 let unlistenProgress: (() => void) | null = null;
@@ -152,6 +153,35 @@ export const useDownloadStore = create<DownloadStore>((set, get) => ({
     return count;
   },
 
+  syncWithDb: async () => {
+    try {
+      const saved = await getAllDownloads();
+      set((state) => {
+        const next = new Map(state.tasks);
+        for (const t of saved) {
+          const existing = next.get(t.id);
+          if (existing) {
+            next.set(t.id, {
+              ...existing,
+              status: t.status,
+              progress: Math.max(existing.progress || 0, t.progress || 0),
+              downloadedBytes: Math.max(existing.downloadedBytes || 0, t.downloadedBytes || 0),
+              totalBytes: t.totalBytes ?? existing.totalBytes,
+              error: t.error,
+              outputPath: t.outputPath || existing.outputPath,
+            });
+          } else {
+            next.set(t.id, t);
+          }
+        }
+        return { tasks: next };
+      });
+      triggerNotificationSync();
+    } catch (e) {
+      console.error('Error syncing downloads with SQLite:', e);
+    }
+  },
+
   init: async () => {
     if (get().initialized) return;
 
@@ -252,6 +282,16 @@ export const useDownloadStore = create<DownloadStore>((set, get) => ({
 
       triggerNotificationSync();
     });
+
+    if (typeof window !== 'undefined') {
+      const handleVisibilityOrFocus = () => {
+        if (document.visibilityState === 'visible') {
+          get().syncWithDb();
+        }
+      };
+      window.addEventListener('focus', handleVisibilityOrFocus);
+      document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    }
   },
 
   cleanup: () => {

@@ -9,9 +9,9 @@ use tokio::sync::{mpsc, Mutex};
 use reqwest::header;
 
 use crate::core::{AppError, AppResult, DownloadProgress, DownloadStatus};
-use crate::scrapers::HTTP_CLIENT;
+use crate::scrapers::DOWNLOAD_CLIENT;
 
-const WINDOW_SIZE: usize = 8; // Fragmentos HLS concurrentes en vuelo
+const WINDOW_SIZE: usize = 6; // Fragmentos HLS concurrentes en vuelo (optimizado para background/mobile)
 
 /// Resultado del análisis de un manifiesto HLS
 #[derive(Debug, Clone)]
@@ -287,10 +287,11 @@ impl HlsEngine {
                                 break;
                             }
                             Err(e) => {
-                                if attempts >= 4 {
+                                if attempts >= 8 {
                                     return Err(e);
                                 }
-                                tokio::time::sleep(tokio::time::Duration::from_millis(500 * attempts)).await;
+                                let delay = std::cmp::min(1000 * attempts as u64, 5000);
+                                tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
                             }
                         }
                     }
@@ -340,7 +341,7 @@ impl HlsEngine {
     }
 
     async fn fetch_url(&self, url: &str) -> AppResult<String> {
-        let mut req = HTTP_CLIENT.get(url);
+        let mut req = DOWNLOAD_CLIENT.get(url);
         if let Some(ref ref_url) = self.referer {
             req = req.header(header::REFERER, ref_url.as_str());
         }
@@ -354,7 +355,7 @@ impl HlsEngine {
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 async fn download_segment(url: &str, referer: Option<&str>) -> AppResult<Bytes> {
-    let mut req = HTTP_CLIENT.get(url);
+    let mut req = DOWNLOAD_CLIENT.get(url);
     if let Some(ref_url) = referer {
         req = req.header(header::REFERER, ref_url);
     }
@@ -367,7 +368,7 @@ async fn download_segment(url: &str, referer: Option<&str>) -> AppResult<Bytes> 
         resp.bytes().await.map_err(AppError::Network)
     };
 
-    match tokio::time::timeout(std::time::Duration::from_secs(12), fetch_fut).await {
+    match tokio::time::timeout(std::time::Duration::from_secs(45), fetch_fut).await {
         Ok(res) => res,
         Err(_) => Err(AppError::Download(
             "Timeout al descargar segmento de video (el servidor dejó de responder)".to_string(),

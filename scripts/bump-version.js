@@ -42,7 +42,7 @@ console.log('  ✓ package.json actualizado');
 // 2. src-tauri/Cargo.toml
 const cargoPath = path.join(ROOT, 'src-tauri', 'Cargo.toml');
 let cargo = fs.readFileSync(cargoPath, 'utf8');
-cargo = cargo.replace(/^version = "[\d\.]+"/m, `version = "${targetVersion}"`);
+cargo = cargo.replace(/^version = "[\d.]+"/m, `version = "${targetVersion}"`);
 fs.writeFileSync(cargoPath, cargo, 'utf8');
 console.log('  ✓ src-tauri/Cargo.toml actualizado');
 
@@ -53,12 +53,18 @@ tauriConf.version = targetVersion;
 fs.writeFileSync(tauriConfPath, JSON.stringify(tauriConf, null, 2) + '\n', 'utf8');
 console.log('  ✓ src-tauri/tauri.conf.json actualizado');
 
-// 4. src/pages/desktop/DesktopSettingsPage.tsx & src/pages/mobile/MobileSettingsPage.tsx
-for (const p of ['src/pages/desktop/DesktopSettingsPage.tsx', 'src/pages/mobile/MobileSettingsPage.tsx', 'src/pages/SettingsPage.tsx']) {
+// 4. src/services/updateService.ts & páginas de settings
+for (const p of [
+  'src/services/updateService.ts',
+  'src/pages/desktop/DesktopSettingsPage.tsx',
+  'src/pages/mobile/MobileSettingsPage.tsx',
+  'src/pages/SettingsPage.tsx'
+]) {
   const fullPath = path.join(ROOT, p);
   if (fs.existsSync(fullPath)) {
     let code = fs.readFileSync(fullPath, 'utf8');
-    code = code.replace(/const CURRENT_VERSION = '[\d\.]+';/g, `const CURRENT_VERSION = '${targetVersion}';`);
+    code = code.replace(/export const CURRENT_VERSION = '[\d.]+';/g, `export const CURRENT_VERSION = '${targetVersion}';`);
+    code = code.replace(/const CURRENT_VERSION = '[\d.]+';/g, `const CURRENT_VERSION = '${targetVersion}';`);
     fs.writeFileSync(fullPath, code, 'utf8');
     console.log(`  ✓ ${p} actualizado`);
   }

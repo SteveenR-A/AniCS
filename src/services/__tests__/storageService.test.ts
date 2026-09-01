@@ -4,6 +4,7 @@ import {
   getHistory,
   getEpisodeProgress,
   clearHistory,
+  removeHistory,
   addFavorite,
   removeFavorite,
   isFavorite,
@@ -49,6 +50,12 @@ describe('storageService', () => {
   it('clearHistory should call invoke with correct arguments', async () => {
     await clearHistory();
     expect(invoke).toHaveBeenCalledWith('clear_history');
+  });
+
+  it('removeHistory should call invoke with correct arguments', async () => {
+    const id = 'https://jkanime.net/naruto-1';
+    await removeHistory(id);
+    expect(invoke).toHaveBeenCalledWith('remove_history', { id });
   });
 
   it('addFavorite should call invoke with correct arguments', async () => {

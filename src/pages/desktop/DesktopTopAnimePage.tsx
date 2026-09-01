@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Flame, Trophy, RefreshCw, Star } from 'lucide-react';
+import { Trophy, RefreshCw, Star, Flame } from 'lucide-react';
 import { getTopAnimes } from '@/services/animeService';
 import { useAnimeStore } from '@/stores/useAnimeStore';
 import { CachedImage } from '@/components/CachedImage';

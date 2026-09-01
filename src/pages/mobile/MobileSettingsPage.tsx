@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Globe, Download, RefreshCw, Check, Undo2,
-  AlertCircle, ExternalLink, Sparkles, ShieldCheck, Palette, HardDrive, Trash2, Database, Activity, Folder
+  Sparkles, ShieldCheck, Palette, HardDrive, Trash2, Database, Activity, Folder
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -12,11 +12,9 @@ import { useThemeStore, THEMES } from '@/stores/useThemeStore';
 import { getCacheStats, clearImageCache } from '@/services/downloadService';
 import { getDatabaseStats, optimizeDatabase, resetDatabase, clearHistory, type DatabaseStats } from '@/services/storageService';
 import { clearMemoryCache } from '@/components/CachedImage';
+import { DEFAULT_JKANIME, DEFAULT_MUNDODONGHUA, DEFAULT_ANDROID_DOWNLOAD_DIR } from '@/services/animeService';
+import { CURRENT_VERSION } from '@/services/updateService';
 
-const DEFAULT_JKANIME = 'https://jkanime.net';
-const DEFAULT_MUNDODONGHUA = 'https://www.mundodonghua.com';
-const DEFAULT_ANDROID_DOWNLOAD_DIR = '/storage/emulated/0/Anime';
-const CURRENT_VERSION = '0.1.7';
 declare const __APP_COMMIT_HASH__: string;
 
 interface GitHubRelease {
@@ -569,6 +567,16 @@ export function MobileSettingsPage() {
               <span style={{ marginLeft: 6, fontFamily: 'monospace' }}>#{__APP_COMMIT_HASH__}</span>
             )}
           </div>
+
+          {updateError && (
+            <div style={{
+              padding: '8px 10px', borderRadius: 'var(--radius-md)',
+              background: 'rgba(239, 68, 68, 0.12)', border: '1px solid var(--border-subtle)',
+              color: 'var(--accent-error)', fontSize: 11, marginBottom: 8,
+            }}>
+              {updateError}
+            </div>
+          )}
 
           {updateInfo && (
             <div style={{ background: 'var(--bg-elevated)', padding: 12, borderRadius: 'var(--radius-md)', marginTop: 8 }}>

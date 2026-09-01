@@ -4,8 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import {
   ArrowLeft, Play, Download, Bookmark, BookmarkCheck,
-  ChevronDown, ChevronUp, Check, HardDrive, CheckCircle2,
-  Calendar, Layers, Tag, Tv, Globe, Sparkles, Clock
+  ChevronDown, ChevronUp, Check, HardDrive, CheckCircle2, Loader2, Calendar
 } from 'lucide-react';
 import { getDetails, getServers, resolveStream } from '@/services/animeService';
 import { addFavorite, removeFavorite, isFavorite as checkFavorite, getHistory } from '@/services/storageService';
@@ -838,7 +837,17 @@ export function MobileDetailsPage() {
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 200, overflowY: 'auto', marginBottom: 16 }}>
-                {downloadServers.map((srv, idx) => {
+                {isLoadingServers ? (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '24px 0', color: 'var(--text-muted)', fontSize: 13 }}>
+                    <Loader2 size={18} style={{ animation: 'spin-slow 1s linear infinite' }} />
+                    Buscando servidores de descarga...
+                  </div>
+                ) : downloadServers.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '20px 0', color: 'var(--text-muted)', fontSize: 13 }}>
+                    No se encontraron servidores disponibles
+                  </div>
+                ) : (
+                  downloadServers.map((srv, idx) => {
                   const isSelected = selectedDownloadServer?.url === srv.url;
                   return (
                     <div
@@ -865,7 +874,7 @@ export function MobileDetailsPage() {
                       )}
                     </div>
                   );
-                })}
+                }))}
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 10 }}>

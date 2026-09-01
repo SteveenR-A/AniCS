@@ -90,6 +90,10 @@ class DownloadService : Service() {
             }
 
             "UPDATE", ACTION_UPDATE -> {
+                if (!isRunning) {
+                    isRunning = true
+                    acquireWakeLock()
+                }
                 val title    = intent.getStringExtra("title")    ?: "Descargas AniCS"
                 val subtitle = intent.getStringExtra("subtitle") ?: ""
                 val details  = intent.getStringExtra("details")  ?: ""

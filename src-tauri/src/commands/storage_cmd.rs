@@ -40,6 +40,15 @@ pub async fn clear_history(_state: State<'_, AppState>) -> Result<(), String> {
     storage::clear_history().map_err(|e| e.to_string())
 }
 
+/// Eliminar un elemento individual del historial
+#[tauri::command]
+pub async fn remove_history(
+    id: String,
+    _state: State<'_, AppState>,
+) -> Result<(), String> {
+    storage::remove_history(&id).map_err(|e| e.to_string())
+}
+
 /// Agregar a favoritos
 #[tauri::command]
 pub async fn add_favorite(

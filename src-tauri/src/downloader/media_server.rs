@@ -101,16 +101,14 @@ Access-Control-Max-Age: 86400\r\n\
     };
 
     let file_path = PathBuf::from(&file_path_str);
-    if !file_path.exists() {
-        let response = "HTTP/1.1 404 Not Found\r\n\r\nFile not found";
-        let _ = stream.write_all(response.as_bytes()).await;
-        return;
-    }
-
     let metadata = match tokio::fs::metadata(&file_path).await {
         Ok(m) => m,
-        Err(_) => {
-            let response = "HTTP/1.1 500 Internal Server Error\r\n\r\n";
+        Err(e) => {
+            let response = if e.kind() == std::io::ErrorKind::NotFound {
+                "HTTP/1.1 404 Not Found\r\n\r\nFile not found"
+            } else {
+                "HTTP/1.1 500 Internal Server Error\r\n\r\n"
+            };
             let _ = stream.write_all(response.as_bytes()).await;
             return;
         }

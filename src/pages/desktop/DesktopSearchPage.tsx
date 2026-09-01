@@ -221,8 +221,16 @@ export function DesktopSearchPage() {
     }
   }, [activeSource, setSearchResults, setIsSearching, saveSearchSession, addRecentSearch]);
 
-  // Restaurar o ejecutar búsqueda inicial al cambiar fuente o montar
+  const lastExecutedKey = useRef<string>('');
+
+  // Restaurar o ejecutar búsqueda inicial al cambiar fuente, filtros o URL
   useEffect(() => {
+    const currentKey = `${activeSource}:${urlQ}:${urlGenre}:${urlStatus}:${urlType}:${urlOrder}:${urlPage}`;
+    if (lastExecutedKey.current === currentKey) {
+      return;
+    }
+    lastExecutedKey.current = currentKey;
+
     const session = getSearchSession(activeSource);
     const hasParams = Boolean(urlQ || urlGenre || urlStatus || urlType || urlOrder || urlPage > 1);
 
@@ -248,7 +256,7 @@ export function DesktopSearchPage() {
     setCurrentPage(urlPage);
 
     executeSearch(urlQ, urlGenre, urlStatus, urlType, urlOrder, urlPage);
-  }, [activeSource]);
+  }, [activeSource, urlQ, urlGenre, urlStatus, urlType, urlOrder, urlPage, getSearchSession, setSearchResults, syncUrlParams, executeSearch]);
 
   const handleInput = (val: string) => {
     setQuery(val);

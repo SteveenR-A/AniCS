@@ -1,7 +1,6 @@
-import { invoke } from '@tauri-apps/api/core';
 import { showUpdateNotification } from '@/services/downloadService';
 
-export const CURRENT_VERSION = '0.1.7';
+export const CURRENT_VERSION = '0.1.8';
 export const DEFAULT_REPO = 'SteveenR-A/AniCS';
 
 export interface GitHubRelease {

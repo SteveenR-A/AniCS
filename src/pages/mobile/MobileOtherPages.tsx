@@ -2,12 +2,12 @@ import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Clock, Trash2, Film, Bookmark, BookmarkX, Download, Inbox, History,
-  ArrowDownCircle, Play, FolderOpen, RefreshCw, Folder, FileVideo,
+  Clock, Trash2, Film, Bookmark, BookmarkX, Inbox, History,
+  ArrowDownCircle, Play, Folder,
   ChevronDown, ChevronUp, Check, Eye, EyeOff, Pause, RotateCcw, Loader2, AlertCircle
 } from 'lucide-react';
 import { convertFileSrc } from '@tauri-apps/api/core';
-import { getHistory, clearHistory, getFavorites, removeFavorite } from '@/services/storageService';
+import { getHistory, clearHistory, removeHistory, getFavorites, removeFavorite } from '@/services/storageService';
 import {
   scanLocalDownloads, deleteLocalDownload, deleteLocalAnimeFolder,
   getDefaultDownloadDir, getLocalMediaUrl
@@ -62,6 +62,16 @@ export function MobileHistoryPage() {
     setEntries([]);
   };
 
+  const handleDeleteEntry = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await removeHistory(id);
+      setEntries((prev) => prev.filter((item) => item.id !== id));
+    } catch (err) {
+      console.error('Error removing history item:', err);
+    }
+  };
+
   return (
     <div style={{ padding: '12px 14px 24px' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
@@ -92,45 +102,73 @@ export function MobileHistoryPage() {
       )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {entries.map((entry) => (
-          <motion.div
-            key={entry.id}
-            whileTap={{ scale: 0.98 }}
-            onClick={() => navigate(`/details/${encodeURIComponent(entry.animeUrl)}?source=${entry.source}`)}
-            style={{
-              background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)',
-              padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 12,
-              cursor: 'pointer', border: '1px solid var(--border-subtle)',
-            }}
-          >
-            <div style={{ width: 44, height: 60, borderRadius: 'var(--radius-sm)', overflow: 'hidden', flexShrink: 0, background: 'var(--bg-elevated)' }}>
-              <CachedImage src={entry.thumbnailUrl} alt={entry.animeTitle} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <p style={{ fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', margin: 0 }}>
-                {entry.animeTitle}
-              </p>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '2px 0 6px' }}>
-                <span style={{ fontSize: 11, color: 'var(--accent-primary)', fontWeight: 700 }}>
-                  Episodio {entry.episodeNumber}
-                </span>
-                {entry.watchProgress >= 0.85 && (
-                  <span style={{ fontSize: 9, fontWeight: 800, color: '#34d399', background: 'rgba(16, 185, 129, 0.15)', padding: '1px 5px', borderRadius: 3 }}>
-                    Visto
-                  </span>
-                )}
+        <AnimatePresence mode="popLayout">
+          {entries.map((entry) => (
+            <motion.div
+              key={entry.id}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, transition: { duration: 0.15 } }}
+              whileTap={{ scale: 0.98 }}
+              onClick={() => navigate(`/details/${encodeURIComponent(entry.animeUrl)}?source=${entry.source}`)}
+              style={{
+                background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)',
+                padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 12,
+                cursor: 'pointer', border: '1px solid var(--border-subtle)',
+                position: 'relative',
+              }}
+            >
+              <div style={{ width: 44, height: 60, borderRadius: 'var(--radius-sm)', overflow: 'hidden', flexShrink: 0, background: 'var(--bg-elevated)' }}>
+                <CachedImage src={entry.thumbnailUrl} alt={entry.animeTitle} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <div style={{ flex: 1, height: 4, background: 'var(--bg-elevated)', borderRadius: 2, overflow: 'hidden' }}>
-                  <div style={{ width: `${Math.round(entry.watchProgress * 100)}%`, height: '100%', background: entry.watchProgress >= 0.85 ? '#34d399' : 'var(--accent-primary)' }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 6 }}>
+                  <p style={{ fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', margin: 0 }}>
+                    {entry.animeTitle}
+                  </p>
+                  <button
+                    type="button"
+                    title="Eliminar del historial"
+                    aria-label="Eliminar del historial"
+                    onClick={(e) => handleDeleteEntry(entry.id, e)}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: 'var(--text-muted)',
+                      cursor: 'pointer',
+                      padding: '2px 4px',
+                      borderRadius: 'var(--radius-sm)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0,
+                    }}
+                  >
+                    <Trash2 size={13} />
+                  </button>
                 </div>
-                <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600 }}>
-                  {Math.round(entry.watchProgress * 100)}%
-                </span>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '2px 0 6px' }}>
+                  <span style={{ fontSize: 11, color: 'var(--accent-primary)', fontWeight: 700 }}>
+                    Episodio {entry.episodeNumber}
+                  </span>
+                  {entry.watchProgress >= 0.85 && (
+                    <span style={{ fontSize: 9, fontWeight: 800, color: '#34d399', background: 'rgba(16, 185, 129, 0.15)', padding: '1px 5px', borderRadius: 3 }}>
+                      Visto
+                    </span>
+                  )}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ flex: 1, height: 4, background: 'var(--bg-elevated)', borderRadius: 2, overflow: 'hidden' }}>
+                    <div style={{ width: `${Math.round(entry.watchProgress * 100)}%`, height: '100%', background: entry.watchProgress >= 0.85 ? '#34d399' : 'var(--accent-primary)' }} />
+                  </div>
+                  <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600 }}>
+                    {Math.round(entry.watchProgress * 100)}%
+                  </span>
+                </div>
               </div>
-            </div>
-          </motion.div>
-        ))}
+            </motion.div>
+          ))}
+        </AnimatePresence>
       </div>
     </div>
   );
@@ -380,7 +418,12 @@ export function MobileDownloadsPage() {
       {/* TAB 1: Carpetas en Móvil */}
       {activeTab === 'local' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {animeFolders.length === 0 ? (
+          {isScanning && animeFolders.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '60px 16px', background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)' }}>
+              <Loader2 size={36} color="var(--accent-primary)" style={{ margin: '0 auto 8px', animation: 'spin-slow 1s linear infinite' }} />
+              <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: 0 }}>Escaneando descargas locales...</p>
+            </div>
+          ) : animeFolders.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '60px 16px', background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)' }}>
               <Folder size={40} color="var(--text-muted)" style={{ margin: '0 auto 8px', opacity: 0.5 }} />
               <p style={{ fontSize: 14, fontWeight: 700, margin: '0 0 4px' }}>Sin animes descargados</p>

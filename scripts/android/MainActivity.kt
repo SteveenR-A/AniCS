@@ -3,6 +3,7 @@ package com.anics.app
 import android.Manifest
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -35,6 +36,7 @@ class AndroidNativeBridge(activity: Activity) {
     private val TAG = "AniCS"
 
     @JavascriptInterface
+    @JvmOverloads
     fun startDownloadService(title: String, subtitle: String = "Iniciando descargas...", details: String = "") {
         val act = activityRef.get() ?: return
         if (act.isFinishing || act.isDestroyed) return
@@ -177,6 +179,25 @@ class AndroidNativeBridge(activity: Activity) {
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error cambiando modo pantalla completa en Android: ${e.message}", e)
+            }
+        }
+    }
+
+    @JavascriptInterface
+    fun setScreenOrientation(orientation: String) {
+        val act = activityRef.get() ?: return
+        if (act.isFinishing || act.isDestroyed) return
+
+        act.runOnUiThread {
+            try {
+                when (orientation.lowercase()) {
+                    "landscape" -> act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                    "portrait" -> act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                    "sensor" -> act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR
+                    else -> act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error cambiando orientación de pantalla en Android: ${e.message}", e)
             }
         }
     }

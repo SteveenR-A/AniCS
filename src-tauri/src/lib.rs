@@ -134,6 +134,7 @@ pub fn run() {
             commands::get_history,
             commands::get_episode_progress,
             commands::clear_history,
+            commands::remove_history,
             commands::add_favorite,
             commands::remove_favorite,
             commands::is_favorite,

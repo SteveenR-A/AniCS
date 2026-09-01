@@ -589,11 +589,10 @@ async fn download_direct_mp4(
     use tokio::io::AsyncWriteExt;
     use futures::StreamExt;
     use std::time::Instant;
-
     let mut downloaded = already_downloaded;
     let mut total_bytes: Option<u64> = None;
     let mut consecutive_stalls = 0u32;
-    const MAX_STALL_RETRIES: u32 = 3;
+    const MAX_STALL_RETRIES: u32 = 6;
     let start_time = Instant::now();
     let mut last_emit = Instant::now();
 
@@ -616,14 +615,14 @@ async fn download_direct_mp4(
         };
 
         let connect_fut = req.send();
-        let resp = match tokio::time::timeout(std::time::Duration::from_secs(15), connect_fut).await {
+        let resp = match tokio::time::timeout(std::time::Duration::from_secs(30), connect_fut).await {
             Ok(Ok(r)) => r,
             Ok(Err(e)) => {
                 consecutive_stalls += 1;
                 if consecutive_stalls > MAX_STALL_RETRIES {
                     return Err(AppError::Network(e));
                 }
-                tokio::time::sleep(std::time::Duration::from_millis(1000 * consecutive_stalls as u64)).await;
+                tokio::time::sleep(std::time::Duration::from_millis(1500 * consecutive_stalls as u64)).await;
                 continue 'connection_loop;
             }
             Err(_) => {
@@ -631,7 +630,7 @@ async fn download_direct_mp4(
                 if consecutive_stalls > MAX_STALL_RETRIES {
                     return Err(AppError::Download("El servidor no responde al conectar (Timeout)".to_string()));
                 }
-                tokio::time::sleep(std::time::Duration::from_millis(1000 * consecutive_stalls as u64)).await;
+                tokio::time::sleep(std::time::Duration::from_millis(1500 * consecutive_stalls as u64)).await;
                 continue 'connection_loop;
             }
         };
@@ -692,10 +691,10 @@ async fn download_direct_mp4(
                     });
                     return Ok(PauseReason::UserPaused);
                 }
-                chunk_res = tokio::time::timeout(std::time::Duration::from_secs(12), stream.next()) => {
+                chunk_res = tokio::time::timeout(std::time::Duration::from_secs(40), stream.next()) => {
                     match chunk_res {
                         Err(_timeout) => {
-                            // No llegaron datos durante 12s
+                            // No llegaron datos durante 40s
                             let _ = file.flush().await;
                             consecutive_stalls += 1;
                             if consecutive_stalls > MAX_STALL_RETRIES {
@@ -703,7 +702,7 @@ async fn download_direct_mp4(
                                     "El servidor de video se detuvo y no envió más datos (Timeout)".to_string(),
                                 ));
                             }
-                            tokio::time::sleep(std::time::Duration::from_millis(800 * consecutive_stalls as u64)).await;
+                            tokio::time::sleep(std::time::Duration::from_millis(1500 * consecutive_stalls as u64)).await;
                             continue 'connection_loop;
                         }
                         Ok(None) => {
@@ -730,13 +729,15 @@ async fn download_direct_mp4(
                             if consecutive_stalls > MAX_STALL_RETRIES {
                                 return Err(AppError::Network(e));
                             }
-                            tokio::time::sleep(std::time::Duration::from_millis(800 * consecutive_stalls as u64)).await;
+                            tokio::time::sleep(std::time::Duration::from_millis(1500 * consecutive_stalls as u64)).await;
                             continue 'connection_loop;
                         }
                         Ok(Some(Ok(chunk))) => {
+                            // Resetear contador de pausas/stalls al recibir datos exitosamente
                             consecutive_stalls = 0;
+                            let chunk_len = chunk.len() as u64;
                             file.write_all(&chunk).await.map_err(AppError::Io)?;
-                            downloaded += chunk.len() as u64;
+                            downloaded += chunk_len;
 
                             if last_emit.elapsed().as_millis() >= 300 {
                                 let elapsed = start_time.elapsed().as_secs_f64();

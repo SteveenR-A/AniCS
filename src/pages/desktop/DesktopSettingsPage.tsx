@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Globe, Download, Tv, RefreshCw, Check, Undo2,
-  FolderOpen, AlertCircle, Info, ExternalLink, Sparkles, ShieldCheck, Palette, HardDrive, Trash2, Database, Activity
+  FolderOpen, ExternalLink, Sparkles, ShieldCheck, Palette, HardDrive, Trash2, Database, Activity
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -13,10 +13,9 @@ import { useThemeStore, THEMES } from '@/stores/useThemeStore';
 import { getCacheStats, clearImageCache } from '@/services/downloadService';
 import { getDatabaseStats, optimizeDatabase, resetDatabase, clearHistory, type DatabaseStats } from '@/services/storageService';
 import { clearMemoryCache } from '@/components/CachedImage';
+import { DEFAULT_JKANIME, DEFAULT_MUNDODONGHUA } from '@/services/animeService';
+import { CURRENT_VERSION } from '@/services/updateService';
 
-const DEFAULT_JKANIME = 'https://jkanime.net';
-const DEFAULT_MUNDODONGHUA = 'https://www.mundodonghua.com';
-const CURRENT_VERSION = '0.1.7';
 declare const __APP_COMMIT_HASH__: string;
 
 interface GitHubRelease {
@@ -768,6 +767,16 @@ export function DesktopSettingsPage() {
               )}
             </span>
           </div>
+
+          {updateError && (
+            <div style={{
+              padding: '10px 14px', borderRadius: 'var(--radius-md)',
+              background: 'rgba(239, 68, 68, 0.12)', border: '1px solid var(--border-subtle)',
+              color: 'var(--accent-error)', fontSize: 13, marginBottom: 12,
+            }}>
+              {updateError}
+            </div>
+          )}
 
           {updateInfo && (
             <div style={{

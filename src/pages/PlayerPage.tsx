@@ -3,19 +3,18 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import Hls from 'hls.js';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  ArrowLeft, Play, Pause, Volume2, VolumeX,
-  Maximize, Minimize, Settings, ChevronLeft, ChevronRight,
+  Play, Pause, Volume2, VolumeX,
+  Maximize, Minimize, Settings, ChevronLeft,
   Loader2, SkipForward, SkipBack, RotateCcw, RotateCw,
-  Sun, ListVideo, Zap, Server, AlertCircle,
-  Eye, EyeOff, Scaling, Smartphone
+  Sun, ListVideo, Zap, AlertCircle,
+  Scaling, Smartphone
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { usePlayerStore } from '@/stores/usePlayerStore';
 import { useAnimeStore } from '@/stores/useAnimeStore';
-import { useDownloadStore } from '@/stores/useDownloadStore';
 import { resolveStream, getServers, getDetails } from '@/services/animeService';
 import { upsertHistory, getEpisodeProgress } from '@/services/storageService';
-import { getLocalMediaUrl, setKeepScreenOn, setNativeFullscreen } from '@/services/downloadService';
+import { getLocalMediaUrl, setKeepScreenOn, setNativeFullscreen, setNativeScreenOrientation } from '@/services/downloadService';
 import { useResponsive } from '@/hooks/useResponsive';
 import type { VideoServer } from '@/types';
 
@@ -36,7 +35,7 @@ const ASPECT_OPTIONS = [
 export function PlayerPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { isMobile, isDesktop } = useResponsive();
+  const { isMobile } = useResponsive();
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -47,7 +46,6 @@ export function PlayerPage() {
 
   // Timers para distinguir 1 clic (mostrar/ocultar HUD) de 2 clics (seek/play)
   const clickTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const clickCountRef = useRef(0);
 
   // Touch gesture state refs
   const touchStartY = useRef<number | null>(null);
@@ -105,34 +103,34 @@ export function PlayerPage() {
   }, []);
 
   const toggleScreenOrientation = async () => {
+    let nextOrientation: 'auto' | 'landscape' | 'portrait' = 'landscape';
+    if (screenOrientation === 'auto') {
+      nextOrientation = 'landscape';
+    } else if (screenOrientation === 'landscape') {
+      nextOrientation = 'portrait';
+    } else {
+      nextOrientation = 'auto';
+    }
+
+    setScreenOrientation(nextOrientation);
+    setNativeScreenOrientation(nextOrientation);
+
+    // Fallback Web / PWA
     try {
       if (typeof window !== 'undefined' && window.screen && 'orientation' in window.screen) {
         const orient = window.screen.orientation as any;
-        if (screenOrientation === 'auto') {
-          if (orient && orient.lock) {
-            await orient.lock('landscape');
-            setScreenOrientation('landscape');
-            showToast({ icon: 'aspect', text: 'Orientación: Horizontal' });
-          }
-        } else if (screenOrientation === 'landscape') {
-          if (orient && orient.lock) {
-            await orient.lock('portrait');
-            setScreenOrientation('portrait');
-            showToast({ icon: 'aspect', text: 'Orientación: Vertical' });
-          }
-        } else {
-          if (orient && orient.unlock) {
-            orient.unlock();
-            setScreenOrientation('auto');
-            showToast({ icon: 'aspect', text: 'Orientación: Automática' });
-          }
+        if (nextOrientation === 'landscape' && orient?.lock) {
+          await orient.lock('landscape').catch(() => {});
+        } else if (nextOrientation === 'portrait' && orient?.lock) {
+          await orient.lock('portrait').catch(() => {});
+        } else if (orient?.unlock) {
+          orient.unlock();
         }
-      } else {
-        setScreenOrientation(prev => prev === 'landscape' ? 'auto' : 'landscape');
       }
-    } catch {
-      setScreenOrientation(prev => prev === 'landscape' ? 'auto' : 'landscape');
-    }
+    } catch {}
+
+    const label = nextOrientation === 'landscape' ? 'Horizontal' : nextOrientation === 'portrait' ? 'Vertical' : 'Automática (Sensor)';
+    showToast({ icon: 'aspect', text: `Orientación: ${label}` });
   };
 
   // Gestos & HUD Toasts
@@ -289,8 +287,9 @@ export function PlayerPage() {
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
       document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
 
-      // Restaurar barras del sistema y permitir que la pantalla se apague normalmente al salir
+      // Restaurar barras del sistema, orientación y permitir que la pantalla se apague normalmente al salir
       setNativeFullscreen(false);
+      setNativeScreenOrientation('unspecified');
       setKeepScreenOn(false);
       exitFullscreen().catch(() => {});
 
@@ -449,6 +448,36 @@ export function PlayerPage() {
     }
   }, [volume, isMuted, playbackSpeed]);
 
+  const tryFallbackServerRef = useRef<() => void>(() => {});
+
+  const handleSelectServer = async (server: VideoServer) => {
+    setSelectedServer(server);
+    setIsResolving(true);
+    try {
+      const media = await resolveStream(server, querySource);
+      setResolvedMedia(media);
+    } catch (err) {
+      console.warn(`Server ${server.name} failed:`, err);
+      tryFallbackServerRef.current();
+    } finally {
+      setIsResolving(false);
+    }
+  };
+
+  const tryFallbackServer = useCallback(() => {
+    if (!servers.length || !selectedServer) return;
+    const currentIndex = servers.findIndex(s => s.url === selectedServer.url);
+    const nextServer = servers[(currentIndex + 1) % servers.length];
+
+    if (nextServer && nextServer.url !== selectedServer.url) {
+      handleSelectServer(nextServer);
+    }
+  }, [servers, selectedServer, querySource]);
+
+  useEffect(() => {
+    tryFallbackServerRef.current = tryFallbackServer;
+  }, [tryFallbackServer]);
+
   // Resolver stream resuelto en el elemento de video
   useEffect(() => {
     const video = videoRef.current;
@@ -496,7 +525,7 @@ export function PlayerPage() {
       hls.on(Hls.Events.ERROR, (_, data) => {
         if (data.fatal) {
           console.warn('Fatal HLS error, switching fallback server...', data);
-          tryFallbackServer();
+          tryFallbackServerRef.current();
         }
       });
     } else if (isHls && video.canPlayType('application/vnd.apple.mpegurl')) {
@@ -516,20 +545,6 @@ export function PlayerPage() {
     };
   }, [resolvedMedia]);
 
-  const handleSelectServer = async (server: VideoServer) => {
-    setSelectedServer(server);
-    setIsResolving(true);
-    try {
-      const media = await resolveStream(server, querySource);
-      setResolvedMedia(media);
-    } catch (err) {
-      console.warn(`Server ${server.name} failed:`, err);
-      tryFallbackServer();
-    } finally {
-      setIsResolving(false);
-    }
-  };
-
   const playbackTimeRef = useRef(playbackTime);
   const durationRef = useRef(duration);
   const currentAnimeRef = useRef(currentAnime);
@@ -545,16 +560,6 @@ export function PlayerPage() {
     hasResumedProgressRef.current = false;
     readyToSaveRef.current = false;
   }, [currentEpisode]);
-
-  const tryFallbackServer = () => {
-    if (!servers.length || !selectedServer) return;
-    const currentIndex = servers.findIndex(s => s.url === selectedServer.url);
-    const nextServer = servers[(currentIndex + 1) % servers.length];
-
-    if (nextServer && nextServer.url !== selectedServer.url) {
-      handleSelectServer(nextServer);
-    }
-  };
 
   // Guardar progreso en el historial de SQLite
   const saveProgress = useCallback((overrideProgress?: number) => {
@@ -1594,35 +1599,39 @@ export function PlayerPage() {
                         <span>{aspectRatio === 'contain' ? '16:9' : aspectRatio === 'cover' ? 'Zoom' : 'Estirar'}</span>
                       </button>
 
-                      {/* Rotar Orientación */}
-                      <button
-                        onClick={toggleScreenOrientation}
-                        title="Rotar pantalla"
-                        style={{
-                          background: screenOrientation !== 'auto' ? 'var(--accent-primary)' : 'rgba(255,255,255,0.1)',
-                          border: '1px solid rgba(255,255,255,0.2)',
-                          borderRadius: 'var(--radius-md)', padding: '4px 7px',
-                          color: 'white', fontSize: 10, fontWeight: 700, cursor: 'pointer',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        }}
-                      >
-                        <Smartphone size={13} />
-                      </button>
+                      {/* Rotar Orientación (Solo Móvil / Android) */}
+                      {isMobile && (
+                        <button
+                          onClick={toggleScreenOrientation}
+                          title="Rotar pantalla"
+                          style={{
+                            background: screenOrientation !== 'auto' ? 'var(--accent-primary)' : 'rgba(255,255,255,0.1)',
+                            border: '1px solid rgba(255,255,255,0.2)',
+                            borderRadius: 'var(--radius-md)', padding: '4px 7px',
+                            color: 'white', fontSize: 10, fontWeight: 700, cursor: 'pointer',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          }}
+                        >
+                          <Smartphone size={13} />
+                        </button>
+                      )}
 
-                      {/* Fullscreen */}
-                      <button
-                        onClick={toggleFullscreen}
-                        title={isFullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'}
-                        style={{
-                          background: isFullscreen ? 'var(--accent-primary)' : 'rgba(255,255,255,0.1)',
-                          border: '1px solid rgba(255,255,255,0.2)',
-                          borderRadius: 'var(--radius-md)', padding: '4px 7px',
-                          color: 'white', fontSize: 10, fontWeight: 700, cursor: 'pointer',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        }}
-                      >
-                        {isFullscreen ? <Minimize size={13} /> : <Maximize size={13} />}
-                      </button>
+                      {/* Fullscreen (Solo PC / Escritorio) */}
+                      {!isMobile && (
+                        <button
+                          onClick={toggleFullscreen}
+                          title={isFullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'}
+                          style={{
+                            background: isFullscreen ? 'var(--accent-primary)' : 'rgba(255,255,255,0.1)',
+                            border: '1px solid rgba(255,255,255,0.2)',
+                            borderRadius: 'var(--radius-md)', padding: '4px 7px',
+                            color: 'white', fontSize: 10, fontWeight: 700, cursor: 'pointer',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          }}
+                        >
+                          {isFullscreen ? <Minimize size={13} /> : <Maximize size={13} />}
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1702,7 +1711,7 @@ export function PlayerPage() {
                     </span>
                   </div>
 
-                  {/* Grupo Derecha: Saltar Intro + Velocidad + Aspecto + Rotar + Fullscreen */}
+                  {/* Grupo Derecha: Saltar Intro + Velocidad + Aspecto + Rotar (Móvil) / Fullscreen (PC) */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     {/* Saltar Intro */}
                     {duration > 120 && (
@@ -1752,35 +1761,39 @@ export function PlayerPage() {
                       <span>{aspectRatio === 'contain' ? '16:9' : aspectRatio === 'cover' ? 'Zoom' : 'Estirar'}</span>
                     </button>
 
-                    {/* Botón de Rotación */}
-                    <button
-                      onClick={toggleScreenOrientation}
-                      title="Rotar orientación de pantalla"
-                      style={{
-                        background: screenOrientation !== 'auto' ? 'var(--accent-primary)' : 'rgba(255,255,255,0.1)',
-                        border: '1px solid rgba(255,255,255,0.2)',
-                        borderRadius: 'var(--radius-md)', padding: '5px 8px',
-                        color: 'white', fontSize: 11, fontWeight: 700, cursor: 'pointer',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      }}
-                    >
-                      <Smartphone size={14} />
-                    </button>
+                    {/* Botón de Rotación (Solo Móvil / Android) */}
+                    {isMobile && (
+                      <button
+                        onClick={toggleScreenOrientation}
+                        title="Rotar orientación de pantalla"
+                        style={{
+                          background: screenOrientation !== 'auto' ? 'var(--accent-primary)' : 'rgba(255,255,255,0.1)',
+                          border: '1px solid rgba(255,255,255,0.2)',
+                          borderRadius: 'var(--radius-md)', padding: '5px 8px',
+                          color: 'white', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        }}
+                      >
+                        <Smartphone size={14} />
+                      </button>
+                    )}
 
-                    {/* Botón de Pantalla Completa */}
-                    <button
-                      onClick={toggleFullscreen}
-                      title={isFullscreen ? 'Salir de pantalla completa (F)' : 'Pantalla completa (F)'}
-                      style={{
-                        background: isFullscreen ? 'var(--accent-primary)' : 'rgba(255,255,255,0.1)',
-                        border: '1px solid rgba(255,255,255,0.2)',
-                        borderRadius: 'var(--radius-md)', padding: '5px 8px',
-                        color: 'white', fontSize: 11, fontWeight: 700, cursor: 'pointer',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      }}
-                    >
-                      {isFullscreen ? <Minimize size={14} /> : <Maximize size={14} />}
-                    </button>
+                    {/* Botón de Pantalla Completa (Solo PC / Escritorio) */}
+                    {!isMobile && (
+                      <button
+                        onClick={toggleFullscreen}
+                        title={isFullscreen ? 'Salir de pantalla completa (F)' : 'Pantalla completa (F)'}
+                        style={{
+                          background: isFullscreen ? 'var(--accent-primary)' : 'rgba(255,255,255,0.1)',
+                          border: '1px solid rgba(255,255,255,0.2)',
+                          borderRadius: 'var(--radius-md)', padding: '5px 8px',
+                          color: 'white', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        }}
+                      >
+                        {isFullscreen ? <Minimize size={14} /> : <Maximize size={14} />}
+                      </button>
+                    )}
                   </div>
                 </div>
               )}
@@ -1970,6 +1983,27 @@ export function PlayerPage() {
                   </button>
                 ))}
               </div>
+            </div>
+
+            {/* Auto siguiente episodio */}
+            <div>
+              <button
+                onClick={() => {
+                  setAutoNext(!autoNext);
+                  showToast({ icon: 'seek', text: `Auto-siguiente: ${!autoNext ? 'Activado' : 'Desactivado'}` });
+                }}
+                style={{
+                  width: '100%', padding: isMobile ? '7px 10px' : '9px 12px', borderRadius: 'var(--radius-md)',
+                  background: autoNext ? 'rgba(124, 58, 237, 0.2)' : 'var(--bg-elevated)',
+                  border: `1px solid ${autoNext ? 'var(--accent-primary)' : 'var(--border-subtle)'}`,
+                  color: autoNext ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                  fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                }}
+              >
+                <span>Siguiente episodio automático</span>
+                <span>{autoNext ? 'ON' : 'OFF'}</span>
+              </button>
             </div>
           </motion.div>
         )}
