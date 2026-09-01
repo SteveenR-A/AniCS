@@ -262,14 +262,37 @@ export async function fetchGistData(
     const raw = getRawContent(filename);
     if (!raw) return fallback;
 
-    if (syncMeta.pbkdf2Salt) {
+    const isEncrypted = !!syncMeta.pbkdf2Salt || config.encryptionEnabled;
+
+    if (isEncrypted) {
       if (!sessionDerivedKey) {
         throw new Error('NEED_PIN_FOR_DECRYPTION');
       }
-      const decrypted = await decryptText(raw, sessionDerivedKey);
-      return JSON.parse(decrypted);
+      try {
+        const decrypted = await decryptText(raw, sessionDerivedKey);
+        return JSON.parse(decrypted);
+      } catch (err: any) {
+        // Fallback si el archivo remoto aún era texto plano no cifrado
+        try {
+          return JSON.parse(raw);
+        } catch {
+          throw err;
+        }
+      }
     } else {
-      return JSON.parse(raw);
+      try {
+        return JSON.parse(raw);
+      } catch {
+        if (sessionDerivedKey) {
+          try {
+            const decrypted = await decryptText(raw, sessionDerivedKey);
+            return JSON.parse(decrypted);
+          } catch {
+            // Ignorar
+          }
+        }
+        throw new Error('Los datos remotos están cifrados. Activa el cifrado por PIN con la clave correcta para sincronizar.');
+      }
     }
   };
 
@@ -292,7 +315,8 @@ export async function fetchGistData(
 export async function createOrUpdateGist(
   config: GistSyncConfig,
   payload: GistFilesPayload,
-  sessionDerivedKey?: CryptoKey | null
+  sessionDerivedKey?: CryptoKey | null,
+  pbkdf2Salt?: string
 ): Promise<{ gistId: string; etag?: string; gistUrl?: string }> {
   if (!config.githubToken) {
     throw new Error('Falta el Token de GitHub para sincronizar');
@@ -321,6 +345,7 @@ export async function createOrUpdateGist(
   let finalSettingsContent = settingsJson;
 
   if (config.encryptionEnabled && sessionDerivedKey) {
+    payload.syncMeta.pbkdf2Salt = pbkdf2Salt || payload.syncMeta.pbkdf2Salt;
     finalProfilesContent = await encryptText(profilesJson, sessionDerivedKey);
     finalHistoryContent = await encryptText(historyJson, sessionDerivedKey);
     finalFavoritesContent = await encryptText(favoritesJson, sessionDerivedKey);

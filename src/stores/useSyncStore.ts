@@ -203,22 +203,27 @@ export const useSyncStore = create<SyncState>((set, get) => ({
     try {
       // 1. Obtener clave de cifrado si está habilitado y aún no está en RAM
       let currentKey = get().sessionDerivedKey;
-      if (config.encryptionEnabled && !currentKey) {
-        let saltB64 = await getSecureSecret('pbkdf2_salt');
+      let saltB64: string | undefined = undefined;
+
+      if (config.encryptionEnabled) {
+        saltB64 = (await getSecureSecret('pbkdf2_salt')) || undefined;
         if (!saltB64) {
           // Generar nuevo salt si no existía
           const newSalt = generateRandomSalt(16);
           saltB64 = uint8ArrayToBase64(newSalt);
           await saveSecureSecret('pbkdf2_salt', saltB64);
         }
-        const pin = await get().requestPin('unlock');
-        if (!pin) {
-          set({ isSyncing: false, syncStatus: 'error', lastError: 'Se requiere el PIN para sincronizar datos cifrados' });
-          return;
+
+        if (!currentKey) {
+          const pin = await get().requestPin('unlock');
+          if (!pin) {
+            set({ isSyncing: false, syncStatus: 'error', lastError: 'Se requiere el PIN para sincronizar datos cifrados' });
+            return;
+          }
+          const saltBytes = base64ToUint8Array(saltB64);
+          currentKey = await deriveKeyFromPin(pin, saltBytes);
+          set({ sessionDerivedKey: currentKey });
         }
-        const saltBytes = base64ToUint8Array(saltB64);
-        currentKey = await deriveKeyFromPin(pin, saltBytes);
-        set({ sessionDerivedKey: currentKey });
       }
 
       // 2. Cargar datos locales de SQLite
@@ -233,9 +238,10 @@ export const useSyncStore = create<SyncState>((set, get) => ({
       const localPayload: GistFilesPayload = {
         syncMeta: {
           schemaVersion: CURRENT_SCHEMA_VERSION,
-          appVersion: '0.1.8',
+          appVersion: '0.1.9',
           lastModifiedAt: new Date().toISOString(),
           lastModifiedDevice: 'windows',
+          pbkdf2Salt: config.encryptionEnabled ? saltB64 : undefined,
           fileHashes: { profiles: '', history: '', favorites: '', settings: '' },
           deletedFavorites: tombstones.filter((t: TombstoneItem) => t.entityType === 'favorite').map((t: TombstoneItem) => ({
             url: t.entityId,
@@ -295,7 +301,7 @@ export const useSyncStore = create<SyncState>((set, get) => ({
       }
 
       // 4. Subir datos al Gist
-      const result = await createOrUpdateGist(get().config, finalPayload, currentKey);
+      const result = await createOrUpdateGist(get().config, finalPayload, currentKey, saltB64);
       const nowIso = new Date().toISOString();
 
       await get().updateConfig({
@@ -341,7 +347,7 @@ export const useSyncStore = create<SyncState>((set, get) => ({
     const payload: GistFilesPayload = {
       syncMeta: {
         schemaVersion: CURRENT_SCHEMA_VERSION,
-        appVersion: '0.1.8',
+        appVersion: '0.1.9',
         lastModifiedAt: new Date().toISOString(),
         lastModifiedDevice: 'windows',
         fileHashes: { profiles: '', history: '', favorites: '', settings: '' },

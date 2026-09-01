@@ -101,22 +101,29 @@ export async function encryptText(plainText: string, key: CryptoKey): Promise<st
 // ─── Descifrado AES-GCM ───
 
 export async function decryptText(cipherBase64: string, key: CryptoKey): Promise<string> {
-  const combined = base64ToUint8Array(cipherBase64);
-  if (combined.length < 12) {
-    throw new Error('Ciphertext demasiado corto: falta IV');
+  try {
+    const combined = base64ToUint8Array(cipherBase64);
+    if (combined.length < 12) {
+      throw new Error('Ciphertext demasiado corto: falta IV');
+    }
+
+    const iv = combined.slice(0, 12);
+    const cipherBytes = combined.slice(12);
+
+    const plainBuffer = await window.crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv },
+      key,
+      cipherBytes
+    );
+
+    const dec = new TextDecoder();
+    return dec.decode(plainBuffer);
+  } catch (err: any) {
+    if (err?.name === 'OperationError' || err?.message?.includes('operation-specific')) {
+      throw new Error('PIN incorrecto: La clave no coincide con los datos cifrados en la nube');
+    }
+    throw err;
   }
-
-  const iv = combined.slice(0, 12);
-  const cipherBytes = combined.slice(12);
-
-  const plainBuffer = await window.crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv },
-    key,
-    cipherBytes
-  );
-
-  const dec = new TextDecoder();
-  return dec.decode(plainBuffer);
 }
 
 // ─── Hashes Deterministas SHA-256 ───
