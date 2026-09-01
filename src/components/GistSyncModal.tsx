@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Cloud, RefreshCw, Lock, Unlock, Key, Download, Upload,
-  ExternalLink, Check, AlertCircle, Trash2, X, Eye, EyeOff, ShieldCheck
+  ExternalLink, Check, CheckCircle2, AlertCircle, Info, Trash2, X, Eye, EyeOff, ShieldCheck
 } from 'lucide-react';
 import { useSyncStore } from '@/stores/useSyncStore';
 import { openUrl } from '@tauri-apps/plugin-opener';
@@ -33,9 +33,39 @@ export const GistSyncModal: React.FC<Props> = ({ isOpen, onClose }) => {
   const [showToken, setShowToken] = useState(false);
   const [isEditingToken, setIsEditingToken] = useState(!config.githubToken);
   const [tokenSaveSuccess, setTokenSaveSuccess] = useState(false);
+  const [syncFeedback, setSyncFeedback] = useState<{ message: string; type: 'success' | 'info' | 'error' } | null>(null);
+  const feedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen) return null;
+
+  const handleManualSync = async () => {
+    try {
+      await syncNow();
+      const currentStatus = useSyncStore.getState().syncStatus;
+      const currentError = useSyncStore.getState().lastError;
+
+      if (feedbackTimer.current) clearTimeout(feedbackTimer.current);
+
+      if (currentStatus === 'success') {
+        setSyncFeedback({ message: '¡Sincronización completada exitosamente!', type: 'success' });
+      } else if (currentStatus === 'not_modified') {
+        setSyncFeedback({ message: '¡Todo al día! Tu historial y favoritos coinciden con la nube', type: 'info' });
+      } else if (currentStatus === 'error') {
+        setSyncFeedback({ message: currentError || 'Error al sincronizar con GitHub', type: 'error' });
+      }
+
+      feedbackTimer.current = setTimeout(() => {
+        setSyncFeedback(null);
+      }, 4000);
+    } catch (e: any) {
+      if (feedbackTimer.current) clearTimeout(feedbackTimer.current);
+      setSyncFeedback({ message: e?.message || 'Error al sincronizar', type: 'error' });
+      feedbackTimer.current = setTimeout(() => {
+        setSyncFeedback(null);
+      }, 4000);
+    }
+  };
 
   const handleSaveToken = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -227,7 +257,7 @@ export const GistSyncModal: React.FC<Props> = ({ isOpen, onClose }) => {
               {config.githubToken && (
                 <button
                   disabled={isSyncing}
-                  onClick={() => syncNow()}
+                  onClick={handleManualSync}
                   style={{
                     background: 'var(--accent-primary, #3b82f6)',
                     border: 'none',
@@ -241,6 +271,7 @@ export const GistSyncModal: React.FC<Props> = ({ isOpen, onClose }) => {
                     alignItems: 'center',
                     gap: 6,
                     opacity: isSyncing ? 0.7 : 1,
+                    transition: 'all 0.2s ease',
                   }}
                 >
                   <RefreshCw size={15} className={isSyncing ? 'animate-spin' : ''} />
@@ -249,7 +280,52 @@ export const GistSyncModal: React.FC<Props> = ({ isOpen, onClose }) => {
               )}
             </div>
 
-            {lastError && (
+            <AnimatePresence>
+              {syncFeedback && (
+                <motion.div
+                  initial={{ opacity: 0, y: -8, scale: 0.98 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -8, scale: 0.98 }}
+                  transition={{ duration: 0.2 }}
+                  style={{
+                    padding: '11px 15px',
+                    borderRadius: '10px',
+                    background:
+                      syncFeedback.type === 'success'
+                        ? 'rgba(16, 185, 129, 0.15)'
+                        : syncFeedback.type === 'info'
+                        ? 'rgba(59, 130, 246, 0.15)'
+                        : 'rgba(239, 68, 68, 0.15)',
+                    border: `1px solid ${
+                      syncFeedback.type === 'success'
+                        ? 'rgba(16, 185, 129, 0.35)'
+                        : syncFeedback.type === 'info'
+                        ? 'rgba(59, 130, 246, 0.35)'
+                        : 'rgba(239, 68, 68, 0.35)'
+                    }`,
+                    color:
+                      syncFeedback.type === 'success'
+                        ? '#34d399'
+                        : syncFeedback.type === 'info'
+                        ? '#60a5fa'
+                        : '#f87171',
+                    fontSize: 13,
+                    fontWeight: 600,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.2)',
+                  }}
+                >
+                  {syncFeedback.type === 'success' && <CheckCircle2 size={18} />}
+                  {syncFeedback.type === 'info' && <Info size={18} />}
+                  {syncFeedback.type === 'error' && <AlertCircle size={18} />}
+                  <span style={{ flex: 1 }}>{syncFeedback.message}</span>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {!syncFeedback && lastError && (
               <div
                 style={{
                   padding: '10px 14px',
