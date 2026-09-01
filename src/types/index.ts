@@ -12,6 +12,7 @@ export interface AnimeResult {
   year?: string;
   rating?: number;
   source: string;
+  profileId?: string;
 }
 
 export interface GenreItem {

@@ -109,6 +109,7 @@ pub fn init_database_inner(app_data_dir: &PathBuf) -> AppResult<Connection> {
         CREATE INDEX IF NOT EXISTS idx_history_watched_at ON watch_history(watched_at DESC);
         CREATE INDEX IF NOT EXISTS idx_history_profile ON watch_history(profile_id);
         CREATE INDEX IF NOT EXISTS idx_favorites_profile ON favorites(profile_id);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_favorites_url_profile ON favorites(url, profile_id);
         CREATE INDEX IF NOT EXISTS idx_tombstones_deleted_at ON tombstones(deleted_at);
         CREATE INDEX IF NOT EXISTS idx_image_cache_last_accessed ON image_cache(last_accessed_at DESC);
         CREATE INDEX IF NOT EXISTS idx_image_cache_access_count ON image_cache(access_count DESC);
@@ -657,8 +658,8 @@ pub fn get_favorites(profile_id: Option<&str>) -> AppResult<Vec<AnimeResult>> {
 pub fn get_all_favorites_for_sync(profile_id: Option<&str>) -> AppResult<Vec<AnimeResult>> {
     with_db(|conn| {
         let (query, has_param) = match profile_id {
-            Some(_) => ("SELECT url, title, thumbnail_url, source FROM favorites WHERE profile_id = ?1 ORDER BY added_at DESC", true),
-            None => ("SELECT url, title, thumbnail_url, source FROM favorites ORDER BY added_at DESC", false),
+            Some(_) => ("SELECT url, title, thumbnail_url, source, profile_id FROM favorites WHERE profile_id = ?1 ORDER BY added_at DESC", true),
+            None => ("SELECT url, title, thumbnail_url, source, profile_id FROM favorites ORDER BY added_at DESC", false),
         };
 
         let mut stmt = conn.prepare(query)?;
@@ -668,6 +669,7 @@ pub fn get_all_favorites_for_sync(profile_id: Option<&str>) -> AppResult<Vec<Ani
                 title: row.get(1)?,
                 thumbnail_url: row.get(2)?,
                 source: row.get(3)?,
+                profile_id: row.get(4).ok(),
                 ..Default::default()
             })
         };
@@ -1158,8 +1160,15 @@ mod tests {
                 [],
                 |row| row.get(0)
             );
-            // Debe compilar/ejecutar la consulta sin error de 'no such column'
-            assert!(result.is_err() || result.is_ok()); // La tabla está vacía, pero la consulta no da error de sintaxis/columna faltante
+            assert!(result.is_err() || result.is_ok());
+
+            // 4. Probar inserción ON CONFLICT en favoritos sobre la base migrada
+            conn.execute(
+                "INSERT INTO favorites (url, title, thumbnail_url, source, added_at, profile_id)
+                 VALUES ('https://jkanime.net/bleach/', 'Bleach', '', 'jkanime', datetime('now'), 'default')
+                 ON CONFLICT(url, profile_id) DO UPDATE SET title = excluded.title",
+                [],
+            ).expect("ON CONFLICT(url, profile_id) must succeed on migrated legacy database");
         }
 
         // Cleanup

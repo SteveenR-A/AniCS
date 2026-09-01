@@ -26,6 +26,8 @@ pub struct AnimeResult {
     pub rating: Option<f32>,
     /// ID del extractor que generó este resultado
     pub source: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

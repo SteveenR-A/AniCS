@@ -73,6 +73,24 @@ interface SyncState {
 }
 
 let autoSyncTimeout: any = null;
+let periodicSyncInterval: any = null;
+
+function setupPeriodicSync(get: () => SyncState) {
+  if (periodicSyncInterval) {
+    clearInterval(periodicSyncInterval);
+    periodicSyncInterval = null;
+  }
+  const { config } = get();
+  if (config.autoSync && config.githubToken && config.gistId) {
+    // Sincronizar automáticamente cada 15 minutos en background
+    periodicSyncInterval = setInterval(() => {
+      const state = get();
+      if (state.config.autoSync && state.config.githubToken && !state.isSyncing) {
+        state.syncNow().catch(e => console.warn('Background periodic sync skipped:', e));
+      }
+    }, 15 * 60 * 1000);
+  }
+}
 
 export const useSyncStore = create<SyncState>((set, get) => ({
   config: {
@@ -120,7 +138,9 @@ export const useSyncStore = create<SyncState>((set, get) => ({
         },
       });
 
-      // Si autoSync está habilitado y hay token + gistId, hacer verificación inicial ETag (304)
+      setupPeriodicSync(get);
+
+      // Si autoSync está habilitado y hay token + gistId, hacer verificación inicial
       if (token && gistId && autoSync) {
         get().syncNow().catch(e => console.warn('Background initial sync skipped:', e));
       }
@@ -137,6 +157,7 @@ export const useSyncStore = create<SyncState>((set, get) => ({
       await deleteSecureSecret('github_token');
     }
     set(state => ({ config: { ...state.config, githubToken: trimmed } }));
+    setupPeriodicSync(get);
   },
 
   clearToken: async () => {
@@ -154,6 +175,7 @@ export const useSyncStore = create<SyncState>((set, get) => ({
       },
       sessionDerivedKey: null,
     }));
+    setupPeriodicSync(get);
   },
 
   updateConfig: async (partial: Partial<GistSyncConfig>) => {
@@ -166,6 +188,7 @@ export const useSyncStore = create<SyncState>((set, get) => ({
     if (partial.gistUrl !== undefined) await setSyncConfig('gist_url', partial.gistUrl);
 
     set({ config: newConfig });
+    setupPeriodicSync(get);
   },
 
   requestPin: (mode: 'unlock' | 'setup' | 'disable') => {
@@ -267,11 +290,31 @@ export const useSyncStore = create<SyncState>((set, get) => ({
           const fetchResult = await fetchGistData(config, currentKey);
 
           if (fetchResult.notModified) {
-            set({ isSyncing: false, syncStatus: 'not_modified' });
-            return;
-          }
+            // El Gist remoto no cambió en GitHub.
+            // Si el estado local tiene cambios no subidos, procedemos a subir localPayload;
+            // de lo contrario, marcamos como "Al día"
+            const localHashes = localPayload.syncMeta.fileHashes;
+            const lastHashesJson = await getSyncConfig('last_synced_hashes').catch(() => '');
+            let hasLocalChanges = true;
+            if (lastHashesJson) {
+              try {
+                const parsed = JSON.parse(lastHashesJson);
+                if (
+                  parsed.profiles === localHashes.profiles &&
+                  parsed.history === localHashes.history &&
+                  parsed.favorites === localHashes.favorites &&
+                  parsed.settings === localHashes.settings
+                ) {
+                  hasLocalChanges = false;
+                }
+              } catch {}
+            }
 
-          if (fetchResult.payload) {
+            if (!hasLocalChanges) {
+              set({ isSyncing: false, syncStatus: 'not_modified' });
+              return;
+            }
+          } else if (fetchResult.payload) {
             finalPayload = mergeSyncData(localPayload, fetchResult.payload);
 
             // Aplicar datos combinados a SQLite local
@@ -282,7 +325,7 @@ export const useSyncStore = create<SyncState>((set, get) => ({
               await upsertHistory(h);
             }
             for (const f of finalPayload.favorites) {
-              await addFavorite(f, (f as any).profileId);
+              await addFavorite(f, f.profileId);
             }
             // Purgar favoritos eliminados por tombstones
             for (const del of finalPayload.syncMeta.deletedFavorites) {
@@ -311,13 +354,19 @@ export const useSyncStore = create<SyncState>((set, get) => ({
         gistUrl: result.gistUrl || `https://gist.github.com/${result.gistId}`,
       });
 
+      // Guardar hashes sincronizados para evitar subidas redundantes
+      await setSyncConfig('last_synced_hashes', JSON.stringify(finalPayload.syncMeta.fileHashes));
+
       set({ isSyncing: false, syncStatus: 'success' });
     } catch (e: any) {
       console.error('Error durante la sincronización:', e);
+      const errMsg = typeof e === 'string'
+        ? e
+        : (e?.message || (typeof e === 'object' ? JSON.stringify(e) : String(e)));
       set({
         isSyncing: false,
         syncStatus: 'error',
-        lastError: e?.message || 'Error desconocido al sincronizar',
+        lastError: errMsg || 'Error desconocido al sincronizar',
       });
     }
   },
