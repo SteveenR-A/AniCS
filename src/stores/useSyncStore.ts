@@ -81,15 +81,18 @@ function setupPeriodicSync(get: () => SyncState) {
     periodicSyncInterval = null;
   }
   const { config } = get();
-  if (config.autoSync && config.githubToken && config.gistId) {
-    // Sincronizar automáticamente cada 15 minutos en background
-    periodicSyncInterval = setInterval(() => {
-      const state = get();
-      if (state.config.autoSync && state.config.githubToken && !state.isSyncing) {
-        state.syncNow().catch(e => console.warn('Background periodic sync skipped:', e));
-      }
-    }, 15 * 60 * 1000);
+  // Si no hay token, no hay gist o la sincronización automática está desmarcada, no se programa ningún intervalo
+  if (!config.autoSync || !config.githubToken || !config.gistId) {
+    return;
   }
+
+  // Sincronizar automáticamente cada 15 minutos en background (solo comprueba ETag 304 ligero)
+  periodicSyncInterval = setInterval(() => {
+    const state = get();
+    if (state.config.autoSync && state.config.githubToken && state.config.gistId && !state.isSyncing) {
+      state.syncNow().catch(e => console.warn('Background periodic sync skipped:', e));
+    }
+  }, 15 * 60 * 1000);
 }
 
 export const useSyncStore = create<SyncState>((set, get) => ({
@@ -161,6 +164,14 @@ export const useSyncStore = create<SyncState>((set, get) => ({
   },
 
   clearToken: async () => {
+    if (autoSyncTimeout) {
+      clearTimeout(autoSyncTimeout);
+      autoSyncTimeout = null;
+    }
+    if (periodicSyncInterval) {
+      clearInterval(periodicSyncInterval);
+      periodicSyncInterval = null;
+    }
     await deleteSecureSecret('github_token');
     await deleteSecureSecret('pbkdf2_salt');
     await setSyncConfig('gist_id', '');
@@ -175,7 +186,6 @@ export const useSyncStore = create<SyncState>((set, get) => ({
       },
       sessionDerivedKey: null,
     }));
-    setupPeriodicSync(get);
   },
 
   updateConfig: async (partial: Partial<GistSyncConfig>) => {
@@ -373,7 +383,7 @@ export const useSyncStore = create<SyncState>((set, get) => ({
 
   triggerDebouncedSync: () => {
     const { config } = get();
-    if (!config.autoSync || !config.githubToken) return;
+    if (!config.autoSync || !config.githubToken || !config.gistId) return;
 
     if (autoSyncTimeout) {
       clearTimeout(autoSyncTimeout);
