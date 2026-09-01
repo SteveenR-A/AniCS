@@ -101,6 +101,65 @@ export interface HistoryEntry {
   watchProgress: number;
   watchedAt: string;
   source: string;
+  profileId?: string;
+}
+
+export interface UserProfile {
+  id: string;
+  name: string;
+  avatar: string;
+  color: string;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export interface TombstoneItem {
+  id: string;
+  entityType: string;
+  entityId: string;
+  profileId: string;
+  deletedAt: string;
+}
+
+export interface SyncMeta {
+  schemaVersion: number;
+  appVersion: string;
+  lastModifiedAt: string;
+  lastModifiedDevice: 'windows' | 'android' | 'web';
+  pbkdf2Salt?: string;
+  fileHashes: {
+    profiles: string;
+    history: string;
+    favorites: string;
+    settings: string;
+  };
+  deletedFavorites: Array<{
+    url: string;
+    profileId: string;
+    deletedAt: string;
+  }>;
+  deletedProfiles: Array<{
+    profileId: string;
+    deletedAt: string;
+  }>;
+}
+
+export interface GistSyncConfig {
+  githubToken?: string;
+  gistId?: string;
+  lastEtag?: string;
+  autoSync: boolean;
+  encryptionEnabled: boolean;
+  lastSyncAt?: string;
+  gistUrl?: string;
+}
+
+export interface GistFilesPayload {
+  syncMeta: SyncMeta;
+  profiles: UserProfile[];
+  history: HistoryEntry[];
+  favorites: AnimeResult[];
+  settings: Record<string, string>;
 }
 
 export type DownloadStatus = 'queued' | 'downloading' | 'paused' | 'completed' | 'failed' | 'canceled';

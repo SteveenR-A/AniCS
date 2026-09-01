@@ -12,6 +12,8 @@ import {
 import { invoke } from '@tauri-apps/api/core';
 import { usePlayerStore } from '@/stores/usePlayerStore';
 import { useAnimeStore } from '@/stores/useAnimeStore';
+import { useProfileStore } from '@/stores/useProfileStore';
+import { useSyncStore } from '@/stores/useSyncStore';
 import { resolveStream, getServers, getDetails } from '@/services/animeService';
 import { upsertHistory, getEpisodeProgress } from '@/services/storageService';
 import { getLocalMediaUrl, setKeepScreenOn, setNativeFullscreen, setNativeScreenOrientation } from '@/services/downloadService';
@@ -585,6 +587,7 @@ export function PlayerPage() {
     const cleanEpUrl = ep.url.replace(/\/+$/, '').trim();
     const epNum = ep.number;
     const historyId = `${cleanAnimeUrl}-${epNum}`;
+    const activeProfileId = useProfileStore.getState().activeProfile?.id;
 
     upsertHistory({
       id: historyId,
@@ -596,7 +599,12 @@ export function PlayerPage() {
       watchProgress: prog,
       watchedAt: new Date().toISOString(),
       source: anime.source,
-    }).catch(console.error);
+      profileId: activeProfileId,
+    })
+      .then(() => {
+        useSyncStore.getState().triggerDebouncedSync();
+      })
+      .catch(console.error);
   }, []);
 
   useEffect(() => {
@@ -1022,7 +1030,10 @@ export function PlayerPage() {
               durationRef.current = v.duration;
               if (!hasResumedProgressRef.current && currentEpisodeRef.current) {
                 try {
-                  const savedProg = await getEpisodeProgress(currentEpisodeRef.current.url);
+                  const savedProg = await getEpisodeProgress(
+                    currentEpisodeRef.current.url,
+                    useProfileStore.getState().activeProfile?.id
+                  );
                   if (savedProg && savedProg > 0.01 && savedProg < 0.95 && v.duration > 0) {
                     const targetTime = savedProg * v.duration;
                     v.currentTime = targetTime;

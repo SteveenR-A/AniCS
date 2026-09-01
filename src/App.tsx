@@ -10,9 +10,12 @@ import { TopAnimePage } from '@/pages/TopAnimePage';
 import { HistoryPage, FavoritesPage, DownloadsPage } from '@/pages/OtherPages';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { ChangelogModal } from '@/components/ChangelogModal';
+import { PinDialogModal } from '@/components/PinDialogModal';
 import { useAnimeStore } from '@/stores/useAnimeStore';
 import { useDownloadStore } from '@/stores/useDownloadStore';
 import { useThemeStore } from '@/stores/useThemeStore';
+import { useProfileStore } from '@/stores/useProfileStore';
+import { useSyncStore } from '@/stores/useSyncStore';
 import { checkForAppUpdates, CURRENT_VERSION } from '@/services/updateService';
 
 function AppRoutes() {
@@ -40,11 +43,17 @@ export default function App() {
   const { loadSources } = useAnimeStore();
   const { init: initDownloads, cleanup: cleanupDownloads } = useDownloadStore();
   const { loadTheme } = useThemeStore();
+  const { loadProfiles } = useProfileStore();
+  const { initSync } = useSyncStore();
   const [showPatchNotes, setShowPatchNotes] = useState(false);
 
   useEffect(() => {
     // Cargar tema visual guardado
     loadTheme();
+
+    // Cargar perfiles de usuario y sincronización
+    loadProfiles();
+    initSync();
 
     // Cargar fuentes de extracción al iniciar
     loadSources();
@@ -82,7 +91,7 @@ export default function App() {
       clearTimeout(timer);
       cleanupDownloads();
     };
-  }, [loadTheme, loadSources, initDownloads, cleanupDownloads]);
+  }, [loadTheme, loadProfiles, initSync, loadSources, initDownloads, cleanupDownloads]);
 
   const handleClosePatchNotes = () => {
     try {
@@ -95,6 +104,7 @@ export default function App() {
     <BrowserRouter>
       <AppRoutes />
       <ChangelogModal isOpen={showPatchNotes} onClose={handleClosePatchNotes} />
+      <PinDialogModal />
     </BrowserRouter>
   );
 }

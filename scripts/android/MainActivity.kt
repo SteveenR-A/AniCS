@@ -203,6 +203,40 @@ class AndroidNativeBridge(activity: Activity) {
     }
 
     @JavascriptInterface
+    fun saveSecureToken(key: String, token: String) {
+        val act = activityRef.get() ?: return
+        try {
+            val prefs = act.getSharedPreferences("anics_secure_prefs", Activity.MODE_PRIVATE)
+            prefs.edit().putString(key, token).apply()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error guardando secure token en Android: ${e.message}", e)
+        }
+    }
+
+    @JavascriptInterface
+    fun getSecureToken(key: String): String? {
+        val act = activityRef.get() ?: return null
+        return try {
+            val prefs = act.getSharedPreferences("anics_secure_prefs", Activity.MODE_PRIVATE)
+            prefs.getString(key, null)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error obteniendo secure token en Android: ${e.message}", e)
+            null
+        }
+    }
+
+    @JavascriptInterface
+    fun deleteSecureToken(key: String) {
+        val act = activityRef.get() ?: return
+        try {
+            val prefs = act.getSharedPreferences("anics_secure_prefs", Activity.MODE_PRIVATE)
+            prefs.edit().remove(key).apply()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error eliminando secure token en Android: ${e.message}", e)
+        }
+    }
+
+    @JavascriptInterface
     fun installApk(filePath: String) {
         val act = activityRef.get() ?: return
         if (act.isFinishing || act.isDestroyed) return

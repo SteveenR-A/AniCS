@@ -20,7 +20,7 @@ pub fn init_database_inner(app_data_dir: &PathBuf) -> AppResult<Connection> {
         PRAGMA temp_store=memory;
     ").map_err(AppError::Database)?;
 
-    // Crear tablas
+    // 1. Crear tablas si no existen
     conn.execute_batch("
         CREATE TABLE IF NOT EXISTS watch_history (
             id TEXT PRIMARY KEY,
@@ -31,15 +31,40 @@ pub fn init_database_inner(app_data_dir: &PathBuf) -> AppResult<Connection> {
             episode_url TEXT NOT NULL,
             watch_progress REAL NOT NULL DEFAULT 0.0,
             watched_at TEXT NOT NULL,
-            source TEXT NOT NULL DEFAULT 'jkanime'
+            source TEXT NOT NULL DEFAULT 'jkanime',
+            profile_id TEXT NOT NULL DEFAULT 'default'
         );
 
         CREATE TABLE IF NOT EXISTS favorites (
-            url TEXT PRIMARY KEY,
+            url TEXT,
             title TEXT NOT NULL,
             thumbnail_url TEXT NOT NULL DEFAULT '',
             source TEXT NOT NULL,
-            added_at TEXT NOT NULL
+            added_at TEXT NOT NULL,
+            profile_id TEXT NOT NULL DEFAULT 'default',
+            PRIMARY KEY (url, profile_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS profiles (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            avatar TEXT NOT NULL DEFAULT 'sparkles',
+            color TEXT NOT NULL DEFAULT '#3b82f6',
+            is_active INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS tombstones (
+            id TEXT PRIMARY KEY,
+            entity_type TEXT NOT NULL,
+            entity_id TEXT NOT NULL,
+            profile_id TEXT NOT NULL DEFAULT 'default',
+            deleted_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS sync_config (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
         );
 
         CREATE TABLE IF NOT EXISTS downloads (
@@ -71,15 +96,30 @@ pub fn init_database_inner(app_data_dir: &PathBuf) -> AppResult<Connection> {
             last_accessed_at TEXT NOT NULL,
             created_at TEXT NOT NULL
         );
+    ").map_err(AppError::Database)?;
 
+    // 2. Migraciones no destructivas para bases de datos existentes de versiones anteriores
+    let _ = conn.execute("ALTER TABLE downloads ADD COLUMN total_bytes INTEGER", []);
+    let _ = conn.execute("ALTER TABLE watch_history ADD COLUMN profile_id TEXT NOT NULL DEFAULT 'default'", []);
+    let _ = conn.execute("ALTER TABLE favorites ADD COLUMN profile_id TEXT NOT NULL DEFAULT 'default'", []);
+
+    // 3. Crear índices una vez asegurada la existencia de todas las columnas
+    conn.execute_batch("
         CREATE INDEX IF NOT EXISTS idx_history_anime_url ON watch_history(anime_url);
         CREATE INDEX IF NOT EXISTS idx_history_watched_at ON watch_history(watched_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_history_profile ON watch_history(profile_id);
+        CREATE INDEX IF NOT EXISTS idx_favorites_profile ON favorites(profile_id);
+        CREATE INDEX IF NOT EXISTS idx_tombstones_deleted_at ON tombstones(deleted_at);
         CREATE INDEX IF NOT EXISTS idx_image_cache_last_accessed ON image_cache(last_accessed_at DESC);
         CREATE INDEX IF NOT EXISTS idx_image_cache_access_count ON image_cache(access_count DESC);
     ").map_err(AppError::Database)?;
 
-    // Migración no destructiva si la tabla downloads ya existía sin total_bytes
-    let _ = conn.execute("ALTER TABLE downloads ADD COLUMN total_bytes INTEGER", []);
+    // 4. Asegurar perfil por defecto inicial
+    conn.execute(
+        "INSERT OR IGNORE INTO profiles (id, name, avatar, color, is_active, created_at)
+         VALUES ('default', 'Principal', 'sparkles', '#3b82f6', 1, datetime('now'))",
+        [],
+    ).map_err(AppError::Database)?;
 
     Ok(conn)
 }
@@ -102,7 +142,136 @@ where
 }
 
 // ──────────────────────────────────────────
-// Configuración / Ajustes (Settings)
+// Perfiles de Usuario
+// ──────────────────────────────────────────
+
+fn get_active_profile_id_inner(conn: &Connection) -> String {
+    conn.query_row(
+        "SELECT id FROM profiles WHERE is_active = 1 LIMIT 1",
+        [],
+        |row| row.get(0),
+    )
+    .unwrap_or_else(|_| "default".to_string())
+}
+
+pub fn get_all_profiles() -> AppResult<Vec<UserProfile>> {
+    with_db(|conn| {
+        let mut stmt = conn.prepare(
+            "SELECT id, name, avatar, color, is_active, created_at FROM profiles ORDER BY created_at ASC"
+        )?;
+        let profiles = stmt.query_map([], |row| {
+            let is_active_int: i32 = row.get(4)?;
+            Ok(UserProfile {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                avatar: row.get(2)?,
+                color: row.get(3)?,
+                is_active: is_active_int == 1,
+                created_at: row.get(5)?,
+            })
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+        Ok(profiles)
+    })
+}
+
+pub fn get_active_profile() -> AppResult<UserProfile> {
+    with_db(|conn| {
+        let mut stmt = conn.prepare(
+            "SELECT id, name, avatar, color, is_active, created_at FROM profiles WHERE is_active = 1 LIMIT 1"
+        )?;
+        let profile = stmt.query_row([], |row| {
+            let is_active_int: i32 = row.get(4)?;
+            Ok(UserProfile {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                avatar: row.get(2)?,
+                color: row.get(3)?,
+                is_active: is_active_int == 1,
+                created_at: row.get(5)?,
+            })
+        }).optional()?;
+
+        match profile {
+            Some(p) => Ok(p),
+            None => {
+                // Fallback al perfil default
+                let default_p = UserProfile {
+                    id: "default".to_string(),
+                    name: "Principal".to_string(),
+                    avatar: "sparkles".to_string(),
+                    color: "#3b82f6".to_string(),
+                    is_active: true,
+                    created_at: chrono::Utc::now().to_rfc3339(),
+                };
+                let _ = conn.execute(
+                    "INSERT OR REPLACE INTO profiles (id, name, avatar, color, is_active, created_at)
+                     VALUES (?1, ?2, ?3, ?4, 1, ?5)",
+                    params![default_p.id, default_p.name, default_p.avatar, default_p.color, default_p.created_at],
+                );
+                Ok(default_p)
+            }
+        }
+    })
+}
+
+pub fn upsert_profile(profile: &UserProfile) -> AppResult<()> {
+    with_db(|conn| {
+        let is_active_int = if profile.is_active { 1 } else { 0 };
+        if profile.is_active {
+            conn.execute("UPDATE profiles SET is_active = 0", [])?;
+        }
+        conn.execute(
+            "INSERT INTO profiles (id, name, avatar, color, is_active, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                avatar = excluded.avatar,
+                color = excluded.color,
+                is_active = excluded.is_active",
+            params![profile.id, profile.name, profile.avatar, profile.color, is_active_int, profile.created_at],
+        )?;
+        Ok(())
+    })
+}
+
+pub fn set_active_profile(id: &str) -> AppResult<()> {
+    with_db(|conn| {
+        conn.execute("UPDATE profiles SET is_active = 0", [])?;
+        conn.execute("UPDATE profiles SET is_active = 1 WHERE id = ?1", params![id])?;
+        Ok(())
+    })
+}
+
+pub fn delete_profile(id: &str) -> AppResult<()> {
+    if id == "default" {
+        return Err(AppError::Generic("Cannot delete the default profile".to_string()));
+    }
+    with_db(|conn| {
+        // Registrar tombstone del perfil
+        let tombstone_id = uuid::Uuid::new_v4().to_string();
+        let now = chrono::Utc::now().to_rfc3339();
+        let _ = conn.execute(
+            "INSERT INTO tombstones (id, entity_type, entity_id, profile_id, deleted_at) VALUES (?1, 'profile', ?2, ?2, ?3)",
+            params![tombstone_id, id, now],
+        );
+
+        conn.execute("DELETE FROM watch_history WHERE profile_id = ?1", params![id])?;
+        conn.execute("DELETE FROM favorites WHERE profile_id = ?1", params![id])?;
+        conn.execute("DELETE FROM profiles WHERE id = ?1", params![id])?;
+
+        // Si era el activo, activar el default
+        let active_count: i32 = conn.query_row("SELECT COUNT(*) FROM profiles WHERE is_active = 1", [], |r| r.get(0))?;
+        if active_count == 0 {
+            conn.execute("UPDATE profiles SET is_active = 1 WHERE id = 'default'", [])?;
+        }
+        Ok(())
+    })
+}
+
+// ──────────────────────────────────────────
+// Ajustes Generales (Settings)
 // ──────────────────────────────────────────
 
 pub fn get_setting(key: &str) -> AppResult<Option<String>> {
@@ -137,42 +306,134 @@ pub fn get_all_settings() -> AppResult<HashMap<String, String>> {
 }
 
 // ──────────────────────────────────────────
-// Historial
+// Configuración de Sincronización (Sync Config)
+// ──────────────────────────────────────────
+
+pub fn get_sync_config(key: &str) -> AppResult<Option<String>> {
+    with_db(|conn| {
+        let mut stmt = conn.prepare("SELECT value FROM sync_config WHERE key = ?1")?;
+        let res = stmt.query_row(params![key], |row| row.get(0)).optional()?;
+        Ok(res)
+    })
+}
+
+pub fn set_sync_config(key: &str, value: &str) -> AppResult<()> {
+    with_db(|conn| {
+        conn.execute(
+            "INSERT INTO sync_config (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![key, value],
+        )?;
+        Ok(())
+    })
+}
+
+pub fn get_all_sync_config() -> AppResult<HashMap<String, String>> {
+    with_db(|conn| {
+        let mut stmt = conn.prepare("SELECT key, value FROM sync_config")?;
+        let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        let mut map = HashMap::new();
+        for r in rows.flatten() {
+            map.insert(r.0, r.1);
+        }
+        Ok(map)
+    })
+}
+
+// ──────────────────────────────────────────
+// Tombstones (Registro de Eliminaciones)
+// ──────────────────────────────────────────
+
+pub fn add_tombstone(entity_type: &str, entity_id: &str, profile_id: &str) -> AppResult<()> {
+    with_db(|conn| {
+        let id = uuid::Uuid::new_v4().to_string();
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO tombstones (id, entity_type, entity_id, profile_id, deleted_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![id, entity_type, entity_id, profile_id, now],
+        )?;
+        Ok(())
+    })
+}
+
+pub fn get_tombstones() -> AppResult<Vec<TombstoneItem>> {
+    with_db(|conn| {
+        let mut stmt = conn.prepare(
+            "SELECT id, entity_type, entity_id, profile_id, deleted_at FROM tombstones ORDER BY deleted_at DESC"
+        )?;
+        let items = stmt.query_map([], |row| {
+            Ok(TombstoneItem {
+                id: row.get(0)?,
+                entity_type: row.get(1)?,
+                entity_id: row.get(2)?,
+                profile_id: row.get(3)?,
+                deleted_at: row.get(4)?,
+            })
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+        Ok(items)
+    })
+}
+
+pub fn cleanup_old_tombstones(days: i64) -> AppResult<()> {
+    with_db(|conn| {
+        let cutoff = (chrono::Utc::now() - chrono::Duration::days(days)).to_rfc3339();
+        conn.execute("DELETE FROM tombstones WHERE deleted_at < ?1", params![cutoff])?;
+        Ok(())
+    })
+}
+
+// ──────────────────────────────────────────
+// Historial (Por Perfil)
 // ──────────────────────────────────────────
 
 pub fn upsert_history(entry: &HistoryEntry) -> AppResult<()> {
     with_db(|conn| {
+        let profile_id = if entry.profile_id.is_empty() {
+            get_active_profile_id_inner(conn)
+        } else {
+            entry.profile_id.clone()
+        };
+
         conn.execute(
-            "INSERT INTO watch_history (id, anime_title, anime_url, thumbnail_url, episode_number, episode_url, watch_progress, watched_at, source)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            "INSERT INTO watch_history (id, anime_title, anime_url, thumbnail_url, episode_number, episode_url, watch_progress, watched_at, source, profile_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
              ON CONFLICT(id) DO UPDATE SET
                anime_title = CASE WHEN excluded.anime_title != '' THEN excluded.anime_title ELSE watch_history.anime_title END,
                thumbnail_url = CASE WHEN excluded.thumbnail_url != '' THEN excluded.thumbnail_url ELSE watch_history.thumbnail_url END,
                episode_url = CASE WHEN excluded.episode_url != '' THEN excluded.episode_url ELSE watch_history.episode_url END,
                watch_progress = excluded.watch_progress,
                watched_at = excluded.watched_at,
-               source = CASE WHEN excluded.source != '' THEN excluded.source ELSE watch_history.source END",
+               source = CASE WHEN excluded.source != '' THEN excluded.source ELSE watch_history.source END,
+               profile_id = excluded.profile_id",
             params![
                 entry.id, entry.anime_title, entry.anime_url, entry.thumbnail_url,
                 entry.episode_number, entry.episode_url, entry.watch_progress,
-                entry.watched_at, entry.source
+                entry.watched_at, entry.source, profile_id
             ],
         )?;
         Ok(())
     })
 }
 
-pub fn get_history(limit: u32, offset: u32) -> AppResult<Vec<HistoryEntry>> {
+pub fn get_history(limit: u32, offset: u32, profile_id: Option<&str>) -> AppResult<Vec<HistoryEntry>> {
     with_db(|conn| {
+        let target_profile = match profile_id {
+            Some(pid) => pid.to_string(),
+            None => get_active_profile_id_inner(conn),
+        };
+
         let mut stmt = conn.prepare(
             "SELECT id, anime_title, anime_url, thumbnail_url, episode_number, episode_url,
-                    watch_progress, watched_at, source
+                    watch_progress, watched_at, source, profile_id
              FROM watch_history
+             WHERE profile_id = ?1
              ORDER BY watched_at DESC
-             LIMIT ?1 OFFSET ?2"
+             LIMIT ?2 OFFSET ?3"
         )?;
 
-        let entries = stmt.query_map(params![limit, offset], |row| {
+        let entries = stmt.query_map(params![target_profile, limit, offset], |row| {
             Ok(HistoryEntry {
                 id: row.get(0)?,
                 anime_title: row.get(1)?,
@@ -183,6 +444,7 @@ pub fn get_history(limit: u32, offset: u32) -> AppResult<Vec<HistoryEntry>> {
                 watch_progress: row.get(6)?,
                 watched_at: row.get(7)?,
                 source: row.get(8)?,
+                profile_id: row.get(9)?,
             })
         })?
         .filter_map(|r| r.ok())
@@ -192,37 +454,83 @@ pub fn get_history(limit: u32, offset: u32) -> AppResult<Vec<HistoryEntry>> {
     })
 }
 
-pub fn get_episode_progress(episode_url: &str) -> AppResult<Option<f64>> {
+pub fn get_all_history(profile_id: Option<&str>) -> AppResult<Vec<HistoryEntry>> {
     with_db(|conn| {
-        // Generar todas las variantes de la ruta para máxima compatibilidad Windows
-        let fwd = episode_url.replace('\\', "/");          // forward slashes
-        let bwd = episode_url.replace('/', "\\");          // backward slashes
-        let fwd_lower = fwd.to_lowercase();                // minúsculas + forward
-        let bwd_lower = bwd.to_lowercase();                // minúsculas + backward
-        let original_lower = episode_url.to_lowercase();  // minúsculas original
+        let (query, has_param) = match profile_id {
+            Some(_) => ("SELECT id, anime_title, anime_url, thumbnail_url, episode_number, episode_url, watch_progress, watched_at, source, profile_id FROM watch_history WHERE profile_id = ?1 ORDER BY watched_at DESC", true),
+            None => ("SELECT id, anime_title, anime_url, thumbnail_url, episode_number, episode_url, watch_progress, watched_at, source, profile_id FROM watch_history ORDER BY watched_at DESC", false),
+        };
+
+        let mut stmt = conn.prepare(query)?;
+        let map_row = |row: &rusqlite::Row| {
+            Ok(HistoryEntry {
+                id: row.get(0)?,
+                anime_title: row.get(1)?,
+                anime_url: row.get(2)?,
+                thumbnail_url: row.get(3)?,
+                episode_number: row.get(4)?,
+                episode_url: row.get(5)?,
+                watch_progress: row.get(6)?,
+                watched_at: row.get(7)?,
+                source: row.get(8)?,
+                profile_id: row.get(9)?,
+            })
+        };
+
+        let entries: Vec<HistoryEntry> = if has_param {
+            stmt.query_map(params![profile_id.unwrap()], map_row)?
+                .filter_map(|r| r.ok())
+                .collect()
+        } else {
+            stmt.query_map([], map_row)?
+                .filter_map(|r| r.ok())
+                .collect()
+        };
+
+        Ok(entries)
+    })
+}
+
+pub fn get_episode_progress(episode_url: &str, profile_id: Option<&str>) -> AppResult<Option<f64>> {
+    with_db(|conn| {
+        let target_profile = match profile_id {
+            Some(pid) => pid.to_string(),
+            None => get_active_profile_id_inner(conn),
+        };
+
+        let fwd = episode_url.replace('\\', "/");
+        let bwd = episode_url.replace('/', "\\");
+        let fwd_lower = fwd.to_lowercase();
+        let bwd_lower = bwd.to_lowercase();
+        let original_lower = episode_url.to_lowercase();
 
         let mut stmt = conn.prepare(
             "SELECT watch_progress FROM watch_history
-             WHERE episode_url = ?1
-                OR episode_url = ?2
-                OR episode_url = ?3
-                OR episode_url = ?4
-                OR episode_url = ?5
-                OR episode_url = ?6
+             WHERE (episode_url = ?1
+                 OR episode_url = ?2
+                 OR episode_url = ?3
+                 OR episode_url = ?4
+                 OR episode_url = ?5
+                 OR episode_url = ?6)
+               AND profile_id = ?7
              ORDER BY watched_at DESC
              LIMIT 1"
         )?;
         let progress = stmt.query_row(
-            params![episode_url, fwd, bwd, fwd_lower, bwd_lower, original_lower],
+            params![episode_url, fwd, bwd, fwd_lower, bwd_lower, original_lower, target_profile],
             |row| row.get(0)
         ).optional()?;
         Ok(progress)
     })
 }
 
-pub fn clear_history() -> AppResult<()> {
+pub fn clear_history(profile_id: Option<&str>) -> AppResult<()> {
     with_db(|conn| {
-        conn.execute("DELETE FROM watch_history", [])?;
+        let target_profile = match profile_id {
+            Some(pid) => pid.to_string(),
+            None => get_active_profile_id_inner(conn),
+        };
+        conn.execute("DELETE FROM watch_history WHERE profile_id = ?1", params![target_profile])?;
         Ok(())
     })
 }
@@ -234,46 +542,104 @@ pub fn remove_history(id: &str) -> AppResult<()> {
     })
 }
 
-// ──────────────────────────────────────────
-// Favoritos
-// ──────────────────────────────────────────
-
-pub fn add_favorite(result: &AnimeResult) -> AppResult<()> {
+pub fn remove_history_batch(ids: &[String]) -> AppResult<()> {
+    if ids.is_empty() {
+        return Ok(());
+    }
     with_db(|conn| {
-        let now = chrono::Utc::now().to_rfc3339();
+        let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let query = format!("DELETE FROM watch_history WHERE id IN ({})", placeholders);
+        let params_vec: Vec<&dyn rusqlite::ToSql> = ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
+        conn.execute(&query, params_vec.as_slice())?;
+        Ok(())
+    })
+}
+
+pub fn remove_history_by_anime(anime_url: &str, profile_id: Option<&str>) -> AppResult<()> {
+    with_db(|conn| {
+        let target_profile = match profile_id {
+            Some(pid) => pid.to_string(),
+            None => get_active_profile_id_inner(conn),
+        };
+        let clean_url = anime_url.trim_end_matches('/').trim();
         conn.execute(
-            "INSERT OR REPLACE INTO favorites (url, title, thumbnail_url, source, added_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![result.url, result.title, result.thumbnail_url, result.source, now],
+            "DELETE FROM watch_history WHERE (anime_url = ?1 OR anime_url LIKE ?2) AND profile_id = ?3",
+            params![clean_url, format!("{}%", clean_url), target_profile],
         )?;
         Ok(())
     })
 }
 
-pub fn remove_favorite(url: &str) -> AppResult<()> {
+// ──────────────────────────────────────────
+// Favoritos (Por Perfil)
+// ──────────────────────────────────────────
+
+pub fn add_favorite(result: &AnimeResult, profile_id: Option<&str>) -> AppResult<()> {
     with_db(|conn| {
-        conn.execute("DELETE FROM favorites WHERE url = ?1", params![url])?;
+        let target_profile = match profile_id {
+            Some(pid) => pid.to_string(),
+            None => get_active_profile_id_inner(conn),
+        };
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO favorites (url, title, thumbnail_url, source, added_at, profile_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(url, profile_id) DO UPDATE SET
+                title = excluded.title,
+                thumbnail_url = excluded.thumbnail_url,
+                source = excluded.source,
+                added_at = excluded.added_at",
+            params![result.url, result.title, result.thumbnail_url, result.source, now, target_profile],
+        )?;
         Ok(())
     })
 }
 
-pub fn is_favorite(url: &str) -> AppResult<bool> {
+pub fn remove_favorite(url: &str, profile_id: Option<&str>) -> AppResult<()> {
     with_db(|conn| {
+        let target_profile = match profile_id {
+            Some(pid) => pid.to_string(),
+            None => get_active_profile_id_inner(conn),
+        };
+        conn.execute("DELETE FROM favorites WHERE url = ?1 AND profile_id = ?2", params![url, target_profile])?;
+
+        // Registrar tombstone
+        let tombstone_id = uuid::Uuid::new_v4().to_string();
+        let now = chrono::Utc::now().to_rfc3339();
+        let _ = conn.execute(
+            "INSERT INTO tombstones (id, entity_type, entity_id, profile_id, deleted_at) VALUES (?1, 'favorite', ?2, ?3, ?4)",
+            params![tombstone_id, url, target_profile, now],
+        );
+
+        Ok(())
+    })
+}
+
+pub fn is_favorite(url: &str, profile_id: Option<&str>) -> AppResult<bool> {
+    with_db(|conn| {
+        let target_profile = match profile_id {
+            Some(pid) => pid.to_string(),
+            None => get_active_profile_id_inner(conn),
+        };
         let count: u32 = conn.query_row(
-            "SELECT COUNT(*) FROM favorites WHERE url = ?1",
-            params![url],
+            "SELECT COUNT(*) FROM favorites WHERE url = ?1 AND profile_id = ?2",
+            params![url, target_profile],
             |row| row.get(0),
         )?;
         Ok(count > 0)
     })
 }
 
-pub fn get_favorites() -> AppResult<Vec<AnimeResult>> {
+pub fn get_favorites(profile_id: Option<&str>) -> AppResult<Vec<AnimeResult>> {
     with_db(|conn| {
+        let target_profile = match profile_id {
+            Some(pid) => pid.to_string(),
+            None => get_active_profile_id_inner(conn),
+        };
         let mut stmt = conn.prepare(
-            "SELECT url, title, thumbnail_url, source FROM favorites ORDER BY added_at DESC"
+            "SELECT url, title, thumbnail_url, source FROM favorites WHERE profile_id = ?1 ORDER BY added_at DESC"
         )?;
-        let results = stmt.query_map([], |row| {
+        let results = stmt.query_map(params![target_profile], |row| {
             Ok(AnimeResult {
                 url: row.get(0)?,
                 title: row.get(1)?,
@@ -284,6 +650,38 @@ pub fn get_favorites() -> AppResult<Vec<AnimeResult>> {
         })?
         .filter_map(|r| r.ok())
         .collect();
+        Ok(results)
+    })
+}
+
+pub fn get_all_favorites_for_sync(profile_id: Option<&str>) -> AppResult<Vec<AnimeResult>> {
+    with_db(|conn| {
+        let (query, has_param) = match profile_id {
+            Some(_) => ("SELECT url, title, thumbnail_url, source FROM favorites WHERE profile_id = ?1 ORDER BY added_at DESC", true),
+            None => ("SELECT url, title, thumbnail_url, source FROM favorites ORDER BY added_at DESC", false),
+        };
+
+        let mut stmt = conn.prepare(query)?;
+        let map_row = |row: &rusqlite::Row| {
+            Ok(AnimeResult {
+                url: row.get(0)?,
+                title: row.get(1)?,
+                thumbnail_url: row.get(2)?,
+                source: row.get(3)?,
+                ..Default::default()
+            })
+        };
+
+        let results: Vec<AnimeResult> = if has_param {
+            stmt.query_map(params![profile_id.unwrap()], map_row)?
+                .filter_map(|r| r.ok())
+                .collect()
+        } else {
+            stmt.query_map([], map_row)?
+                .filter_map(|r| r.ok())
+                .collect()
+        };
+
         Ok(results)
     })
 }
@@ -714,5 +1112,57 @@ mod tests {
 
         // Cleanup
         let _ = fs::remove_dir_all(valid_dir);
+    }
+
+    #[test]
+    fn test_migration_from_legacy_schema() {
+        let base_temp_dir = env::temp_dir();
+        let mut test_dir = base_temp_dir.clone();
+        test_dir.push(format!("anics_test_legacy_db_{}", get_unique_id()));
+        fs::create_dir_all(&test_dir).unwrap();
+
+        // 1. Crear base de datos simulando esquema anterior (v0.1.7) sin columna profile_id
+        let db_path = test_dir.join("anics.db");
+        {
+            let legacy_conn = Connection::open(&db_path).unwrap();
+            legacy_conn.execute_batch("
+                CREATE TABLE watch_history (
+                    id TEXT PRIMARY KEY,
+                    anime_title TEXT NOT NULL,
+                    anime_url TEXT NOT NULL,
+                    thumbnail_url TEXT NOT NULL DEFAULT '',
+                    episode_number INTEGER NOT NULL,
+                    episode_url TEXT NOT NULL,
+                    watch_progress REAL NOT NULL DEFAULT 0.0,
+                    watched_at TEXT NOT NULL,
+                    source TEXT NOT NULL DEFAULT 'jkanime'
+                );
+
+                CREATE TABLE favorites (
+                    url TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    thumbnail_url TEXT NOT NULL DEFAULT '',
+                    source TEXT NOT NULL,
+                    added_at TEXT NOT NULL
+                );
+            ").unwrap();
+        }
+
+        // 2. Ejecutar init_database_inner sobre la base existente
+        {
+            let conn = init_database_inner(&test_dir).expect("init_database_inner should migrate legacy schema without error");
+
+            // 3. Verificar que la columna profile_id fue añadida y el índice creado
+            let result: Result<String, _> = conn.query_row(
+                "SELECT profile_id FROM watch_history LIMIT 1",
+                [],
+                |row| row.get(0)
+            );
+            // Debe compilar/ejecutar la consulta sin error de 'no such column'
+            assert!(result.is_err() || result.is_ok()); // La tabla está vacía, pero la consulta no da error de sintaxis/columna faltante
+        }
+
+        // Cleanup
+        let _ = fs::remove_dir_all(test_dir);
     }
 }

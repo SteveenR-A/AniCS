@@ -20,6 +20,9 @@ function androidBridge() {
         setKeepScreenOn: (enabled: boolean) => void;
         setFullscreenMode: (enabled: boolean) => void;
         setScreenOrientation: (orientation: string) => void;
+        saveSecureToken: (key: string, token: string) => void;
+        getSecureToken: (key: string) => string | null | undefined;
+        deleteSecureToken: (key: string) => void;
       }
     | undefined;
 }

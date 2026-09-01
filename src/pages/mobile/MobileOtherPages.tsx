@@ -1,19 +1,24 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Clock, Trash2, Film, Bookmark, BookmarkX, Inbox, History,
-  ArrowDownCircle, Play, Folder,
+  ArrowDownCircle, Play, Folder, Search, X, CheckSquare, Square,
   ChevronDown, ChevronUp, Check, Eye, EyeOff, Pause, RotateCcw, Loader2, AlertCircle
 } from 'lucide-react';
 import { convertFileSrc } from '@tauri-apps/api/core';
-import { getHistory, clearHistory, removeHistory, getFavorites, removeFavorite } from '@/services/storageService';
+import {
+  getHistory, clearHistory, removeHistory, removeHistoryBatch,
+  removeHistoryByAnime, getFavorites, removeFavorite
+} from '@/services/storageService';
 import {
   scanLocalDownloads, deleteLocalDownload, deleteLocalAnimeFolder,
   getDefaultDownloadDir, getLocalMediaUrl
 } from '@/services/downloadService';
 import { useDownloadStore } from '@/stores/useDownloadStore';
 import { usePlayerStore } from '@/stores/usePlayerStore';
+import { useProfileStore } from '@/stores/useProfileStore';
+import { useSyncStore } from '@/stores/useSyncStore';
 import { CachedImage } from '@/components/CachedImage';
 import type { HistoryEntry, AnimeResult, LocalAnimeFolder, LocalEpisodeItem } from '@/types';
 
@@ -30,13 +35,17 @@ function formatSpeed(kbps: number) {
 // ──────────────────────────────────────────
 export function MobileHistoryPage() {
   const navigate = useNavigate();
+  const { activeProfile } = useProfileStore();
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isSelecting, setIsSelecting] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const loadHistory = useCallback(async () => {
     setIsLoading(true);
     try {
-      const data = await getHistory(150, 0);
+      const data = await getHistory(150, 0, activeProfile?.id);
       const seen = new Set<string>();
       const deduplicated = data.filter((item) => {
         const uniqueAnimeKey = item.animeUrl || item.id || item.animeTitle.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -51,15 +60,28 @@ export function MobileHistoryPage() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [activeProfile?.id]);
 
   useEffect(() => {
     loadHistory();
   }, [loadHistory]);
 
+  const filteredEntries = useMemo(() => {
+    if (!searchQuery.trim()) return entries;
+    const q = searchQuery.toLowerCase().trim();
+    return entries.filter(
+      (e) => e.animeTitle.toLowerCase().includes(q) || `episodio ${e.episodeNumber}`.includes(q)
+    );
+  }, [entries, searchQuery]);
+
   const handleClear = async () => {
-    await clearHistory();
-    setEntries([]);
+    if (confirm('¿Estás seguro de que deseas borrar todo el historial?')) {
+      await clearHistory(activeProfile?.id);
+      setEntries([]);
+      setSelectedIds(new Set());
+      setIsSelecting(false);
+      useSyncStore.getState().triggerDebouncedSync();
+    }
   };
 
   const handleDeleteEntry = async (id: string, e: React.MouseEvent) => {
@@ -67,109 +89,326 @@ export function MobileHistoryPage() {
     try {
       await removeHistory(id);
       setEntries((prev) => prev.filter((item) => item.id !== id));
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      useSyncStore.getState().triggerDebouncedSync();
     } catch (err) {
       console.error('Error removing history item:', err);
     }
   };
 
+  const handleDeleteEntireAnime = async (animeUrl: string, animeTitle: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (confirm(`¿Eliminar todos los episodios de "${animeTitle}" del historial?`)) {
+      try {
+        await removeHistoryByAnime(animeUrl, activeProfile?.id);
+        setEntries((prev) => prev.filter((item) => item.animeUrl !== animeUrl));
+        setSelectedIds((prev) => {
+          const next = new Set(prev);
+          entries.filter(it => it.animeUrl === animeUrl).forEach(it => next.delete(it.id));
+          return next;
+        });
+        useSyncStore.getState().triggerDebouncedSync();
+      } catch (err) {
+        console.error('Error removing anime from history:', err);
+      }
+    }
+  };
+
+  const toggleSelectId = (id: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleSelectAll = () => {
+    if (selectedIds.size === filteredEntries.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filteredEntries.map((e) => e.id)));
+    }
+  };
+
+  const handleDeleteSelected = async () => {
+    if (selectedIds.size === 0) return;
+    if (confirm(`¿Eliminar los ${selectedIds.size} episodios seleccionados del historial?`)) {
+      try {
+        const idsToDelete = Array.from(selectedIds);
+        await removeHistoryBatch(idsToDelete);
+        setEntries((prev) => prev.filter((item) => !selectedIds.has(item.id)));
+        setSelectedIds(new Set());
+        setIsSelecting(false);
+        useSyncStore.getState().triggerDebouncedSync();
+      } catch (err) {
+        console.error('Error deleting selected items:', err);
+      }
+    }
+  };
+
   return (
     <div style={{ padding: '12px 14px 24px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+      {/* Header Móvil */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <History size={20} color="var(--accent-primary)" />
-          <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0 }}>Historial</h2>
+          <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0 }}>Historial ({entries.length})</h2>
         </div>
+
         {entries.length > 0 && (
-          <button
-            onClick={handleClear}
-            style={{
-              background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
-              borderRadius: 'var(--radius-full)', padding: '5px 12px',
-              color: 'var(--accent-error)', cursor: 'pointer',
-              display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 600,
-            }}
-          >
-            <Trash2 size={12} /> Borrar
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <button
+              onClick={() => {
+                setIsSelecting(!isSelecting);
+                if (isSelecting) setSelectedIds(new Set());
+              }}
+              style={{
+                background: isSelecting ? 'var(--accent-primary)' : 'var(--bg-elevated)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: 'var(--radius-full)', padding: '5px 10px',
+                color: isSelecting ? 'white' : 'var(--text-secondary)',
+                fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: 4,
+              }}
+            >
+              <CheckSquare size={12} /> {isSelecting ? 'Listo' : 'Seleccionar'}
+            </button>
+
+            {!isSelecting && (
+              <button
+                onClick={handleClear}
+                style={{
+                  background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.25)',
+                  borderRadius: 'var(--radius-full)', padding: '5px 10px',
+                  color: '#ef4444', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', gap: 4,
+                }}
+              >
+                <Trash2 size={12} /> Borrar Todo
+              </button>
+            )}
+          </div>
         )}
       </div>
 
-      {!isLoading && entries.length === 0 && (
-        <div style={{ textAlign: 'center', padding: '60px 16px' }}>
-          <Inbox size={40} color="var(--text-muted)" style={{ margin: '0 auto 8px', opacity: 0.5 }} />
-          <p style={{ color: 'var(--text-secondary)', fontSize: 15, fontWeight: 600, margin: 0 }}>Sin historial</p>
+      {/* Buscador Rápido Móvil */}
+      {entries.length > 0 && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
+          borderRadius: 'var(--radius-md)', padding: '6px 10px', marginBottom: 12,
+        }}>
+          <Search size={14} color="var(--text-muted)" />
+          <input
+            type="text"
+            placeholder="Buscar por anime o episodio..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            style={{
+              background: 'transparent', border: 'none', color: 'white',
+              fontSize: 12, outline: 'none', width: '100%',
+            }}
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery('')}
+              style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 0 }}
+            >
+              <X size={13} />
+            </button>
+          )}
         </div>
       )}
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <AnimatePresence mode="popLayout">
-          {entries.map((entry) => (
-            <motion.div
-              key={entry.id}
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, transition: { duration: 0.15 } }}
-              whileTap={{ scale: 0.98 }}
-              onClick={() => navigate(`/details/${encodeURIComponent(entry.animeUrl)}?source=${entry.source}`)}
+      {/* Barra de Gestión de Selección Móvil */}
+      <AnimatePresence>
+        {isSelecting && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            style={{
+              background: 'var(--bg-elevated)', border: '1px solid var(--accent-primary)',
+              borderRadius: 'var(--radius-md)', padding: '8px 12px',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              marginBottom: 12, overflow: 'hidden',
+            }}
+          >
+            <button
+              onClick={handleSelectAll}
               style={{
-                background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)',
-                padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 12,
-                cursor: 'pointer', border: '1px solid var(--border-subtle)',
-                position: 'relative',
+                background: 'transparent', border: 'none',
+                color: 'var(--text-secondary)', fontSize: 11, fontWeight: 700, cursor: 'pointer',
               }}
             >
-              <div style={{ width: 44, height: 60, borderRadius: 'var(--radius-sm)', overflow: 'hidden', flexShrink: 0, background: 'var(--bg-elevated)' }}>
-                <CachedImage src={entry.thumbnailUrl} alt={entry.animeTitle} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 6 }}>
-                  <p style={{ fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', margin: 0 }}>
-                    {entry.animeTitle}
-                  </p>
-                  <button
-                    type="button"
-                    title="Eliminar del historial"
-                    aria-label="Eliminar del historial"
-                    onClick={(e) => handleDeleteEntry(entry.id, e)}
+              {selectedIds.size === filteredEntries.length ? 'Deseleccionar Todos' : 'Todos'}
+            </button>
+
+            <button
+              onClick={handleDeleteSelected}
+              disabled={selectedIds.size === 0}
+              style={{
+                background: selectedIds.size > 0 ? '#ef4444' : 'rgba(239, 68, 68, 0.2)',
+                border: 'none', color: 'white', fontSize: 11, fontWeight: 700,
+                borderRadius: 'var(--radius-full)', padding: '5px 12px',
+                cursor: selectedIds.size > 0 ? 'pointer' : 'not-allowed',
+                display: 'flex', alignItems: 'center', gap: 4,
+              }}
+            >
+              <Trash2 size={12} /> Eliminar ({selectedIds.size})
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {isLoading ? (
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '40px 0' }}>
+          <Loader2 className="animate-spin" size={28} color="var(--accent-primary)" />
+        </div>
+      ) : filteredEntries.length === 0 ? (
+        <div style={{
+          textAlign: 'center', padding: '60px 16px', background: 'var(--bg-surface)',
+          borderRadius: 'var(--radius-lg)', border: '1px solid var(--border-subtle)',
+        }}>
+          <History size={40} color="var(--text-muted)" style={{ margin: '0 auto 8px', opacity: 0.5 }} />
+          <p style={{ color: 'var(--text-primary)', fontSize: 15, fontWeight: 700, margin: '0 0 4px' }}>
+            {searchQuery ? 'Sin resultados' : 'Sin historial aún'}
+          </p>
+          <p style={{ color: 'var(--text-muted)', fontSize: 12, margin: '0 0 16px' }}>
+            {searchQuery ? `No hay episodios que coincidan con "${searchQuery}"` : 'Los episodios que reproduzcas aparecerán aquí'}
+          </p>
+          {searchQuery ? (
+            <button
+              onClick={() => setSearchQuery('')}
+              style={{
+                padding: '6px 14px', borderRadius: 'var(--radius-full)',
+                background: 'var(--bg-elevated)', color: 'white', border: '1px solid var(--border-subtle)',
+                fontWeight: 700, fontSize: 11, cursor: 'pointer',
+              }}
+            >
+              Limpiar Búsqueda
+            </button>
+          ) : (
+            <button
+              onClick={() => navigate('/')}
+              style={{
+                padding: '8px 16px', borderRadius: 'var(--radius-full)',
+                background: 'var(--accent-primary)', color: 'white', border: 'none',
+                fontWeight: 700, fontSize: 12, cursor: 'pointer',
+              }}
+            >
+              Explorar Animes
+            </button>
+          )}
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {filteredEntries.map((entry) => {
+            const pct = Math.min(100, Math.max(0, Math.round((entry.watchProgress || 0) * 100)));
+            const isSelected = selectedIds.has(entry.id);
+
+            return (
+              <div
+                key={entry.id}
+                onClick={() => {
+                  if (isSelecting) {
+                    toggleSelectId(entry.id);
+                  } else {
+                    navigate(`/player?url=${encodeURIComponent(entry.episodeUrl)}&title=${encodeURIComponent(entry.animeTitle)}&ep=${entry.episodeNumber}&source=${entry.source}&animeUrl=${encodeURIComponent(entry.animeUrl)}`);
+                  }
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 12,
+                  padding: 10,
+                  borderRadius: 'var(--radius-md)',
+                  background: 'var(--bg-surface)',
+                  border: isSelected ? '1.5px solid var(--accent-primary)' : '1px solid var(--border-subtle)',
+                  cursor: 'pointer',
+                }}
+              >
+                {/* Checkbox en modo selección */}
+                {isSelecting && (
+                  <div
+                    onClick={(e) => toggleSelectId(entry.id, e)}
                     style={{
-                      background: 'transparent',
-                      border: 'none',
-                      color: 'var(--text-muted)',
-                      cursor: 'pointer',
-                      padding: '2px 4px',
-                      borderRadius: 'var(--radius-sm)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      flexShrink: 0,
+                      color: isSelected ? 'var(--accent-primary)' : 'var(--text-muted)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
                     }}
                   >
-                    <Trash2 size={13} />
-                  </button>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '2px 0 6px' }}>
-                  <span style={{ fontSize: 11, color: 'var(--accent-primary)', fontWeight: 700 }}>
-                    Episodio {entry.episodeNumber}
-                  </span>
-                  {entry.watchProgress >= 0.85 && (
-                    <span style={{ fontSize: 9, fontWeight: 800, color: '#34d399', background: 'rgba(16, 185, 129, 0.15)', padding: '1px 5px', borderRadius: 3 }}>
-                      Visto
-                    </span>
-                  )}
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{ flex: 1, height: 4, background: 'var(--bg-elevated)', borderRadius: 2, overflow: 'hidden' }}>
-                    <div style={{ width: `${Math.round(entry.watchProgress * 100)}%`, height: '100%', background: entry.watchProgress >= 0.85 ? '#34d399' : 'var(--accent-primary)' }} />
+                    {isSelected ? <CheckSquare size={18} /> : <Square size={18} />}
                   </div>
-                  <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600 }}>
-                    {Math.round(entry.watchProgress * 100)}%
-                  </span>
+                )}
+
+                <div style={{ position: 'relative', width: 64, height: 64, borderRadius: 8, overflow: 'hidden', flexShrink: 0 }}>
+                  <CachedImage src={entry.thumbnailUrl} alt={entry.animeTitle} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  <div style={{
+                    position: 'absolute', bottom: 0, left: 0, right: 0, height: 3,
+                    background: 'rgba(255,255,255,0.2)',
+                  }}>
+                    <div style={{ width: `${pct}%`, height: '100%', background: 'var(--accent-primary)' }} />
+                  </div>
                 </div>
+
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: 'white', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {entry.animeTitle}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--accent-primary)', fontWeight: 600, marginTop: 2 }}>
+                    Episodio {entry.episodeNumber} · {pct}%
+                  </div>
+                  <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
+                    {entry.source.toUpperCase()} · {new Date(entry.watchedAt).toLocaleDateString()}
+                  </div>
+                </div>
+
+                {!isSelecting && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    {/* Eliminar todo el anime del historial */}
+                    <button
+                      onClick={(e) => handleDeleteEntireAnime(entry.animeUrl, entry.animeTitle, e)}
+                      title="Eliminar todo este anime"
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: 'var(--text-muted)',
+                        padding: 6,
+                        cursor: 'pointer',
+                        borderRadius: 'var(--radius-sm)',
+                      }}
+                    >
+                      <Film size={14} />
+                    </button>
+
+                    {/* Eliminar este episodio */}
+                    <button
+                      onClick={(e) => handleDeleteEntry(entry.id, e)}
+                      title="Eliminar episodio"
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: 'var(--text-muted)',
+                        padding: 6,
+                        cursor: 'pointer',
+                        borderRadius: 'var(--radius-sm)',
+                      }}
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                )}
               </div>
-            </motion.div>
-          ))}
-        </AnimatePresence>
-      </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -179,20 +418,21 @@ export function MobileHistoryPage() {
 // ──────────────────────────────────────────
 export function MobileFavoritesPage() {
   const navigate = useNavigate();
+  const { activeProfile } = useProfileStore();
   const [favorites, setFavorites] = useState<AnimeResult[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   const loadFavs = useCallback(async () => {
     setIsLoading(true);
     try {
-      const data = await getFavorites();
+      const data = await getFavorites(activeProfile?.id);
       setFavorites(data);
     } catch (e) {
       console.error(e);
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [activeProfile?.id]);
 
   useEffect(() => {
     loadFavs();

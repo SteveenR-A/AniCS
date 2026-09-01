@@ -50,6 +50,12 @@ AniCS/
 - En Android y PC, los videos descargados se reproducen a través del servidor local `127.0.0.1:{PORT}/video?path={ENCODED_PATH}` (`media_server.rs`) para soportar Range Requests (`206 Partial Content`) de forma fluida.
 - La ruta por defecto de descargas en PC es la carpeta local del sistema (`Videos/AniCS`), mientras que en Android es `/storage/emulated/0/Anime` con fallback al almacenamiento interno de la app.
 
-### 4. Flujo de Git y Compilación
+### 4. Perfiles, Keyring y Sincronización en la Nube
+- **Perfiles Locales**: Cada perfil posee su propio historial y favoritos indexados por `profile_id` en SQLite.
+- **Almacenamiento Seguro (Keyring v3)**: El token de GitHub se almacena en el gestor de credenciales nativo (`new_with_target("AniCS/{key}", "AniCS", key)` en Windows / Android EncryptedSharedPreferences). Nunca guardar tokens en SQLite en texto plano.
+- **Migraciones SQLite**: Mantener estrictamente el orden: `CREATE TABLE IF NOT EXISTS` -> `ALTER TABLE ADD COLUMN` -> `CREATE INDEX IF NOT EXISTS` -> inserción de perfil default para evitar fallos de columnas ausentes en bases de datos existentes.
+- **Sincronización Gist**: Multi-archivo (`profiles.json`, `history.json`, `favorites.json`, `settings.json`, `sync_meta.json`) con fusión bidireccional (`mergeSyncData`), lápidas (`tombstones`) para borrados, debounce de 30s y arranque en frío optimizado con ETag.
+
+### 5. Flujo de Git y Compilación
 - **No hacer `git push`** a menos que el usuario lo solicite explícitamente.
-- Siempre validar cambios con `npm run build` en el frontend y `cargo check` en `src-tauri`.
+- Siempre validar cambios con `npm run build` en el frontend y `cargo check` / `cargo test` en `src-tauri`.

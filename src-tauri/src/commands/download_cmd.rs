@@ -902,7 +902,7 @@ pub async fn scan_local_downloads(
     let mut groups: HashMap<String, (PathBuf, Vec<LocalEpisodeItem>)> = HashMap::new();
 
     // Obtener historial completo para mapear progreso
-    let history_list = storage::get_history(500, 0).unwrap_or_default();
+    let history_list = storage::get_history(500, 0, None).unwrap_or_default();
     let mut path_history_map: HashMap<String, f64> = HashMap::new();
     let mut title_history_map: HashMap<String, f64> = HashMap::new();
 
@@ -996,8 +996,8 @@ pub async fn scan_local_downloads(
         }
     }
 
-    let history_list = storage::get_history(500, 0).unwrap_or_default();
-    let favorites_list = storage::get_favorites().unwrap_or_default();
+    let history_list = storage::get_history(500, 0, None).unwrap_or_default();
+    let favorites_list = storage::get_favorites(None).unwrap_or_default();
 
     let mut result = vec![];
     for (anime_title, (folder_path, mut episodes)) in groups {

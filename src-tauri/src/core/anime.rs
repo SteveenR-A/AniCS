@@ -161,6 +161,37 @@ pub struct HistoryEntry {
     pub watch_progress: f64,
     pub watched_at: String,
     pub source: String,
+    #[serde(default = "default_profile_id")]
+    pub profile_id: String,
+}
+
+fn default_profile_id() -> String {
+    "default".to_string()
+}
+
+// ──────────────────────────────────────────
+// Perfiles de Usuario y Sincronización
+// ──────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserProfile {
+    pub id: String,
+    pub name: String,
+    pub avatar: String,
+    pub color: String,
+    pub is_active: bool,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TombstoneItem {
+    pub id: String,
+    pub entity_type: String,
+    pub entity_id: String,
+    pub profile_id: String,
+    pub deleted_at: String,
 }
 
 // ──────────────────────────────────────────

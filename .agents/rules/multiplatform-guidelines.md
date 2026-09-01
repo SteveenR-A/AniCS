@@ -49,8 +49,20 @@ Este documento establece las reglas arquitectónicas y directrices obligatorias 
 
 ---
 
-## 4. Reglas de Verificación antes de Cambios
+## 4. Persistencia, Keyring y Sincronización
+
+1. **Gestión de Credenciales en Keyring**:
+   - `keyring` v3 en Windows y SecretService en Linux/Android: indexar objetivos mediante `new_with_target("AniCS/{key}", "AniCS", key)` para evitar colisiones.
+2. **Migraciones de Base de Datos SQLite**:
+   - `CREATE TABLE IF NOT EXISTS` -> `ALTER TABLE ADD COLUMN` -> `CREATE INDEX IF NOT EXISTS` -> inserción inicial.
+   - Jamás declarar índices sobre columnas antes de verificar y ejecutar sus respectivas migraciones `ALTER TABLE`.
+3. **Sincronización en la Nube y Lápidas (Tombstones)**:
+   - Todo borrado intencional de datos debe registrarse en la tabla `tombstones` para propagarse fielmente a través de GitHub Gist.
+
+---
+
+## 5. Reglas de Verificación antes de Cambios
 
 1. **Compilación Frontend**: Todo cambio en TypeScript/React debe validar con `npm run build` sin errores de tipo ni dependencias ausentes.
-2. **Compilación Backend**: Todo cambio en Rust debe validar con `cargo check` en `src-tauri`.
+2. **Compilación Backend**: Todo cambio en Rust debe validar con `cargo check` y `cargo test` en `src-tauri`.
 3. **Validación Cruzada**: Antes de dar por resuelto un problema de móvil, verificar que no rompa el flujo de PC, y viceversa.

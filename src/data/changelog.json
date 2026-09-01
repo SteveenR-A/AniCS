@@ -1,15 +1,38 @@
 [
   {
+    "version": "0.1.9",
+    "date": "2026-09-01",
+    "title": "Perfiles de Anime, Sincronización GitHub Gist Secreto y Gestión Avanzada del Historial",
+    "type": "minor",
+    "highlights": [
+      "Perfiles de Usuario locales multi-cuenta con galería de 15 avatares temáticos de anime y paleta de 10 colores",
+      "Edición completa del Perfil Principal y perfiles secundarios (nombre, avatar e identidad visual)",
+      "Sincronización en la Nube con GitHub Gist Secreto (public: false) con arquitectura multi-archivo",
+      "Cifrado de Extremo a Extremo (E2E) con PIN seguro (PBKDF2 100k + AES-GCM 256 bits)",
+      "Motor de fusión bidireccional inteligente con lápidas (tombstones) para borrados sincronizados sin pérdida de datos",
+      "Sincronización automática silenciosa con debounce de 30s y arranque en frío optimizado mediante ETag (304 Not Modified)",
+      "Almacenamiento seguro del Personal Access Token en el Keyring del Sistema Operativo (Windows Credential Manager / Android)",
+      "Modo de selección múltiple interactivo y eliminación por lotes (Batch Delete) en el Historial",
+      "Eliminación rápida de un anime completo del historial en un solo clic",
+      "Buscador en tiempo real integrado para filtrar episodios y animes en el historial",
+      "Rediseño visual de tarjetas de historial y unificación del logo oficial (Tv2) en Móvil y Escritorio",
+      "Migración de base de datos SQLite retrocompatible y robusta con suite de tests ampliada"
+    ]
+  },
+  {
     "version": "0.1.8",
     "date": "2026-09-01",
     "title": "AniCS v0.1.8 - Optimizacion de Rendimiento y Estabilidad",
     "type": "patch",
     "highlights": [
-      "Actualizacion de metadatos en SQLite (upsert_history)",
-      "Eliminacion de I/O sincrono en media_server.rs",
-      "Correccion de orden de inicializacion en PlayerPage y toggle de auto-siguiente",
-      "Sincronizacion reactiva de filtros de busqueda con URL",
-      "Centralizacion de constantes y limpieza de codigo"
+      "Perfiles de Usuario locales multi-cuenta con avatares Lucide e historiales/favoritos independientes",
+      "Sincronización en la Nube con GitHub Gist Secreto (public: false) con soporte multi-archivo",
+      "Cifrado de Extremo a Extremo con PIN seguro (PBKDF2 100k + AES-GCM 256 bits)",
+      "Motor de fusión bidireccional inteligente con lápidas (tombstones) de borrado",
+      "Sincronización automática silenciosa con debounce de 30s y arranque en frío optimizado con ETag",
+      "Exportación e Importación de respaldos offline en formato .json",
+      "Almacenamiento seguro del Personal Access Token en el Keyring del Sistema Operativo",
+      "Actualización de metadatos en SQLite (upsert_history) y optimización de rendimiento"
     ]
   },
   {

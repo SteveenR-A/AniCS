@@ -2,13 +2,17 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Globe, Download, RefreshCw, Check, Undo2,
-  Sparkles, ShieldCheck, Palette, HardDrive, Trash2, Database, Activity, Folder
+  Sparkles, ShieldCheck, Palette, HardDrive, Trash2, Database, Activity, Folder, Cloud, User
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { openUrl, openPath } from '@tauri-apps/plugin-opener';
 import { ChangelogModal } from '@/components/ChangelogModal';
+import { ProfileSelectorModal, getProfileAvatarIcon } from '@/components/ProfileSelectorModal';
+import { GistSyncModal } from '@/components/GistSyncModal';
 import { useThemeStore, THEMES } from '@/stores/useThemeStore';
+import { useProfileStore } from '@/stores/useProfileStore';
+import { useSyncStore } from '@/stores/useSyncStore';
 import { getCacheStats, clearImageCache } from '@/services/downloadService';
 import { getDatabaseStats, optimizeDatabase, resetDatabase, clearHistory, type DatabaseStats } from '@/services/storageService';
 import { clearMemoryCache } from '@/components/CachedImage';
@@ -157,6 +161,14 @@ export function MobileSettingsPage() {
     }
   };
 
+  // Perfiles y Sincronización en la Nube
+  const { profiles, activeProfile } = useProfileStore();
+  const { config: syncConfig } = useSyncStore();
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
+
+  const ActiveProfileIcon = activeProfile ? getProfileAvatarIcon(activeProfile.avatar) : User;
+
   return (
     <div style={{ padding: '12px 14px 32px' }}>
       {/* Header Móvil */}
@@ -200,6 +212,125 @@ export function MobileSettingsPage() {
       </AnimatePresence>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        {/* Perfiles de Usuario y Sincronización Móvil */}
+        <div style={{
+          background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)',
+          border: '1px solid var(--border-subtle)', padding: 14,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+            <Cloud size={16} color="var(--accent-primary)" />
+            <h3 style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>Cuentas y Sincronización</h3>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {/* Perfil Activo */}
+            <div style={{
+              background: 'rgba(255, 255, 255, 0.03)',
+              borderRadius: 'var(--radius-md)',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              padding: '12px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: '50%',
+                    background: activeProfile?.color || '#3b82f6',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'white',
+                  }}
+                >
+                  <ActiveProfileIcon size={18} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: 'white' }}>
+                    {activeProfile?.name || 'Principal'}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                    {profiles.length} {profiles.length === 1 ? 'perfil' : 'perfiles'}
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsProfileModalOpen(true)}
+                style={{
+                  background: 'rgba(255, 255, 255, 0.08)',
+                  border: '1px solid rgba(255, 255, 255, 0.15)',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '6px 12px',
+                  color: 'white',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                Cambiar
+              </button>
+            </div>
+
+            {/* GitHub Gist Sync Status */}
+            <div style={{
+              background: 'rgba(255, 255, 255, 0.03)',
+              borderRadius: 'var(--radius-md)',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              padding: '12px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: '10px',
+                    background: syncConfig.githubToken ? 'rgba(16, 185, 129, 0.15)' : 'rgba(245, 158, 11, 0.15)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: syncConfig.githubToken ? '#10b981' : '#f59e0b',
+                  }}
+                >
+                  <Cloud size={18} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: 'white' }}>
+                    GitHub Gist Sync
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                    {syncConfig.githubToken ? 'Vinculado' : 'Sin vincular'}
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsSyncModalOpen(true)}
+                style={{
+                  background: 'var(--accent-primary)',
+                  border: 'none',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '6px 12px',
+                  color: 'white',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                {syncConfig.githubToken ? 'Gestionar' : 'Vincular'}
+              </button>
+            </div>
+          </div>
+        </div>
+
         {/* Temas Móvil */}
         <div style={{
           background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)',
@@ -757,6 +888,8 @@ export function MobileSettingsPage() {
       </div>
 
       <ChangelogModal isOpen={showChangelog} onClose={() => setShowChangelog(false)} />
+      <ProfileSelectorModal isOpen={isProfileModalOpen} onClose={() => setIsProfileModalOpen(false)} />
+      <GistSyncModal isOpen={isSyncModalOpen} onClose={() => setIsSyncModalOpen(false)} />
     </div>
   );
 }

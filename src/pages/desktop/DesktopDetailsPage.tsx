@@ -13,6 +13,8 @@ import { startDownload, scanLocalDownloads, saveLocalAnimeCover, getLocalMediaUr
 import { usePlayerStore } from '@/stores/usePlayerStore';
 import { useAnimeStore } from '@/stores/useAnimeStore';
 import { useDownloadStore } from '@/stores/useDownloadStore';
+import { useProfileStore } from '@/stores/useProfileStore';
+import { useSyncStore } from '@/stores/useSyncStore';
 import { CachedImage } from '@/components/CachedImage';
 import type { AnimeDetails, Episode, VideoServer, LocalEpisodeItem } from '@/types';
 
@@ -67,13 +69,14 @@ export function DesktopDetailsPage() {
   const {
     openPlayer, setCurrentEpisode, setCurrentAnime, setServers, setResolvedMedia, resetPlayback
   } = usePlayerStore();
+  const { activeProfile } = useProfileStore();
 
   useEffect(() => {
     const load = async () => {
       if (cached && cached.episodes && cached.episodes.length > 0) {
         setDetails(cached);
         setIsLoading(false);
-        checkFavorite(decodedUrl).then(setIsFavorite).catch(() => {});
+        checkFavorite(decodedUrl, activeProfile?.id).then(setIsFavorite).catch(() => {});
         return;
       }
 
@@ -83,7 +86,7 @@ export function DesktopDetailsPage() {
       try {
         const [det, fav] = await Promise.all([
           getDetails(decodedUrl, source),
-          checkFavorite(decodedUrl),
+          checkFavorite(decodedUrl, activeProfile?.id),
         ]);
         setDetails(det);
         cacheDetails(det);
@@ -95,7 +98,7 @@ export function DesktopDetailsPage() {
       }
     };
     load();
-  }, [decodedUrl, source, cached, cacheDetails]);
+  }, [decodedUrl, source, cached, cacheDetails, activeProfile?.id]);
 
   // Normalizador de títulos ultra-tolerante (ignora tildes, guiones, espacios y puntuación)
   const normalizeTitle = (str: string): string => {
@@ -154,7 +157,7 @@ export function DesktopDetailsPage() {
     }).catch(console.error);
 
     // 2. Sincronizar progreso de visualización de SQLite priorizando URL única de anime
-    getHistory(500, 0).then((history) => {
+    getHistory(500, 0, activeProfile?.id).then((history) => {
       const map = new Map<number, number>();
       for (const h of history) {
         const isUrlMatch = Boolean(h.animeUrl && details.url && h.animeUrl === details.url);
@@ -168,7 +171,7 @@ export function DesktopDetailsPage() {
       }
       setHistoryMap(map);
     }).catch(console.error);
-  }, [details?.title, details?.url]);
+  }, [details?.title, details?.url, activeProfile?.id]);
 
   const handlePlayEpisode = async (ep: Episode) => {
     if (!details) return;
@@ -346,16 +349,18 @@ export function DesktopDetailsPage() {
     if (!details) return;
     try {
       if (isFavorite) {
-        await removeFavorite(decodedUrl);
+        await removeFavorite(decodedUrl, activeProfile?.id);
         setIsFavorite(false);
+        useSyncStore.getState().triggerDebouncedSync();
       } else {
         await addFavorite({
           title: details.title,
           url: decodedUrl,
           thumbnailUrl: details.thumbnailUrl,
           source: details.source,
-        });
+        }, activeProfile?.id);
         setIsFavorite(true);
+        useSyncStore.getState().triggerDebouncedSync();
       }
     } catch (e) {
       console.error(e);

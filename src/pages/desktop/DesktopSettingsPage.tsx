@@ -2,14 +2,18 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Globe, Download, Tv, RefreshCw, Check, Undo2,
-  FolderOpen, ExternalLink, Sparkles, ShieldCheck, Palette, HardDrive, Trash2, Database, Activity
+  FolderOpen, ExternalLink, Sparkles, ShieldCheck, Palette, HardDrive, Trash2, Database, Activity, Cloud, User
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { ChangelogModal } from '@/components/ChangelogModal';
+import { ProfileSelectorModal, getProfileAvatarIcon } from '@/components/ProfileSelectorModal';
+import { GistSyncModal } from '@/components/GistSyncModal';
 import { useThemeStore, THEMES } from '@/stores/useThemeStore';
+import { useProfileStore } from '@/stores/useProfileStore';
+import { useSyncStore } from '@/stores/useSyncStore';
 import { getCacheStats, clearImageCache } from '@/services/downloadService';
 import { getDatabaseStats, optimizeDatabase, resetDatabase, clearHistory, type DatabaseStats } from '@/services/storageService';
 import { clearMemoryCache } from '@/components/CachedImage';
@@ -190,6 +194,14 @@ export function DesktopSettingsPage() {
     return cleanRemote !== cleanCurrent;
   };
 
+  // Perfiles y Sincronización en la Nube
+  const { profiles, activeProfile } = useProfileStore();
+  const { config: syncConfig } = useSyncStore();
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
+
+  const ActiveProfileIcon = activeProfile ? getProfileAvatarIcon(activeProfile.avatar) : User;
+
   return (
     <div style={{ padding: '28px 36px', maxWidth: 1000, margin: '0 auto' }}>
       {/* Header Desktop */}
@@ -197,7 +209,7 @@ export function DesktopSettingsPage() {
         <div>
           <h1 style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-0.02em', margin: 0 }}>Ajustes y Preferencias</h1>
           <p style={{ color: 'var(--text-muted)', fontSize: 14, margin: '4px 0 0' }}>
-            Configuración global de fuentes, descargas, reproductor y actualizaciones
+            Configuración global de fuentes, descargas, reproductor, perfiles y sincronización
           </p>
         </div>
 
@@ -235,6 +247,139 @@ export function DesktopSettingsPage() {
       </AnimatePresence>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+        {/* Perfiles de Usuario y Sincronización en la Nube */}
+        <div style={{
+          background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)',
+          border: '1px solid var(--border-subtle)', padding: 22,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18 }}>
+            <div style={{ padding: 8, borderRadius: 'var(--radius-md)', background: 'rgba(59, 130, 246, 0.15)' }}>
+              <Cloud size={20} color="var(--accent-primary)" />
+            </div>
+            <div>
+              <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Cuentas y Sincronización en la Nube</h2>
+              <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '2px 0 0' }}>
+                Perfiles locales multi-usuario y sincronización secreta con GitHub Gist
+              </p>
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+            {/* Perfil Activo */}
+            <div style={{
+              background: 'rgba(255, 255, 255, 0.03)',
+              borderRadius: 'var(--radius-md)',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              padding: '16px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: '50%',
+                    background: activeProfile?.color || '#3b82f6',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'white',
+                    boxShadow: `0 4px 12px ${(activeProfile?.color || '#3b82f6')}55`,
+                  }}
+                >
+                  <ActiveProfileIcon size={22} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: 'white' }}>
+                    {activeProfile?.name || 'Principal'}
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                    {profiles.length} {profiles.length === 1 ? 'perfil registrado' : 'perfiles registrados'}
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsProfileModalOpen(true)}
+                style={{
+                  background: 'rgba(255, 255, 255, 0.08)',
+                  border: '1px solid rgba(255, 255, 255, 0.15)',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '8px 14px',
+                  color: 'white',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                Cambiar Perfil
+              </button>
+            </div>
+
+            {/* GitHub Gist Sync Status */}
+            <div style={{
+              background: 'rgba(255, 255, 255, 0.03)',
+              borderRadius: 'var(--radius-md)',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              padding: '16px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: '12px',
+                    background: syncConfig.githubToken ? 'rgba(16, 185, 129, 0.15)' : 'rgba(245, 158, 11, 0.15)',
+                    border: syncConfig.githubToken ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(245, 158, 11, 0.3)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: syncConfig.githubToken ? '#10b981' : '#f59e0b',
+                  }}
+                >
+                  <Cloud size={22} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: 'white', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span>GitHub Gist Sync</span>
+                    {syncConfig.githubToken && (
+                      <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: '8px', background: 'rgba(16,185,129,0.2)', color: '#10b981' }}>
+                        Activo
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                    {syncConfig.githubToken ? (syncConfig.lastSyncAt ? `Sync: ${new Date(syncConfig.lastSyncAt).toLocaleDateString()}` : 'Listo para sincronizar') : 'Sin configurar'}
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsSyncModalOpen(true)}
+                style={{
+                  background: 'var(--accent-primary)',
+                  border: 'none',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '8px 14px',
+                  color: 'white',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                {syncConfig.githubToken ? 'Gestionar Sync' : 'Vincular Gist'}
+              </button>
+            </div>
+          </div>
+        </div>
+
         {/* Temas */}
         <div style={{
           background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)',
@@ -926,6 +1071,8 @@ export function DesktopSettingsPage() {
       </div>
 
       <ChangelogModal isOpen={showChangelog} onClose={() => setShowChangelog(false)} />
+      <ProfileSelectorModal isOpen={isProfileModalOpen} onClose={() => setIsProfileModalOpen(false)} />
+      <GistSyncModal isOpen={isSyncModalOpen} onClose={() => setIsSyncModalOpen(false)} />
     </div>
   );
 }

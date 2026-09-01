@@ -1,6 +1,6 @@
 [package]
 name = "anics"
-version = "0.1.8"
+version = "0.1.9"
 description = "AniCS - Anime streaming app"
 authors = ["AniCS"]
 edition = "2021"
@@ -48,6 +48,7 @@ parking_lot = "0.12"
 urlencoding = "2"
 url = "2"
 base64 = "0.22"
+keyring = { version = "3", features = ["windows-native", "apple-native", "sync-secret-service"] }
 
 [profile.release]
 panic = "abort"
