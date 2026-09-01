@@ -114,6 +114,12 @@ export interface UserProfile {
   createdAt: string;
 }
 
+export interface ProfileStats {
+  animesCount: number;
+  episodesCount: number;
+  hoursWatched: number;
+}
+
 export interface TombstoneItem {
   id: string;
   entityType: string;

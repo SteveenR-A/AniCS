@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Globe, Download, RefreshCw, Check, Undo2,
-  Sparkles, ShieldCheck, Palette, HardDrive, Trash2, Database, Activity, Folder, Cloud, User
+  Sparkles, ShieldCheck, Palette, HardDrive, Trash2, Database, Activity, Folder, Cloud, User,
+  Film, Clock, Tv
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -13,11 +14,13 @@ import { GistSyncModal } from '@/components/GistSyncModal';
 import { useThemeStore, THEMES } from '@/stores/useThemeStore';
 import { useProfileStore } from '@/stores/useProfileStore';
 import { useSyncStore } from '@/stores/useSyncStore';
+import { getProfileStats } from '@/services/profileService';
 import { getCacheStats, clearImageCache } from '@/services/downloadService';
 import { getDatabaseStats, optimizeDatabase, resetDatabase, clearHistory, type DatabaseStats } from '@/services/storageService';
 import { clearMemoryCache } from '@/components/CachedImage';
 import { DEFAULT_JKANIME, DEFAULT_MUNDODONGHUA, DEFAULT_ANDROID_DOWNLOAD_DIR } from '@/services/animeService';
 import { CURRENT_VERSION } from '@/services/updateService';
+import type { ProfileStats } from '@/types';
 
 declare const __APP_COMMIT_HASH__: string;
 
@@ -166,6 +169,20 @@ export function MobileSettingsPage() {
   const { config: syncConfig } = useSyncStore();
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
+  const [activeProfileStats, setActiveProfileStats] = useState<ProfileStats | null>(null);
+
+  useEffect(() => {
+    const loadStats = async () => {
+      try {
+        const st = await getProfileStats(activeProfile?.id);
+        setActiveProfileStats(st);
+      } catch {}
+    };
+    loadStats();
+    const handleSync = () => loadStats();
+    window.addEventListener('anics:sync-completed', handleSync);
+    return () => window.removeEventListener('anics:sync-completed', handleSync);
+  }, [activeProfile?.id]);
 
   const ActiveProfileIcon = activeProfile ? getProfileAvatarIcon(activeProfile.avatar) : User;
 
@@ -255,6 +272,61 @@ export function MobileSettingsPage() {
                   <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                     {profiles.length} {profiles.length === 1 ? 'perfil' : 'perfiles'}
                   </div>
+                  {activeProfileStats && (
+                    <div style={{ display: 'flex', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
+                      <span
+                        title="Animes con al menos 1 episodio completado (≥80%)"
+                        style={{
+                          fontSize: 10,
+                          color: 'rgba(255, 255, 255, 0.75)',
+                          background: 'rgba(255, 255, 255, 0.06)',
+                          padding: '2px 6px',
+                          borderRadius: '6px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 3,
+                          fontWeight: 600,
+                        }}
+                      >
+                        <Tv size={10} color={activeProfile?.color || 'var(--accent-primary)'} />
+                        {activeProfileStats.animesCount} {activeProfileStats.animesCount === 1 ? 'anime' : 'animes'}
+                      </span>
+                      <span
+                        title="Episodios completados (≥80%)"
+                        style={{
+                          fontSize: 10,
+                          color: 'rgba(255, 255, 255, 0.75)',
+                          background: 'rgba(255, 255, 255, 0.06)',
+                          padding: '2px 6px',
+                          borderRadius: '6px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 3,
+                          fontWeight: 600,
+                        }}
+                      >
+                        <Film size={10} color={activeProfile?.color || 'var(--accent-primary)'} />
+                        {activeProfileStats.episodesCount} eps
+                      </span>
+                      <span
+                        title="Horas acumuladas vistas"
+                        style={{
+                          fontSize: 10,
+                          color: 'rgba(255, 255, 255, 0.75)',
+                          background: 'rgba(255, 255, 255, 0.06)',
+                          padding: '2px 6px',
+                          borderRadius: '6px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 3,
+                          fontWeight: 600,
+                        }}
+                      >
+                        <Clock size={10} color={activeProfile?.color || 'var(--accent-primary)'} />
+                        {activeProfileStats.hoursWatched}h
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
 

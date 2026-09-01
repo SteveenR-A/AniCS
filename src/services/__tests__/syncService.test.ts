@@ -11,7 +11,7 @@ import {
 import type { HistoryEntry, AnimeResult, UserProfile, GistFilesPayload } from '@/types';
 
 describe('syncService - Merge Engine & Migrations', () => {
-  it('resuelve historial favoreciendo el episodio más avanzado', () => {
+  it('preserva múltiples episodios vistos de un mismo anime', () => {
     const local: HistoryEntry[] = [
       {
         id: '1',
@@ -43,11 +43,11 @@ describe('syncService - Merge Engine & Migrations', () => {
     ];
 
     const merged = mergeHistoryEntries(local, remote);
-    expect(merged.length).toBe(1);
-    expect(merged[0].episodeNumber).toBe(5);
+    expect(merged.length).toBe(2);
+    expect(merged.map(m => m.episodeNumber).sort()).toEqual([3, 5]);
   });
 
-  it('resuelve historial en el mismo episodio favoreciendo mayor progreso', () => {
+  it('resuelve historial en el mismo episodio favoreciendo mayor progreso si uno está completado (>=80%)', () => {
     const local: HistoryEntry[] = [
       {
         id: '1',
@@ -56,7 +56,7 @@ describe('syncService - Merge Engine & Migrations', () => {
         thumbnailUrl: '',
         episodeNumber: 10,
         episodeUrl: 'https://jkanime.net/frieren/10/',
-        watchProgress: 0.8,
+        watchProgress: 0.85,
         watchedAt: '2026-08-01T10:00:00Z',
         source: 'jkanime',
         profileId: 'default',
@@ -80,7 +80,81 @@ describe('syncService - Merge Engine & Migrations', () => {
 
     const merged = mergeHistoryEntries(local, remote);
     expect(merged.length).toBe(1);
-    expect(merged[0].watchProgress).toBe(0.8);
+    expect(merged[0].watchProgress).toBe(0.85);
+  });
+
+  it('resuelve historial en el mismo episodio favoreciendo la fecha más reciente si ninguno alcanza el 80%', () => {
+    const local: HistoryEntry[] = [
+      {
+        id: '1',
+        animeTitle: 'Frieren',
+        animeUrl: 'https://jkanime.net/frieren/',
+        thumbnailUrl: '',
+        episodeNumber: 10,
+        episodeUrl: 'https://jkanime.net/frieren/10/',
+        watchProgress: 0.4,
+        watchedAt: '2026-08-01T10:00:00Z',
+        source: 'jkanime',
+        profileId: 'default',
+      },
+    ];
+
+    const remote: HistoryEntry[] = [
+      {
+        id: '2',
+        animeTitle: 'Frieren',
+        animeUrl: 'https://jkanime.net/frieren/',
+        thumbnailUrl: '',
+        episodeNumber: 10,
+        episodeUrl: 'https://jkanime.net/frieren/10/',
+        watchProgress: 0.35,
+        watchedAt: '2026-08-02T10:00:00Z',
+        source: 'jkanime',
+        profileId: 'default',
+      },
+    ];
+
+    const merged = mergeHistoryEntries(local, remote);
+    expect(merged.length).toBe(1);
+    expect(merged[0].watchProgress).toBe(0.35);
+    expect(merged[0].watchedAt).toBe('2026-08-02T10:00:00Z');
+  });
+
+  it('mantiene historiales separados para diferentes perfiles del mismo episodio', () => {
+    const local: HistoryEntry[] = [
+      {
+        id: '1',
+        animeTitle: 'Naruto',
+        animeUrl: 'https://jkanime.net/naruto/',
+        thumbnailUrl: '',
+        episodeNumber: 1,
+        episodeUrl: 'https://jkanime.net/naruto/1/',
+        watchProgress: 0.9,
+        watchedAt: '2026-08-01T10:00:00Z',
+        source: 'jkanime',
+        profileId: 'default',
+      },
+    ];
+
+    const remote: HistoryEntry[] = [
+      {
+        id: '2',
+        animeTitle: 'Naruto',
+        animeUrl: 'https://jkanime.net/naruto/',
+        thumbnailUrl: '',
+        episodeNumber: 1,
+        episodeUrl: 'https://jkanime.net/naruto/1/',
+        watchProgress: 0.5,
+        watchedAt: '2026-08-02T10:00:00Z',
+        source: 'jkanime',
+        profileId: 'hermano_id',
+      },
+    ];
+
+    const merged = mergeHistoryEntries(local, remote);
+    expect(merged.length).toBe(2);
+    expect(merged.find(m => m.profileId === 'default')?.watchProgress).toBe(0.9);
+    expect(merged.find(m => m.profileId === 'hermano_id')?.watchProgress).toBe(0.5);
   });
 
   it('resuelve favoritos respetando tombstones de eliminación', () => {

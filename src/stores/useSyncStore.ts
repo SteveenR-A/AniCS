@@ -367,6 +367,16 @@ export const useSyncStore = create<SyncState>((set, get) => ({
       // Guardar hashes sincronizados para evitar subidas redundantes
       await setSyncConfig('last_synced_hashes', JSON.stringify(finalPayload.syncMeta.fileHashes));
 
+      // Recargar perfiles en memoria y notificar a vistas abiertas
+      try {
+        const { useProfileStore } = await import('@/stores/useProfileStore');
+        await useProfileStore.getState().loadProfiles();
+      } catch {}
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('anics:sync-completed'));
+      }
+
       set({ isSyncing: false, syncStatus: 'success' });
     } catch (e: any) {
       console.error('Error durante la sincronización:', e);
@@ -448,7 +458,17 @@ export const useSyncStore = create<SyncState>((set, get) => ({
         await upsertHistory(h);
       }
       for (const f of imported.favorites) {
-        await addFavorite(f, (f as any).profileId);
+        await addFavorite(f, f.profileId);
+      }
+
+      // Recargar perfiles y emitir evento
+      try {
+        const { useProfileStore } = await import('@/stores/useProfileStore');
+        await useProfileStore.getState().loadProfiles();
+      } catch {}
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('anics:sync-completed'));
       }
 
       set({ isSyncing: false, syncStatus: 'success' });

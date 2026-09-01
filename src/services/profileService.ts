@@ -30,6 +30,9 @@ export const setActiveProfile = (id: string): Promise<void> =>
 export const deleteProfile = (id: string): Promise<void> =>
   invoke('delete_profile', { id });
 
+export const getProfileStats = (profileId?: string): Promise<import('@/types').ProfileStats> =>
+  invoke('get_profile_stats', { profileId });
+
 // ─── Almacenamiento Seguro (Token de GitHub y Salt PBKDF2) ───
 
 export const saveSecureSecret = async (key: string, secret: string): Promise<void> => {

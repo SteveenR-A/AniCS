@@ -60,23 +60,15 @@ export function mergeHistoryEntries(local: HistoryEntry[], remote: HistoryEntry[
     if (!lItem) {
       map.set(rItem);
     } else {
-      // 1. Gana el episodio más avanzado
-      if (rItem.episodeNumber > lItem.episodeNumber) {
-        map.set(rItem);
-      } else if (rItem.episodeNumber < lItem.episodeNumber) {
-        map.set(lItem);
+      // Política de resolución de conflictos por episodio:
+      // 1. Si alguno ya alcanzó o superó el 80% (completado), gana el de mayor progreso
+      if (rItem.watchProgress >= 0.80 || lItem.watchProgress >= 0.80) {
+        map.set(rItem.watchProgress >= lItem.watchProgress ? rItem : lItem);
       } else {
-        // Mismo episodio: gana mayor progreso
-        if (rItem.watchProgress > lItem.watchProgress) {
-          map.set(rItem);
-        } else if (rItem.watchProgress < lItem.watchProgress) {
-          map.set(lItem);
-        } else {
-          // Mismo progreso: gana el más recientemente visto
-          const rTime = new Date(rItem.watchedAt).getTime();
-          const lTime = new Date(lItem.watchedAt).getTime();
-          map.set(rTime >= lTime ? rItem : lItem);
-        }
+        // 2. Si ninguno está completado, gana el más recientemente visto
+        const rTime = new Date(rItem.watchedAt).getTime();
+        const lTime = new Date(lItem.watchedAt).getTime();
+        map.set(rTime >= lTime ? rItem : lItem);
       }
     }
   }
@@ -90,7 +82,8 @@ class HashMapHistory {
   private makeKey(e: HistoryEntry): string {
     const pid = e.profileId || 'default';
     const normUrl = e.animeUrl.toLowerCase().trim();
-    return `${normUrl}::${pid}`;
+    const epNum = e.episodeNumber;
+    return `${normUrl}::ep${epNum}::${pid}`;
   }
 
   get(e: HistoryEntry): HistoryEntry | undefined {

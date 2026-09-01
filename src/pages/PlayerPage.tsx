@@ -586,8 +586,8 @@ export function PlayerPage() {
     const cleanAnimeUrl = anime.url.replace(/\/+$/, '').trim();
     const cleanEpUrl = ep.url.replace(/\/+$/, '').trim();
     const epNum = ep.number;
-    const historyId = `${cleanAnimeUrl}-${epNum}`;
-    const activeProfileId = useProfileStore.getState().activeProfile?.id;
+    const activeProfileId = useProfileStore.getState().activeProfile?.id || 'default';
+    const historyId = `${cleanAnimeUrl}-${epNum}-${activeProfileId}`;
 
     upsertHistory({
       id: historyId,

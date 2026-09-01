@@ -159,6 +159,14 @@ pub async fn delete_profile(id: String, _state: State<'_, AppState>) -> Result<(
     storage::delete_profile(&id).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+pub async fn get_profile_stats(
+    profile_id: Option<String>,
+    _state: State<'_, AppState>,
+) -> Result<storage::ProfileStats, String> {
+    storage::get_profile_stats(profile_id.as_deref()).map_err(|e| e.to_string())
+}
+
 // ──────────────────────────────────────────
 // Almacenamiento Seguro (Keyring / Token)
 // ──────────────────────────────────────────

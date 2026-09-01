@@ -66,6 +66,9 @@ export function DesktopHistoryPage() {
 
   useEffect(() => {
     loadHistory();
+    const handleSync = () => loadHistory();
+    window.addEventListener('anics:sync-completed', handleSync);
+    return () => window.removeEventListener('anics:sync-completed', handleSync);
   }, [loadHistory]);
 
   const filteredEntries = useMemo(() => {
@@ -593,6 +596,9 @@ export function DesktopFavoritesPage() {
 
   useEffect(() => {
     loadFavs();
+    const handleSync = () => loadFavs();
+    window.addEventListener('anics:sync-completed', handleSync);
+    return () => window.removeEventListener('anics:sync-completed', handleSync);
   }, [loadFavs]);
 
   const handleRemove = async (e: React.MouseEvent, url: string) => {

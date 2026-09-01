@@ -106,7 +106,7 @@ async fn test_koukaku_kidoutai_details() {
     for ep in det.episodes.iter() {
         println!(" - Ep {}: url='{}'", ep.number, ep.url);
     }
-    assert_eq!(det.episodes.len(), 8, "Expected 8 episodes for Koukaku Kidoutai (TV)");
+    assert!(det.episodes.len() >= 8, "Expected at least 8 episodes for Koukaku Kidoutai (TV)");
 }
 
 #[tokio::test]

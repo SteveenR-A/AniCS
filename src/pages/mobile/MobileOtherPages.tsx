@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Clock, Trash2, Film, Bookmark, BookmarkX, Inbox, History,
-  ArrowDownCircle, Play, Folder, Search, X, CheckSquare, Square,
+  ArrowDownCircle, Play, Folder, Search, X, CheckSquare, Square, RefreshCw,
   ChevronDown, ChevronUp, Check, Eye, EyeOff, Pause, RotateCcw, Loader2, AlertCircle
 } from 'lucide-react';
 import { convertFileSrc } from '@tauri-apps/api/core';
@@ -64,6 +64,9 @@ export function MobileHistoryPage() {
 
   useEffect(() => {
     loadHistory();
+    const handleSync = () => loadHistory();
+    window.addEventListener('anics:sync-completed', handleSync);
+    return () => window.removeEventListener('anics:sync-completed', handleSync);
   }, [loadHistory]);
 
   const filteredEntries = useMemo(() => {
@@ -436,6 +439,9 @@ export function MobileFavoritesPage() {
 
   useEffect(() => {
     loadFavs();
+    const handleSync = () => loadFavs();
+    window.addEventListener('anics:sync-completed', handleSync);
+    return () => window.removeEventListener('anics:sync-completed', handleSync);
   }, [loadFavs]);
 
   const handleRemove = async (e: React.MouseEvent, url: string) => {
@@ -625,8 +631,8 @@ export function MobileDownloadsPage() {
 
   return (
     <div style={{ padding: '12px 14px 24px' }}>
-      {/* Header Móvil Tabs */}
-      <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
+      {/* Header Móvil Tabs & Refresh */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 14, alignItems: 'center' }}>
         <button
           onClick={() => setActiveTab('local')}
           style={{
@@ -652,6 +658,27 @@ export function MobileDownloadsPage() {
           }}
         >
           <ArrowDownCircle size={14} /> Cola ({activeTasks.length})
+        </button>
+        <button
+          onClick={() => loadLocalFolders()}
+          disabled={isScanning}
+          title="Escanear y actualizar descargas"
+          style={{
+            background: 'var(--bg-surface)',
+            color: 'var(--text-primary)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 'var(--radius-full)',
+            padding: '7px 11px',
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: isScanning ? 'not-allowed' : 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            opacity: isScanning ? 0.7 : 1,
+          }}
+        >
+          <RefreshCw size={14} className={isScanning ? 'animate-spin' : ''} />
         </button>
       </div>
 

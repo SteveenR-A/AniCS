@@ -149,6 +149,7 @@ pub fn run() {
             commands::upsert_profile,
             commands::set_active_profile,
             commands::delete_profile,
+            commands::get_profile_stats,
             // Almacenamiento Seguro (Keyring)
             commands::save_secure_token,
             commands::get_secure_token,

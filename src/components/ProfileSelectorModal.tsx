@@ -3,11 +3,12 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   User, Sparkles, Swords, Bot, Star, Heart, Zap,
   Skull, Crown, Cat, Tv, Moon, Feather, Gamepad2, Smile,
-  X, Plus, Check, Trash2, Edit3
+  X, Plus, Check, Trash2, Edit3, Film, Clock
 } from 'lucide-react';
 import { useProfileStore } from '@/stores/useProfileStore';
 import { useSyncStore } from '@/stores/useSyncStore';
-import type { UserProfile } from '@/types';
+import { getProfileStats } from '@/services/profileService';
+import type { UserProfile, ProfileStats } from '@/types';
 
 export const AVATAR_OPTIONS = [
   { id: 'swords', label: 'Shonen', Icon: Swords },
@@ -60,14 +61,31 @@ export const ProfileSelectorModal: React.FC<Props> = ({ isOpen, onClose }) => {
   const [formAvatar, setFormAvatar] = useState('swords');
   const [formColor, setFormColor] = useState('#3b82f6');
   const [error, setError] = useState<string | null>(null);
+  const [profileStats, setProfileStats] = useState<Record<string, ProfileStats>>({});
 
   useEffect(() => {
     if (!isOpen) {
       setMode('list');
       setEditingProfile(null);
       setError(null);
+    } else {
+      const fetchStats = async () => {
+        const statsObj: Record<string, ProfileStats> = {};
+        await Promise.all(
+          profiles.map(async (p) => {
+            try {
+              const st = await getProfileStats(p.id);
+              statsObj[p.id] = st;
+            } catch (err) {
+              console.error('Error fetching stats for profile:', p.id, err);
+            }
+          })
+        );
+        setProfileStats(statsObj);
+      };
+      fetchStats();
     }
-  }, [isOpen]);
+  }, [isOpen, profiles]);
 
   if (!isOpen) return null;
 
@@ -292,6 +310,62 @@ export const ProfileSelectorModal: React.FC<Props> = ({ isOpen, onClose }) => {
                             <div style={{ fontSize: 11, color: 'rgba(255, 255, 255, 0.4)', marginTop: 2 }}>
                               {p.id === 'default' ? 'Perfil Principal' : `Creado ${new Date(p.createdAt).toLocaleDateString()}`}
                             </div>
+
+                            {profileStats[p.id] && (
+                              <div style={{ display: 'flex', gap: 6, marginTop: 5, flexWrap: 'wrap' }}>
+                                <span
+                                  title="Animes con al menos 1 episodio visto al 80%"
+                                  style={{
+                                    fontSize: 10,
+                                    color: 'rgba(255, 255, 255, 0.75)',
+                                    background: 'rgba(255, 255, 255, 0.07)',
+                                    padding: '2px 6px',
+                                    borderRadius: '6px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 3,
+                                    fontWeight: 600,
+                                  }}
+                                >
+                                  <Tv size={10} color={p.color || '#3b82f6'} />
+                                  {profileStats[p.id].animesCount} {profileStats[p.id].animesCount === 1 ? 'anime' : 'animes'}
+                                </span>
+                                <span
+                                  title="Episodios completados (≥ 80%)"
+                                  style={{
+                                    fontSize: 10,
+                                    color: 'rgba(255, 255, 255, 0.75)',
+                                    background: 'rgba(255, 255, 255, 0.07)',
+                                    padding: '2px 6px',
+                                    borderRadius: '6px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 3,
+                                    fontWeight: 600,
+                                  }}
+                                >
+                                  <Film size={10} color={p.color || '#3b82f6'} />
+                                  {profileStats[p.id].episodesCount} eps
+                                </span>
+                                <span
+                                  title="Horas acumuladas vistas"
+                                  style={{
+                                    fontSize: 10,
+                                    color: 'rgba(255, 255, 255, 0.75)',
+                                    background: 'rgba(255, 255, 255, 0.07)',
+                                    padding: '2px 6px',
+                                    borderRadius: '6px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 3,
+                                    fontWeight: 600,
+                                  }}
+                                >
+                                  <Clock size={10} color={p.color || '#3b82f6'} />
+                                  {profileStats[p.id].hoursWatched}h
+                                </span>
+                              </div>
+                            )}
                           </div>
                         </div>
 

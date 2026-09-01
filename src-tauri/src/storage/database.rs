@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use once_cell::sync::OnceCell;
 use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
 
 use crate::core::*;
 
@@ -102,6 +103,7 @@ pub fn init_database_inner(app_data_dir: &PathBuf) -> AppResult<Connection> {
     let _ = conn.execute("ALTER TABLE downloads ADD COLUMN total_bytes INTEGER", []);
     let _ = conn.execute("ALTER TABLE watch_history ADD COLUMN profile_id TEXT NOT NULL DEFAULT 'default'", []);
     let _ = conn.execute("ALTER TABLE favorites ADD COLUMN profile_id TEXT NOT NULL DEFAULT 'default'", []);
+    let _ = conn.execute("UPDATE watch_history SET id = anime_url || '-' || episode_number || '-' || profile_id WHERE id = anime_url || '-' || episode_number", []);
 
     // 3. Crear índices una vez asegurada la existencia de todas las columnas
     conn.execute_batch("
@@ -568,6 +570,47 @@ pub fn remove_history_by_anime(anime_url: &str, profile_id: Option<&str>) -> App
             params![clean_url, format!("{}%", clean_url), target_profile],
         )?;
         Ok(())
+    })
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileStats {
+    pub animes_count: u32,
+    pub episodes_count: u32,
+    pub hours_watched: f64,
+}
+
+pub fn get_profile_stats(profile_id: Option<&str>) -> AppResult<ProfileStats> {
+    with_db(|conn| {
+        let target_profile = match profile_id {
+            Some(pid) => pid.to_string(),
+            None => get_active_profile_id_inner(conn),
+        };
+
+        let animes_count: u32 = conn.query_row(
+            "SELECT COUNT(DISTINCT anime_url) FROM watch_history WHERE profile_id = ?1 AND watch_progress >= 0.80",
+            params![target_profile],
+            |row| row.get(0),
+        ).unwrap_or(0);
+
+        let episodes_count: u32 = conn.query_row(
+            "SELECT COUNT(DISTINCT id) FROM watch_history WHERE profile_id = ?1 AND watch_progress >= 0.80",
+            params![target_profile],
+            |row| row.get(0),
+        ).unwrap_or(0);
+
+        let hours_watched: f64 = conn.query_row(
+            "SELECT COALESCE(SUM(watch_progress * 24.0 / 60.0), 0.0) FROM watch_history WHERE profile_id = ?1 AND watch_progress >= 0.80",
+            params![target_profile],
+            |row| row.get(0),
+        ).unwrap_or(0.0);
+
+        Ok(ProfileStats {
+            animes_count,
+            episodes_count,
+            hours_watched: (hours_watched * 10.0).round() / 10.0,
+        })
     })
 }
 
