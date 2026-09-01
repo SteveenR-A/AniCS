@@ -1217,4 +1217,70 @@ mod tests {
         // Cleanup
         let _ = fs::remove_dir_all(test_dir);
     }
+
+    #[test]
+    fn test_profile_stats_calculation_and_threshold() {
+        let base_temp_dir = env::temp_dir();
+        let mut test_dir = base_temp_dir.clone();
+        test_dir.push(format!("anics_test_stats_db_{}", get_unique_id()));
+        fs::create_dir_all(&test_dir).unwrap();
+
+        {
+            let conn = init_database_inner(&test_dir).unwrap();
+
+            // Insertar historial de prueba para 'default'
+            // 1. Anime A: Ep 1 completado (90%)
+            conn.execute(
+                "INSERT INTO watch_history (id, anime_title, anime_url, thumbnail_url, episode_number, episode_url, watch_progress, watched_at, source, profile_id)
+                 VALUES ('anime-a-1-default', 'Anime A', 'https://jkanime.net/anime-a/', '', 1, 'https://jkanime.net/anime-a/1/', 0.90, datetime('now'), 'jkanime', 'default')",
+                [],
+            ).unwrap();
+
+            // 2. Anime A: Ep 2 incompleto (30%) -> No debe sumar como capítulo completado ni para horas completadas
+            conn.execute(
+                "INSERT INTO watch_history (id, anime_title, anime_url, thumbnail_url, episode_number, episode_url, watch_progress, watched_at, source, profile_id)
+                 VALUES ('anime-a-2-default', 'Anime A', 'https://jkanime.net/anime-a/', '', 2, 'https://jkanime.net/anime-a/2/', 0.30, datetime('now'), 'jkanime', 'default')",
+                [],
+            ).unwrap();
+
+            // 3. Anime B: Ep 1 completado (80%) -> Cuenta como segundo anime y segundo episodio completado
+            conn.execute(
+                "INSERT INTO watch_history (id, anime_title, anime_url, thumbnail_url, episode_number, episode_url, watch_progress, watched_at, source, profile_id)
+                 VALUES ('anime-b-1-default', 'Anime B', 'https://jkanime.net/anime-b/', '', 1, 'https://jkanime.net/anime-b/1/', 0.80, datetime('now'), 'jkanime', 'default')",
+                [],
+            ).unwrap();
+
+            // 4. Anime C para otro perfil 'prof2': Ep 1 completado (100%)
+            conn.execute(
+                "INSERT INTO watch_history (id, anime_title, anime_url, thumbnail_url, episode_number, episode_url, watch_progress, watched_at, source, profile_id)
+                 VALUES ('anime-c-1-prof2', 'Anime C', 'https://jkanime.net/anime-c/', '', 1, 'https://jkanime.net/anime-c/1/', 1.0, datetime('now'), 'jkanime', 'prof2')",
+                [],
+            ).unwrap();
+
+            // Consultar estadísticas para 'default'
+            let animes_count: u32 = conn.query_row(
+                "SELECT COUNT(DISTINCT anime_url) FROM watch_history WHERE profile_id = 'default' AND watch_progress >= 0.80",
+                [],
+                |row| row.get(0),
+            ).unwrap();
+            assert_eq!(animes_count, 2, "Debe haber 2 animes únicos con >= 80% completado");
+
+            let episodes_count: u32 = conn.query_row(
+                "SELECT COUNT(DISTINCT id) FROM watch_history WHERE profile_id = 'default' AND watch_progress >= 0.80",
+                [],
+                |row| row.get(0),
+            ).unwrap();
+            assert_eq!(episodes_count, 2, "Debe haber 2 episodios con >= 80% completado");
+
+            let hours_watched: f64 = conn.query_row(
+                "SELECT COALESCE(SUM(watch_progress * 24.0 / 60.0), 0.0) FROM watch_history WHERE profile_id = 'default' AND watch_progress >= 0.80",
+                [],
+                |row| row.get(0),
+            ).unwrap();
+            // (0.90 + 0.80) * 24 / 60 = 1.70 * 0.4 = 0.68 horas
+            assert!((hours_watched - 0.68).abs() < 0.01, "Horas calculadas deben ser ~0.68");
+        }
+
+        let _ = fs::remove_dir_all(test_dir);
+    }
 }
