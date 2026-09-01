@@ -1,5 +1,23 @@
 [
   {
+    "version": "0.1.20",
+    "date": "2026-09-01",
+    "title": "Sincronización por Episodio, Estadísticas de Perfil de Anime y Escaneo Manual de Descargas",
+    "type": "minor",
+    "highlights": [
+      "Sincronización de Historial por Episodio individual en la nube (Gist) sin colapsar capítulos de una misma serie",
+      "Política de fusión de conflictos inteligente: prioridad a capítulos completados (watchProgress >= 80%) y fechas más recientes",
+      "Aislamiento total de identificadores de historial entre perfiles de usuario en SQLite",
+      "Estadísticas de Usuario por Perfil: Conteo de animes únicos, capítulos completados y horas acumuladas de visualización",
+      "Criterio de activación estricto (>= 80% de progreso) para conteo de episodios y cómputo honesto de horas vistas",
+      "Visualización de estadísticas en badges estilizados dentro del Selector de Perfiles y la sección de Ajustes",
+      "Reactividad global automática tras sincronización (anics:sync-completed) sin necesidad de reiniciar la app",
+      "Botón de recarga y escaneo manual en Descargas Móvil para indexar archivos de /storage/emulated/0/Anime al instante",
+      "Notificación visual animada (Toast con Framer Motion) al pulsar Sincronizar en el modal de la nube",
+      "Migración automática retrocompatible de identificadores en SQLite y optimización de rendimiento"
+    ]
+  },
+  {
     "version": "0.1.9",
     "date": "2026-09-01",
     "title": "Perfiles de Anime, Sincronización GitHub Gist Secreto y Gestión Avanzada del Historial",

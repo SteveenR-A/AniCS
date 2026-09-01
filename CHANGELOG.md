@@ -5,6 +5,44 @@ El formato está basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1
 
 ---
 
+## [0.1.20] - 2026-09-01
+
+### 🚀 Sincronización por Episodio, Estadísticas de Perfil y Escaneo Manual de Descargas
+- **Sincronización por Episodio Individual (`animeUrl::epNum::profileId`):**
+  - Cada capítulo visto se indexa y almacena independientemente en GitHub Gist y SQLite, impidiendo que ver un capítulo nuevo sobreescriba los anteriores en la nube.
+- **Resolución de Conflictos Inteligente:**
+  - Si alguno de los dispositivos completó el episodio (`watchProgress >= 80%`), se prioriza el progreso más alto. Si ninguno está completado, gana la fecha más reciente (`watchedAt`).
+- **Estadísticas de Usuario por Perfil:**
+  - Consulta SQL optimizada en SQLite (`get_profile_stats`) para calcular:
+    - Cantidad de animes únicos vistos.
+    - Cantidad de capítulos completados (`watch_progress >= 0.80`).
+    - Horas acumuladas de visualización honesta.
+  - Badges interactivos en `ProfileSelectorModal.tsx`, `DesktopSettingsPage.tsx` y `MobileSettingsPage.tsx`.
+- **Reactividad Global sin Reinicio (`anics:sync-completed`):**
+  - Evento despachado tras sincronizaciones exitosas para recargar perfiles, historial y favoritos sin parpadeos ni memory leaks.
+- **Botón de Escaneo Manual en Descargas Móvil:**
+  - Botón interactivo `RefreshCw` en `MobileDownloadsPage` para indexar episodios en `/storage/emulated/0/Anime` al instante.
+- **Notificación Toast de Sincronización Manual:**
+  - Feedback visual animado con `framer-motion` informando si la sincronización fue exitosa, si ya estaba al día o si ocurrió algún error.
+
+---
+
+## [0.1.9] - 2026-09-01
+
+### 👥 Perfiles de Usuario, GitHub Gist Secreto y Gestión del Historial
+- **Perfiles Locales Multi-Cuenta:**
+  - Galería de 15 avatares temáticos de anime y paleta de 10 colores con historiales y favoritos independientes en SQLite.
+- **Sincronización en la Nube con GitHub Gist Secreto:**
+  - Arquitectura multi-archivo (`profiles.json`, `history.json`, `favorites.json`, `settings.json`, `sync_meta.json`).
+- **Cifrado E2E con PIN Seguro:**
+  - Derivación PBKDF2 (100k iteraciones) + cifrado simétrico AES-GCM de 256 bits.
+- **Fusión Bidireccional con Lápidas (Tombstones):**
+  - Propagación fiel de borrados intencionales entre dispositivos.
+- **Gestión Avanzada de Historial:**
+  - Modo de selección múltiple interactivo, eliminación por lotes y borrado rápido por serie completa.
+
+---
+
 ## [0.1.7] - 2026-08-31
 
 ### 📖 Paginación Numérica, Sesiones de Búsqueda, Reproductor Vertical y Diferenciación de Temporadas

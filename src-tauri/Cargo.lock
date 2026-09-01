@@ -55,7 +55,7 @@ dependencies = [
 
 [[package]]
 name = "anics"
-version = "0.1.9"
+version = "0.1.20"
 dependencies = [
  "anyhow",
  "async-trait",

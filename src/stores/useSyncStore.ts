@@ -271,7 +271,7 @@ export const useSyncStore = create<SyncState>((set, get) => ({
       const localPayload: GistFilesPayload = {
         syncMeta: {
           schemaVersion: CURRENT_SCHEMA_VERSION,
-          appVersion: '0.1.9',
+          appVersion: '0.1.20',
           lastModifiedAt: new Date().toISOString(),
           lastModifiedDevice: 'windows',
           pbkdf2Salt: config.encryptionEnabled ? saltB64 : undefined,
@@ -416,7 +416,7 @@ export const useSyncStore = create<SyncState>((set, get) => ({
     const payload: GistFilesPayload = {
       syncMeta: {
         schemaVersion: CURRENT_SCHEMA_VERSION,
-        appVersion: '0.1.9',
+        appVersion: '0.1.20',
         lastModifiedAt: new Date().toISOString(),
         lastModifiedDevice: 'windows',
         fileHashes: { profiles: '', history: '', favorites: '', settings: '' },
