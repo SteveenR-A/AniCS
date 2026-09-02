@@ -5,6 +5,32 @@ El formato está basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1
 
 ---
 
+## [0.2.0] - 2026-09-02
+
+### 🔄 Sincronización Bidireccional y Deduplicación
+- **Sincronización con Lápidas Temporales (Tombstones):**
+  - Registro y propagación fiel de eliminaciones intencionadas de historial y favoritos entre PC y Android vía GitHub Gist sin reapariciones no deseadas.
+- **Deduplicación Canónica:**
+  - Normalización unificada de títulos y rutas para fusionar registros de descargas locales y servidores online en una única entrada coherente.
+- **Optimización de Payload en la Nube:**
+  - Ventana de hasta 1500 episodios con orden cronológico y auto-vinculación de Gists existentes.
+
+### 🛡️ Blindaje de Seguridad y Arquitectura
+- **Servidor Local de Streaming Protegido (`media_server.rs`):**
+  - Requiere token efímero de sesión UUID v4 en cada solicitud de video (`/video?path=...&token=...`), rechazando accesos no autorizados con `403 Forbidden`.
+  - Puerto dedicado fijado (`41725`) con fallback controlado.
+  - Bloqueo explícito de Symlinks con `symlink_metadata` para prevenir ataques de traversal en Android y Windows.
+  - Validación de rutas base autorizadas (descargas, caché y portadas internas) y restricción estricta de orígenes CORS al WebView.
+- **Content Security Policy (CSP) Estricto:**
+  - Erradicación de comodines loopback (`http://127.0.0.1:*`) fijando el puerto exacto en `tauri.conf.json`.
+  - Ámbito de protocolo de assets acotado a directorios estándar de la app.
+- **Actualizador Determinista:**
+  - Reconstrucción de URLs de descarga de actualizaciones desde cero en Rust (`https://github.com/SteveenR-A/AniCS/releases/download/...`), neutralizando manipulaciones en base de datos o entradas del usuario.
+- **Filtrado de Secretos en SQLite:**
+  - Exclusión automática de claves privadas `_sec_%` en `get_all_sync_config`.
+
+---
+
 ## [0.1.22] - 2026-09-02
 
 ### 📥 Gestión Avanzada de Descargas

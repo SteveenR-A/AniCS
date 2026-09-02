@@ -5,7 +5,7 @@ import {
   Clock, Trash2, Film, Bookmark, BookmarkX, Download, Inbox, History,
   ArrowDownCircle, HardDrive, Play, FolderOpen, RefreshCw, Search, Folder, FileVideo,
   ChevronDown, ChevronUp, Check, Eye, EyeOff, Pause, RotateCcw, Loader2, AlertCircle,
-  CheckSquare, Square, X, Layers, PlayCircle, Heart
+  CheckSquare, Square, X, Layers, PlayCircle, Heart, AlertTriangle
 } from 'lucide-react';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { convertFileSrc } from '@tauri-apps/api/core';
@@ -41,8 +41,10 @@ function formatSpeed(kbps: number) {
 export function DesktopHistoryPage() {
   const navigate = useNavigate();
   const { activeProfile } = useProfileStore();
+  const { isSyncing, isSyncPausedByLocalClear, resumeSync, syncNow, triggerDebouncedSync } = useSyncStore();
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isManualRefreshing, setIsManualRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSelecting, setIsSelecting] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -151,6 +153,10 @@ export function DesktopHistoryPage() {
           existing.latestWatchedAt = entry.watchedAt;
           existing.latestEpisode = entry;
         }
+        // Priorizar títulos limpios sin caracteres corruptos (\uFFFD o )
+        if (existing.animeTitle.includes('\uFFFD') && !entry.animeTitle.includes('\uFFFD')) {
+          existing.animeTitle = entry.animeTitle;
+        }
         if (!existing.animeUrl.startsWith('http') && entry.animeUrl && entry.animeUrl.startsWith('http')) {
           existing.animeUrl = entry.animeUrl;
         }
@@ -172,13 +178,40 @@ export function DesktopHistoryPage() {
     );
   }, [filteredEntries]);
 
+  const handleRefresh = async () => {
+    setIsManualRefreshing(true);
+    try {
+      if (useSyncStore.getState().config.githubToken && !useSyncStore.getState().isSyncPausedByLocalClear) {
+        await syncNow();
+      }
+      await loadHistory();
+    } catch (err) {
+      console.error('Error al actualizar historial:', err);
+    } finally {
+      setIsManualRefreshing(false);
+    }
+  };
+
   const handleClear = async () => {
-    if (confirm('¿Estás seguro de que deseas borrar todo el historial?')) {
-      await clearHistory(activeProfile?.id);
-      setEntries([]);
-      setSelectedIds(new Set());
-      setIsSelecting(false);
-      useSyncStore.getState().triggerDebouncedSync();
+    if (!confirm('¿Estás seguro de que deseas borrar todo el historial de este perfil?')) {
+      return;
+    }
+
+    const clearCloudToo = confirm(
+      '¿Deseas eliminar este historial también en tus otros dispositivos y en la nube?\n\n' +
+      '• Aceptar: Borrar en todos los dispositivos sincronizados (nube y local).\n' +
+      '• Cancelar: Borrar SOLO en este dispositivo (pausará la sincronización en este equipo para proteger la nube).'
+    );
+
+    await clearHistory(activeProfile?.id);
+    setEntries([]);
+    setSelectedIds(new Set());
+    setIsSelecting(false);
+
+    if (clearCloudToo) {
+      triggerDebouncedSync();
+    } else {
+      await useSyncStore.getState().pauseSyncByLocalClear();
     }
   };
 
@@ -289,74 +322,140 @@ export function DesktopHistoryPage() {
         </div>
 
         {/* Barra de Acciones y Búsqueda */}
-        {entries.length > 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            {/* Buscador Rápido */}
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 8,
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          {/* Botón Actualizar */}
+          <button
+            onClick={handleRefresh}
+            disabled={isManualRefreshing || isSyncing}
+            title="Actualizar historial y sincronizar con la nube"
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '8px 14px', borderRadius: 'var(--radius-md)',
               background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
-              borderRadius: 'var(--radius-md)', padding: '6px 12px', width: 220,
-            }}>
-              <Search size={15} color="var(--text-muted)" />
-              <input
-                type="text"
-                placeholder="Buscar en historial..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                style={{
-                  background: 'transparent', border: 'none', color: 'white',
-                  fontSize: 12, outline: 'none', width: '100%',
-                }}
-              />
-              {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery('')}
-                  style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 0 }}
-                >
-                  <X size={13} />
-                </button>
-              )}
-            </div>
-
-            {/* Modo Selección */}
-            <button
-              onClick={() => {
-                setIsSelecting(!isSelecting);
-                if (isSelecting) setSelectedIds(new Set());
-              }}
+              color: 'var(--text-secondary)', fontSize: 13, fontWeight: 600,
+              cursor: (isManualRefreshing || isSyncing) ? 'not-allowed' : 'pointer',
+              transition: 'all var(--transition-fast)',
+            }}
+          >
+            <RefreshCw
+              size={15}
               style={{
-                display: 'flex', alignItems: 'center', gap: 6,
-                padding: '8px 14px', borderRadius: 'var(--radius-md)',
-                background: isSelecting ? 'var(--accent-primary)' : 'var(--bg-surface)',
-                border: '1px solid var(--border-subtle)',
-                color: isSelecting ? 'white' : 'var(--text-secondary)',
-                fontSize: 13, fontWeight: 600, cursor: 'pointer',
-                transition: 'all var(--transition-fast)',
+                animation: (isManualRefreshing || isSyncing) ? 'spin 1s linear infinite' : 'none',
               }}
-            >
-              <CheckSquare size={16} />
-              {isSelecting ? 'Modo Gestión Activo' : 'Seleccionar'}
-            </button>
+            />
+            <span>Actualizar</span>
+          </button>
 
-            {/* Botón Borrar Todo */}
-            {!isSelecting && (
+          {entries.length > 0 && (
+            <>
+              {/* Buscador Rápido */}
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
+                borderRadius: 'var(--radius-md)', padding: '6px 12px', width: 220,
+              }}>
+                <Search size={15} color="var(--text-muted)" />
+                <input
+                  type="text"
+                  placeholder="Buscar en historial..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  style={{
+                    background: 'transparent', border: 'none', color: 'white',
+                    fontSize: 12, outline: 'none', width: '100%',
+                  }}
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery('')}
+                    style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 0 }}
+                  >
+                    <X size={13} />
+                  </button>
+                )}
+              </div>
+
+              {/* Modo Selección */}
               <button
-                onClick={handleClear}
+                onClick={() => {
+                  setIsSelecting(!isSelecting);
+                  if (isSelecting) setSelectedIds(new Set());
+                }}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 6,
                   padding: '8px 14px', borderRadius: 'var(--radius-md)',
-                  background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.25)',
-                  color: '#ef4444', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                  background: isSelecting ? 'var(--accent-primary)' : 'var(--bg-surface)',
+                  border: '1px solid var(--border-subtle)',
+                  color: isSelecting ? 'white' : 'var(--text-secondary)',
+                  fontSize: 13, fontWeight: 600, cursor: 'pointer',
                   transition: 'all var(--transition-fast)',
                 }}
               >
-                <Trash2 size={16} />
-                Borrar Todo
+                <CheckSquare size={16} />
+                {isSelecting ? 'Modo Gestión Activo' : 'Seleccionar'}
               </button>
-            )}
-          </div>
-        )}
+
+              {/* Botón Borrar Todo */}
+              {!isSelecting && (
+                <button
+                  onClick={handleClear}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    padding: '8px 14px', borderRadius: 'var(--radius-md)',
+                    background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.25)',
+                    color: '#ef4444', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                    transition: 'all var(--transition-fast)',
+                  }}
+                >
+                  <Trash2 size={16} />
+                  Borrar Todo
+                </button>
+              )}
+            </>
+          )}
+        </div>
       </div>
+
+      {/* Banner de Sincronización Pausada */}
+      {isSyncPausedByLocalClear && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '12px 16px',
+            borderRadius: 'var(--radius-md)',
+            background: 'rgba(245, 158, 11, 0.12)',
+            border: '1px solid rgba(245, 158, 11, 0.3)',
+            marginBottom: 20,
+            gap: 12,
+            flexWrap: 'wrap',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#fbbf24', fontSize: 13 }}>
+            <AlertTriangle size={18} style={{ flexShrink: 0 }} />
+            <span>
+              <strong>Sincronización pausada en este equipo:</strong> El historial se borró localmente. La sincronización automática está detenida para no sobrescribir tus otros dispositivos.
+            </span>
+          </div>
+          <button
+            onClick={resumeSync}
+            style={{
+              background: '#f59e0b',
+              border: 'none',
+              borderRadius: '6px',
+              color: 'black',
+              fontWeight: 700,
+              fontSize: 12,
+              padding: '6px 14px',
+              cursor: 'pointer',
+              flexShrink: 0,
+            }}
+          >
+            Reanudar Sincronización
+          </button>
+        </div>
+      )}
 
       {/* Barra Flotante de Selección Múltiple */}
       <AnimatePresence>

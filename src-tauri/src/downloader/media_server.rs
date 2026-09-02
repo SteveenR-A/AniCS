@@ -1,35 +1,61 @@
+use std::io::SeekFrom;
 use std::net::SocketAddr;
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicU16, Ordering};
+use std::path::{Path, PathBuf};
+use once_cell::sync::OnceCell;
+use tauri::{AppHandle, Manager};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use std::io::SeekFrom;
 
-static SERVER_PORT: AtomicU16 = AtomicU16::new(0);
+static SERVER_PORT: OnceCell<u16> = OnceCell::new();
+static MEDIA_TOKEN: OnceCell<String> = OnceCell::new();
+static APP_HANDLE: OnceCell<AppHandle> = OnceCell::new();
 
 /// Obtiene el puerto asignado al servidor local de streaming
 pub fn get_server_port() -> u16 {
-    SERVER_PORT.load(Ordering::Relaxed)
+    SERVER_PORT.get().copied().unwrap_or(0)
 }
 
-/// Genera una URL de streaming local compatible con HTML5 <video>
+/// Obtiene el token de sesión efímero del servidor de medios
+pub fn get_media_token() -> &'static str {
+    MEDIA_TOKEN.get().map(|s| s.as_str()).unwrap_or("")
+}
+
+/// Genera una URL de streaming local compatible con HTML5 <video> protegida con token
 pub fn get_media_stream_url(file_path: &str) -> String {
     let port = get_server_port();
+    let token = get_media_token();
     let encoded_path = urlencoding::encode(file_path);
-    if port > 0 {
+    if port > 0 && !token.is_empty() {
+        format!("http://127.0.0.1:{}/video?path={}&token={}", port, encoded_path, token)
+    } else if port > 0 {
         format!("http://127.0.0.1:{}/video?path={}", port, encoded_path)
     } else {
         file_path.to_string()
     }
 }
 
+pub const PREFERRED_PORT: u16 = 41725;
+
 /// Inicia el servidor HTTP de streaming local en segundo plano
-pub async fn start_media_server() -> Result<u16, Box<dyn std::error::Error + Send + Sync>> {
-    let listener = TcpListener::bind("127.0.0.1:0").await?;
+pub async fn start_media_server(app_handle: AppHandle) -> Result<u16, Box<dyn std::error::Error + Send + Sync>> {
+    let _ = APP_HANDLE.set(app_handle);
+
+    // Intentar enlazar el puerto fijo dedicado para CSP exacto sin comodines
+    let listener = match TcpListener::bind(format!("127.0.0.1:{}", PREFERRED_PORT)).await {
+        Ok(l) => l,
+        Err(e) => {
+            log::warn!("No se pudo enlazar el puerto preferido {}: {}. Usando puerto dinámico.", PREFERRED_PORT, e);
+            TcpListener::bind("127.0.0.1:0").await?
+        }
+    };
     let local_addr = listener.local_addr()?;
     let port = local_addr.port();
-    SERVER_PORT.store(port, Ordering::Relaxed);
-    log::info!("Local media streaming server started on port {}", port);
+    let _ = SERVER_PORT.set(port);
+
+    let token = uuid::Uuid::new_v4().to_string();
+    let _ = MEDIA_TOKEN.set(token);
+
+    log::info!("Local media streaming server started on port {} with session token", port);
 
     tokio::spawn(async move {
         loop {
@@ -46,6 +72,73 @@ pub async fn start_media_server() -> Result<u16, Box<dyn std::error::Error + Sen
     });
 
     Ok(port)
+}
+
+/// Valida si una ruta solicitada está dentro de los directorios permitidos y tiene extensión multimedia
+pub fn is_path_allowed(file_path: &Path, app_handle: &AppHandle) -> bool {
+    // 1. Resolver ruta canónica (si no se puede resolver, el archivo no existe o la ruta es inválida)
+    let canonical = match file_path.canonicalize() {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+
+    // 2. Validar extensión de archivo permitida
+    let ext = canonical
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .unwrap_or_default();
+    let allowed_extensions = [
+        "mp4", "mkv", "ts", "webm", "avi", "mov", "flv", "m3u8", "jpg", "jpeg", "png", "webp",
+    ];
+    if !allowed_extensions.contains(&ext.as_str()) {
+        log::warn!("Access denied: extension .{} not allowed for media streaming", ext);
+        return false;
+    }
+
+    // 3. Obtener directorios base permitidos
+    let mut allowed_dirs: Vec<PathBuf> = Vec::new();
+
+    // Carpeta de descargas por defecto
+    if let Ok(dir) = crate::commands::download_cmd::get_default_download_dir(app_handle.clone()) {
+        if let Ok(canon) = Path::new(&dir).canonicalize() {
+            allowed_dirs.push(canon);
+        }
+    }
+
+    // Carpeta de descargas personalizada si está configurada
+    if let Ok(Some(custom_dir)) = crate::storage::get_setting("download_dir") {
+        if let Ok(canon) = Path::new(&custom_dir).canonicalize() {
+            allowed_dirs.push(canon);
+        }
+    }
+
+    // Carpeta de caché de imágenes
+    if let Ok(cache_dir) = app_handle.path().app_cache_dir() {
+        if let Ok(canon) = cache_dir.canonicalize() {
+            allowed_dirs.push(canon);
+        }
+    }
+
+    // Carpeta de portadas internas
+    if let Ok(data_dir) = app_handle.path().app_data_dir() {
+        let covers_dir = data_dir.join("covers");
+        if let Ok(canon) = covers_dir.canonicalize() {
+            allowed_dirs.push(canon);
+        } else if let Ok(canon) = data_dir.canonicalize() {
+            allowed_dirs.push(canon);
+        }
+    }
+
+    // Directorio compartido de Android si existe
+    #[cfg(target_os = "android")]
+    {
+        if let Ok(canon) = Path::new("/storage/emulated/0/Anime").canonicalize() {
+            allowed_dirs.push(canon);
+        }
+    }
+
+    allowed_dirs.iter().any(|base| canonical.starts_with(base))
 }
 
 async fn handle_connection(mut stream: TcpStream, _addr: SocketAddr) {
@@ -70,13 +163,37 @@ async fn handle_connection(mut stream: TcpStream, _addr: SocketAddr) {
     let method = parts[0];
     let uri = parts[1];
 
+    // Extraer origen para política CORS restringida
+    let mut origin_header: Option<&str> = None;
+    let mut range_header: Option<&str> = None;
+
+    for line in lines {
+        let lower = line.to_lowercase();
+        if lower.starts_with("origin:") {
+            origin_header = Some(line["origin:".len()..].trim());
+        } else if lower.starts_with("range:") {
+            range_header = Some(line["range:".len()..].trim());
+        }
+    }
+
+    // Cabecera CORS estricta: sólo permitir orígenes legítimos del WebView
+    let cors_allow_origin = match origin_header {
+        Some(o) if o == "tauri://localhost" || o == "http://tauri.localhost" || o == "http://localhost:1420" => {
+            format!("Access-Control-Allow-Origin: {}\r\n", o)
+        }
+        None => "Access-Control-Allow-Origin: tauri://localhost\r\n".to_string(),
+        _ => String::new(), // NO emitir CORS ante orígenes externos no autorizados
+    };
+
     if method == "OPTIONS" {
-        let response = "HTTP/1.1 204 No Content\r\n\
-Access-Control-Allow-Origin: *\r\n\
-Access-Control-Allow-Methods: GET, HEAD, OPTIONS\r\n\
+        let response = format!(
+            "HTTP/1.1 204 No Content\r\n\
+{}Access-Control-Allow-Methods: GET, HEAD, OPTIONS\r\n\
 Access-Control-Allow-Headers: Range, Content-Type, Accept\r\n\
 Access-Control-Max-Age: 86400\r\n\
-\r\n";
+\r\n",
+            cors_allow_origin
+        );
         let _ = stream.write_all(response.as_bytes()).await;
         return;
     }
@@ -87,7 +204,17 @@ Access-Control-Max-Age: 86400\r\n\
         return;
     }
 
-    // Extraer parámetro `path` de la URL /video?path=...
+    // 1. Validar presencia y coincidencia del token de sesión
+    let expected_token = get_media_token();
+    let provided_token = extract_query_param(uri, "token");
+    if !expected_token.is_empty() && provided_token.as_deref() != Some(expected_token) {
+        log::warn!("Unauthorized access attempt to media server: missing or invalid token");
+        let response = "HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\n\r\nMissing or invalid token";
+        let _ = stream.write_all(response.as_bytes()).await;
+        return;
+    }
+
+    // 2. Extraer parámetro `path` de la URL /video?path=...
     let file_path_str = match extract_query_param(uri, "path") {
         Some(p) => match urlencoding::decode(&p) {
             Ok(decoded) => decoded.into_owned(),
@@ -101,7 +228,9 @@ Access-Control-Max-Age: 86400\r\n\
     };
 
     let file_path = PathBuf::from(&file_path_str);
-    let metadata = match tokio::fs::metadata(&file_path).await {
+
+    // 3. Inspeccionar metadatos de symlink SIN resolver: Bloquear cualquier enlace simbólico
+    let symlink_meta = match tokio::fs::symlink_metadata(&file_path).await {
         Ok(m) => m,
         Err(e) => {
             let response = if e.kind() == std::io::ErrorKind::NotFound {
@@ -114,30 +243,47 @@ Access-Control-Max-Age: 86400\r\n\
         }
     };
 
-    let total_size = metadata.len();
-    let mime_type = get_mime_type(&file_path);
+    if symlink_meta.file_type().is_symlink() {
+        log::warn!("Access denied: symlinks are strictly prohibited: {}", file_path.display());
+        let response = "HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\n\r\nSymlinks are not allowed";
+        let _ = stream.write_all(response.as_bytes()).await;
+        return;
+    }
 
-    // Buscar cabecera Range: bytes=start-end
-    let mut range_header: Option<&str> = None;
-    for line in lines {
-        if line.to_lowercase().starts_with("range:") {
-            range_header = Some(line["range:".len()..].trim());
-            break;
+    // 4. Validar que la ruta canónica esté dentro de las carpetas autorizadas de la app
+    if let Some(app) = APP_HANDLE.get() {
+        if !is_path_allowed(&file_path, app) {
+            log::warn!("Access denied: path outside allowed directories: {}", file_path.display());
+            let response = "HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\n\r\nAccess denied: path outside allowed directory";
+            let _ = stream.write_all(response.as_bytes()).await;
+            return;
         }
     }
 
+    let metadata = match tokio::fs::metadata(&file_path).await {
+        Ok(m) => m,
+        Err(_) => {
+            let response = "HTTP/1.1 404 Not Found\r\n\r\nFile not found";
+            let _ = stream.write_all(response.as_bytes()).await;
+            return;
+        }
+    };
+
+    let total_size = metadata.len();
+    let mime_type = get_mime_type(&file_path);
+
+    // 5. Manejar cabecera Range: bytes=start-end
     if let Some(range_str) = range_header {
         if let Some((start, end)) = parse_range(range_str, total_size) {
             let content_length = end - start + 1;
             let header = format!(
                 "HTTP/1.1 206 Partial Content\r\n\
-Access-Control-Allow-Origin: *\r\n\
-Accept-Ranges: bytes\r\n\
+{}Accept-Ranges: bytes\r\n\
 Content-Range: bytes {}-{}/{}\r\n\
 Content-Length: {}\r\n\
 Content-Type: {}\r\n\
 \r\n",
-                start, end, total_size, content_length, mime_type
+                cors_allow_origin, start, end, total_size, content_length, mime_type
             );
 
             if stream.write_all(header.as_bytes()).await.is_err() {
@@ -175,12 +321,11 @@ Content-Type: {}\r\n\
     // Respuesta completa 200 OK
     let header = format!(
         "HTTP/1.1 200 OK\r\n\
-Access-Control-Allow-Origin: *\r\n\
-Accept-Ranges: bytes\r\n\
+{}Accept-Ranges: bytes\r\n\
 Content-Length: {}\r\n\
 Content-Type: {}\r\n\
 \r\n",
-        total_size, mime_type
+        cors_allow_origin, total_size, mime_type
     );
 
     if stream.write_all(header.as_bytes()).await.is_err() {
@@ -207,7 +352,7 @@ Content-Type: {}\r\n\
     }
 }
 
-fn extract_query_param(uri: &str, key: &str) -> Option<String> {
+pub fn extract_query_param(uri: &str, key: &str) -> Option<String> {
     let query = uri.split('?').nth(1)?;
     for pair in query.split('&') {
         let mut parts = pair.splitn(2, '=');
@@ -220,7 +365,7 @@ fn extract_query_param(uri: &str, key: &str) -> Option<String> {
     None
 }
 
-fn parse_range(range_str: &str, total_size: u64) -> Option<(u64, u64)> {
+pub fn parse_range(range_str: &str, total_size: u64) -> Option<(u64, u64)> {
     let trimmed = range_str.trim();
     let s = if trimmed.to_ascii_lowercase().starts_with("bytes=") {
         &trimmed[6..].trim()
@@ -264,6 +409,39 @@ fn get_mime_type(path: &PathBuf) -> &'static str {
         Some("webm") => "video/webm",
         Some("avi") => "video/x-msvideo",
         Some("m3u8") => "application/vnd.apple.mpegurl",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("png") => "image/png",
+        Some("webp") => "image/webp",
         _ => "application/octet-stream",
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_query_param() {
+        let uri = "/video?path=C%3A%2Ftest.mp4&token=secret-token-123";
+        assert_eq!(extract_query_param(uri, "token"), Some("secret-token-123".to_string()));
+        assert_eq!(extract_query_param(uri, "path"), Some("C%3A%2Ftest.mp4".to_string()));
+        assert_eq!(extract_query_param(uri, "nonexistent"), None);
+    }
+
+    #[test]
+    fn test_parse_range() {
+        assert_eq!(parse_range("bytes=0-499", 1000), Some((0, 499)));
+        assert_eq!(parse_range("bytes=500-", 1000), Some((500, 999)));
+        assert_eq!(parse_range("bytes=-500", 1000), Some((500, 999)));
+        assert_eq!(parse_range("bytes=1500-2000", 1000), None);
+    }
+
+    #[test]
+    fn test_mime_types() {
+        assert_eq!(get_mime_type(&PathBuf::from("video.mp4")), "video/mp4");
+        assert_eq!(get_mime_type(&PathBuf::from("video.mkv")), "video/x-matroska");
+        assert_eq!(get_mime_type(&PathBuf::from("image.webp")), "image/webp");
+        assert_eq!(get_mime_type(&PathBuf::from("data.db")), "application/octet-stream");
+    }
+}
+

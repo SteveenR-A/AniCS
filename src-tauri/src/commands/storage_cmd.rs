@@ -14,6 +14,15 @@ pub async fn upsert_history(
     storage::upsert_history(&entry).map_err(|e| e.to_string())
 }
 
+/// Insertar o actualizar un lote de entradas de historial en una única transacción SQLite
+#[tauri::command]
+pub async fn batch_upsert_history(
+    entries: Vec<HistoryEntry>,
+    _state: State<'_, AppState>,
+) -> Result<(), String> {
+    storage::batch_upsert_history(&entries).map_err(|e| e.to_string())
+}
+
 /// Obtener historial paginado (opcionalmente por perfil)
 #[tauri::command]
 pub async fn get_history(

@@ -898,12 +898,26 @@ export function DesktopSettingsPage() {
 
             <button
               onClick={async () => {
-                if (!window.confirm('¿Seguro que deseas vaciar el historial de episodios vistos?')) return;
+                const proceed = window.confirm('¿Seguro que deseas vaciar el historial de episodios vistos?');
+                if (!proceed) return;
+
+                const clearCloudToo = window.confirm(
+                  '¿Deseas eliminar este historial también en tus otros dispositivos y en la nube?\n\n' +
+                  '• Aceptar: Borrar en todos los dispositivos (nube y local).\n' +
+                  '• Cancelar: Borrar SOLO en este equipo (la sincronización se pausará para proteger la nube).'
+                );
+
                 try {
                   await clearHistory();
                   await loadDb();
-                  setSaveStatus('Historial de reproducción vaciado');
-                  setTimeout(() => setSaveStatus(null), 3000);
+                  if (clearCloudToo) {
+                    useSyncStore.getState().triggerDebouncedSync();
+                    setSaveStatus('Historial de reproducción vaciado (nube y local)');
+                  } else {
+                    await useSyncStore.getState().pauseSyncByLocalClear();
+                    setSaveStatus('Historial vaciado en este equipo (sincronización pausada)');
+                  }
+                  setTimeout(() => setSaveStatus(null), 4000);
                 } catch (e) {
                   console.error(e);
                 }
@@ -920,10 +934,11 @@ export function DesktopSettingsPage() {
 
             <button
               onClick={async () => {
-                if (!window.confirm('¿Estás seguro de restablecer la base de datos completa? Se limpiará el historial y favoritos de forma segura y se recreará la base de datos limpia.')) return;
+                if (!window.confirm('¿Estás seguro de restablecer la base de datos completa? Se limpiará el historial y favoritos de forma local y se desvincularán las credenciales de sincronización.')) return;
                 setIsResettingDb(true);
                 try {
                   await resetDatabase();
+                  await useSyncStore.getState().clearToken();
                   clearMemoryCache();
                   await loadDb();
                   setSaveStatus('Base de datos restablecida limpiamente');

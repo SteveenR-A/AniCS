@@ -707,11 +707,26 @@ export function MobileSettingsPage() {
             <div style={{ display: 'flex', gap: 8 }}>
               <button
                 onClick={async () => {
-                  if (!window.confirm('¿Vaciar historial de reproducción?')) return;
+                  const proceed = window.confirm('¿Vaciar historial de reproducción en este perfil?');
+                  if (!proceed) return;
+
+                  const clearCloudToo = window.confirm(
+                    '¿Deseas eliminar este historial también en tus otros dispositivos y en la nube?\n\n' +
+                    '• Aceptar: Borrar en todos los dispositivos (nube y móvil).\n' +
+                    '• Cancelar: Borrar SOLO en este móvil (la sincronización se pausará para proteger la nube).'
+                  );
+
                   try {
                     await clearHistory();
                     await loadDb();
-                    setSaveStatus('Historial vaciado');
+                    if (clearCloudToo) {
+                      useSyncStore.getState().triggerDebouncedSync();
+                      setSaveStatus('Historial vaciado (nube y local)');
+                    } else {
+                      await useSyncStore.getState().pauseSyncByLocalClear();
+                      setSaveStatus('Historial vaciado (sincronización pausada)');
+                    }
+                    setTimeout(() => setSaveStatus(null), 3000);
                   } catch (e) {
                     console.error(e);
                   }
@@ -728,13 +743,15 @@ export function MobileSettingsPage() {
 
               <button
                 onClick={async () => {
-                  if (!window.confirm('¿Restablecer toda la base de datos limpia?')) return;
+                  if (!window.confirm('¿Restablecer toda la base de datos limpia? Se limpiará el historial y favoritos de forma local y se desvincularán las credenciales.')) return;
                   setIsResettingDb(true);
                   try {
                     await resetDatabase();
+                    await useSyncStore.getState().clearToken();
                     clearMemoryCache();
                     await loadDb();
                     setSaveStatus('Base de datos restablecida');
+                    setTimeout(() => setSaveStatus(null), 3000);
                   } catch (e) {
                     console.error(e);
                   } finally {

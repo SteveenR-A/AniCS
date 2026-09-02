@@ -1,5 +1,20 @@
 [
   {
+    "version": "0.2.0",
+    "date": "2026-09-02",
+    "title": "Sincronización Bidireccional, Deduplicación y Blindaje de Seguridad",
+    "type": "minor",
+    "highlights": [
+      "Sincronización bidireccional fiable PC-Android con lápidas temporales (tombstones)",
+      "Deduplicación canónica de historial y unificación de series locales vs online",
+      "Servidor de streaming local protegido con token de sesión efímero y puerto dedicado (41725)",
+      "Bloqueo estricto de symlinks y validación de rutas base para prevenir path traversal",
+      "Content Security Policy (CSP) estricto sin comodines loopback y restricción de orígenes CORS",
+      "Reconstrucción determinista de URLs de actualización fijadas al repositorio oficial",
+      "Filtrado de secretos y claves privadas en el almacenamiento de configuración SQLite"
+    ]
+  },
+  {
     "version": "0.1.22",
     "date": "2026-09-02",
     "title": "Descargas por Lotes, Barra de Almacenamiento, Favoritos por Estado y Fix de Sync Android",

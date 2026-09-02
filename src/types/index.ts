@@ -149,6 +149,14 @@ export interface SyncMeta {
     profileId: string;
     deletedAt: string;
   }>;
+  deletedHistory?: HistoryTombstone[];
+}
+
+export interface HistoryTombstone {
+  type: 'episode' | 'anime' | 'clear';
+  key: string;
+  profileId: string;
+  deletedAt: string;
 }
 
 export interface GistSyncConfig {

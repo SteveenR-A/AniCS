@@ -2,7 +2,8 @@ import React, { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Cloud, RefreshCw, Lock, Unlock, Key, Download, Upload,
-  ExternalLink, Check, CheckCircle2, AlertCircle, Info, Trash2, X, Eye, EyeOff, ShieldCheck
+  ExternalLink, Check, CheckCircle2, AlertCircle, Info, Trash2, X, Eye, EyeOff, ShieldCheck,
+  Copy, Link as LinkIcon
 } from 'lucide-react';
 import { useSyncStore } from '@/stores/useSyncStore';
 import { openUrl } from '@tauri-apps/plugin-opener';
@@ -20,6 +21,7 @@ export const GistSyncModal: React.FC<Props> = ({ isOpen, onClose }) => {
     lastError,
     saveToken,
     clearToken,
+    linkExistingGist,
     updateConfig,
     syncNow,
     exportBackupFile,
@@ -33,6 +35,9 @@ export const GistSyncModal: React.FC<Props> = ({ isOpen, onClose }) => {
   const [showToken, setShowToken] = useState(false);
   const [isEditingToken, setIsEditingToken] = useState(!config.githubToken);
   const [tokenSaveSuccess, setTokenSaveSuccess] = useState(false);
+  const [copiedGistId, setCopiedGistId] = useState(false);
+  const [isLinkingManualGist, setIsLinkingManualGist] = useState(false);
+  const [manualGistId, setManualGistId] = useState('');
   const [syncFeedback, setSyncFeedback] = useState<{ message: string; type: 'success' | 'info' | 'error' } | null>(null);
   const feedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -491,8 +496,8 @@ export const GistSyncModal: React.FC<Props> = ({ isOpen, onClose }) => {
               )}
             </div>
 
-            {/* Gist Info & Link */}
-            {config.gistId && (
+            {/* Gist Info, Copy & Manual Link */}
+            {config.gistId ? (
               <div
                 style={{
                   display: 'flex',
@@ -509,28 +514,157 @@ export const GistSyncModal: React.FC<Props> = ({ isOpen, onClose }) => {
                 <div style={{ fontSize: 12, color: 'rgba(255, 255, 255, 0.6)', minWidth: 0, flex: '1 1 auto', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   Gist ID: <span style={{ fontFamily: 'monospace', color: 'white' }}>{config.gistId.length > 18 ? `${config.gistId.slice(0, 8)}...${config.gistId.slice(-6)}` : config.gistId}</span>
                 </div>
-                <button
-                  onClick={handleOpenGistUrl}
-                  style={{
-                    background: 'transparent',
-                    border: 'none',
-                    color: 'var(--accent-primary, #3b82f6)',
-                    fontSize: 12,
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 4,
-                    flexShrink: 0,
-                    padding: 0,
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  <span>Ver en GitHub</span>
-                  <ExternalLink size={13} />
-                </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <button
+                    onClick={async () => {
+                      if (config.gistId) {
+                        await navigator.clipboard.writeText(config.gistId);
+                        setCopiedGistId(true);
+                        setTimeout(() => setCopiedGistId(false), 2000);
+                      }
+                    }}
+                    title="Copiar Gist ID"
+                    style={{
+                      background: 'rgba(255, 255, 255, 0.06)',
+                      border: 'none',
+                      borderRadius: '6px',
+                      color: copiedGistId ? '#10b981' : 'rgba(255, 255, 255, 0.8)',
+                      fontSize: 11,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      padding: '4px 8px',
+                    }}
+                  >
+                    {copiedGistId ? <Check size={12} /> : <Copy size={12} />}
+                    <span>{copiedGistId ? 'Copiado' : 'Copiar'}</span>
+                  </button>
+                  <button
+                    onClick={handleOpenGistUrl}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: 'var(--accent-primary, #3b82f6)',
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      flexShrink: 0,
+                      padding: 0,
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    <span>Ver en GitHub</span>
+                    <ExternalLink size={13} />
+                  </button>
+                </div>
               </div>
+            ) : (
+              config.githubToken && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {!isLinkingManualGist ? (
+                    <button
+                      onClick={() => setIsLinkingManualGist(true)}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: 'var(--accent-primary, #3b82f6)',
+                        fontSize: 11,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4,
+                        padding: 0,
+                        textAlign: 'left',
+                      }}
+                    >
+                      <LinkIcon size={12} />
+                      <span>¿Ya tienes un Gist ID creado en otro dispositivo? Vincular manualmente</span>
+                    </button>
+                  ) : (
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <input
+                        type="text"
+                        value={manualGistId}
+                        onChange={e => setManualGistId(e.target.value)}
+                        placeholder="Pega el Gist ID aquí..."
+                        style={{
+                          flex: 1,
+                          background: 'rgba(255, 255, 255, 0.05)',
+                          border: '1px solid rgba(255, 255, 255, 0.1)',
+                          borderRadius: '6px',
+                          padding: '6px 10px',
+                          color: 'white',
+                          fontSize: 12,
+                          fontFamily: 'monospace',
+                          outline: 'none',
+                        }}
+                      />
+                      <button
+                        onClick={async () => {
+                          if (manualGistId.trim()) {
+                            await linkExistingGist(manualGistId.trim());
+                            setIsLinkingManualGist(false);
+                            setManualGistId('');
+                          }
+                        }}
+                        style={{
+                          background: 'var(--accent-primary, #3b82f6)',
+                          border: 'none',
+                          borderRadius: '6px',
+                          padding: '0 12px',
+                          color: 'white',
+                          fontSize: 12,
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Vincular
+                      </button>
+                      <button
+                        onClick={() => setIsLinkingManualGist(false)}
+                        style={{
+                          background: 'rgba(255, 255, 255, 0.08)',
+                          border: 'none',
+                          borderRadius: '6px',
+                          padding: '0 8px',
+                          color: 'rgba(255, 255, 255, 0.6)',
+                          fontSize: 12,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )
             )}
+
+            {/* Cloud rolling window notice */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 8,
+                padding: '10px 12px',
+                borderRadius: '10px',
+                background: 'rgba(59, 130, 246, 0.08)',
+                border: '1px solid rgba(59, 130, 246, 0.2)',
+                fontSize: 11,
+                color: 'rgba(255, 255, 255, 0.7)',
+                lineHeight: 1.4,
+              }}
+            >
+              <Info size={15} style={{ color: '#60a5fa', flexShrink: 0, marginTop: 1 }} />
+              <span>
+                <strong>Sincronización en la nube:</strong> Sincroniza los últimos 1,500 episodios activos. Tu historial completo se almacena permanentemente de forma local en este dispositivo.
+              </span>
+            </div>
 
             {/* Toggles */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12, borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: 14 }}>

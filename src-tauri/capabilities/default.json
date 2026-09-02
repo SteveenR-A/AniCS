@@ -5,10 +5,7 @@
   "windows": ["*"],
   "permissions": [
     "core:default",
-    "shell:default",
     "dialog:default",
-    "fs:default",
-    "http:default",
     "notification:default",
     "process:allow-exit",
     "opener:default",

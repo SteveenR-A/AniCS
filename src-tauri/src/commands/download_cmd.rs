@@ -71,10 +71,11 @@ pub fn sanitize_anime_folder_name(name: &str) -> String {
         .map(|c| if invalid_chars.contains(&c) { ' ' } else { c })
         .collect();
     let result = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
-    if result.is_empty() {
+    let trimmed = result.trim_matches('.').trim();
+    if trimmed.is_empty() || trimmed == "." || trimmed == ".." || trimmed.starts_with("..") {
         "Anime".to_string()
     } else {
-        result
+        trimmed.to_string()
     }
 }
 
@@ -135,8 +136,8 @@ pub fn clean_empty_anime_folder_safely(folder_path: &Path, base_dir: &Path) {
     let Ok(folder_canonical) = folder_path.canonicalize() else { return; };
     let Ok(base_canonical) = base_dir.canonicalize() else { return; };
 
-    if folder_canonical == base_canonical {
-        log::warn!("Prevented deletion of root download directory: {}", folder_canonical.display());
+    if folder_canonical == base_canonical || !folder_canonical.starts_with(&base_canonical) {
+        log::warn!("Prevented deletion of root or out-of-bounds download directory: {}", folder_canonical.display());
         return;
     }
 
@@ -1029,7 +1030,15 @@ pub fn get_default_download_dir(app_handle: AppHandle) -> Result<String, String>
 /// Guarda la carpeta de descargas personalizada en ajustes
 #[tauri::command]
 pub fn set_download_dir(folder_path: String) -> Result<(), String> {
-    storage::set_setting("download_dir", &folder_path)
+    let p = Path::new(&folder_path);
+    if !p.exists() || !p.is_dir() {
+        return Err("La ruta seleccionada no es un directorio válido o no existe".to_string());
+    }
+    let canonical = p.canonicalize().map_err(|e| format!("Ruta inválida: {}", e))?;
+    if canonical.parent().is_none() {
+        return Err("No se permite configurar la raíz del disco como carpeta de descargas".to_string());
+    }
+    storage::set_setting("download_dir", &canonical.to_string_lossy())
         .map_err(|e| e.to_string())
 }
 
@@ -1566,6 +1575,31 @@ fn format_bytes(bytes: u64) -> String {
     format!("{:.1} {}", (bytes as f64) / k.powi(i as i32), sizes[i])
 }
 
+pub const OFFICIAL_REPO: &str = "SteveenR-A/AniCS";
+
+/// Extrae y valida estrictamente el tag de versión semver de una URL o versión directa
+pub fn extract_safe_version_tag(url_or_tag: &str) -> Result<String, String> {
+    let trimmed = url_or_tag.trim();
+    let raw_tag = if let Some(idx) = trimmed.find("/releases/download/") {
+        let after = &trimmed[idx + "/releases/download/".len()..];
+        after.split('/').next().unwrap_or("")
+    } else {
+        trimmed
+    };
+
+    let clean = raw_tag.trim().trim_start_matches(|c| c == 'v' || c == 'V');
+    let parts: Vec<&str> = clean.split('.').collect();
+    if parts.len() >= 2 && parts.iter().all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit())) {
+        if raw_tag.starts_with('v') || raw_tag.starts_with('V') {
+            Ok(format!("v{}", clean))
+        } else {
+            Ok(clean.to_string())
+        }
+    } else {
+        Err(format!("Tag de versión inválido o no reconocido: {}", raw_tag))
+    }
+}
+
 /// Descarga el instalador (.exe o .apk) internamente en segundo plano con progreso y lo ejecuta automáticamente
 #[tauri::command]
 pub async fn download_and_run_installer(
@@ -1576,24 +1610,6 @@ pub async fn download_and_run_installer(
     use futures::StreamExt;
     use tokio::io::AsyncWriteExt;
 
-    let repo = crate::storage::database::get_setting("github_repo")
-        .unwrap_or_default()
-        .unwrap_or_else(|| "SteveenR-A/AniCS".to_string());
-
-    let parsed_url = match url::Url::parse(&url) {
-        Ok(parsed) => parsed,
-        Err(_) => return Err("URL inválida".to_string()),
-    };
-
-    if parsed_url.host_str() != Some("github.com") {
-        return Err("URL de descarga no autorizada (dominio inválido)".to_string());
-    }
-
-    let expected_path_prefix = format!("/{}/releases/download/", repo);
-    if !parsed_url.path().starts_with(&expected_path_prefix) {
-        return Err("URL de descarga no autorizada (ruta inválida)".to_string());
-    }
-
     let safe_filename = match std::path::Path::new(&filename).file_name() {
         Some(name) => name.to_string_lossy().into_owned(),
         None => return Err("Nombre de archivo inválido".to_string()),
@@ -1603,6 +1619,18 @@ pub async fn download_and_run_installer(
         return Err("Extensión de archivo no permitida".to_string());
     }
 
+    if !safe_filename.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_') {
+        return Err("Nombre de archivo contiene caracteres prohibidos".to_string());
+    }
+
+    let safe_version = extract_safe_version_tag(&url)?;
+
+    // Reconstrucción determinista absoluta: Cero confianza en dominios o rutas de entrada
+    let download_url = format!(
+        "https://github.com/{OFFICIAL_REPO}/releases/download/{safe_version}/{safe_filename}"
+    );
+
+    log::info!("Downloading update package deterministically from {}", download_url);
     let filename = safe_filename;
 
     let dest_path = {
@@ -1635,7 +1663,7 @@ pub async fn download_and_run_installer(
 
     let client = &crate::scrapers::DOWNLOAD_CLIENT;
     let response = client
-        .get(&url)
+        .get(&download_url)
         .header("User-Agent", "AniCS-Updater")
         .send()
         .await
@@ -1922,5 +1950,22 @@ mod tests {
         assert_eq!(sanitize_anime_folder_name("Naruto: Shippuden?"), "Naruto Shippuden");
         assert_eq!(sanitize_anime_folder_name("Solo/Leveling <Season 2>"), "Solo Leveling Season 2");
         assert_eq!(sanitize_anime_folder_name("   "), "Anime");
+        assert_eq!(sanitize_anime_folder_name(".."), "Anime");
+        assert_eq!(sanitize_anime_folder_name("."), "Anime");
+        assert_eq!(sanitize_anime_folder_name("../malicious"), "malicious");
+        assert_eq!(sanitize_anime_folder_name("..hidden"), "hidden");
+    }
+
+    #[test]
+    fn test_extract_safe_version_tag() {
+        use super::*;
+        assert_eq!(extract_safe_version_tag("v0.2.1").unwrap(), "v0.2.1");
+        assert_eq!(extract_safe_version_tag("0.2.1").unwrap(), "0.2.1");
+        assert_eq!(
+            extract_safe_version_tag("https://github.com/SteveenR-A/AniCS/releases/download/v0.2.1/anics.exe").unwrap(),
+            "v0.2.1"
+        );
+        assert!(extract_safe_version_tag("invalid_version").is_err());
+        assert!(extract_safe_version_tag("../../../etc").is_err());
     }
 }

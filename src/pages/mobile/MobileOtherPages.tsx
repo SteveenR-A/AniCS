@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Clock, Trash2, Film, Bookmark, BookmarkX, Inbox, History,
   ArrowDownCircle, Play, Folder, Search, X, CheckSquare, Square, RefreshCw,
-  ChevronDown, ChevronUp, Check, Eye, EyeOff, Pause, RotateCcw, Loader2, AlertCircle, Heart
+  ChevronDown, ChevronUp, Check, Eye, EyeOff, Pause, RotateCcw, Loader2, AlertCircle, Heart, AlertTriangle
 } from 'lucide-react';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import {
@@ -39,8 +39,10 @@ function formatSpeed(kbps: number) {
 export function MobileHistoryPage() {
   const navigate = useNavigate();
   const { activeProfile } = useProfileStore();
+  const { isSyncing, isSyncPausedByLocalClear, resumeSync, syncNow, triggerDebouncedSync } = useSyncStore();
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isManualRefreshing, setIsManualRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSelecting, setIsSelecting] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -149,6 +151,10 @@ export function MobileHistoryPage() {
           existing.latestWatchedAt = entry.watchedAt;
           existing.latestEpisode = entry;
         }
+        // Priorizar títulos limpios sin caracteres corruptos (\uFFFD o )
+        if (existing.animeTitle.includes('\uFFFD') && !entry.animeTitle.includes('\uFFFD')) {
+          existing.animeTitle = entry.animeTitle;
+        }
         if (!existing.animeUrl.startsWith('http') && entry.animeUrl && entry.animeUrl.startsWith('http')) {
           existing.animeUrl = entry.animeUrl;
         }
@@ -170,13 +176,40 @@ export function MobileHistoryPage() {
     );
   }, [filteredEntries]);
 
+  const handleRefresh = async () => {
+    setIsManualRefreshing(true);
+    try {
+      if (useSyncStore.getState().config.githubToken && !useSyncStore.getState().isSyncPausedByLocalClear) {
+        await syncNow();
+      }
+      await loadHistory();
+    } catch (err) {
+      console.error('Error al actualizar historial en móvil:', err);
+    } finally {
+      setIsManualRefreshing(false);
+    }
+  };
+
   const handleClear = async () => {
-    if (confirm('¿Estás seguro de que deseas borrar todo el historial?')) {
-      await clearHistory(activeProfile?.id);
-      setEntries([]);
-      setSelectedIds(new Set());
-      setIsSelecting(false);
-      useSyncStore.getState().triggerDebouncedSync();
+    if (!confirm('¿Estás seguro de que deseas borrar todo el historial?')) {
+      return;
+    }
+
+    const clearCloudToo = confirm(
+      '¿Deseas eliminar este historial también en tus otros dispositivos y en la nube?\n\n' +
+      '• Aceptar: Borrar en todos los dispositivos y nube.\n' +
+      '• Cancelar: Borrar SOLO en este móvil (pausará la sincronización para proteger la nube).'
+    );
+
+    await clearHistory(activeProfile?.id);
+    setEntries([]);
+    setSelectedIds(new Set());
+    setIsSelecting(false);
+
+    if (clearCloudToo) {
+      triggerDebouncedSync();
+    } else {
+      await useSyncStore.getState().pauseSyncByLocalClear();
     }
   };
 
@@ -274,43 +307,106 @@ export function MobileHistoryPage() {
           <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0 }}>Historial ({groupedAnimes.length})</h2>
         </div>
 
-        {entries.length > 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <button
-              onClick={() => {
-                setIsSelecting(!isSelecting);
-                if (isSelecting) setSelectedIds(new Set());
-              }}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button
+            onClick={handleRefresh}
+            disabled={isManualRefreshing || isSyncing}
+            title="Actualizar y sincronizar historial"
+            style={{
+              background: 'var(--bg-surface)',
+              border: '1px solid var(--border-subtle)',
+              color: 'var(--text-secondary)',
+              fontSize: 11, fontWeight: 700,
+              borderRadius: 'var(--radius-full)', padding: '5px 10px',
+              cursor: (isManualRefreshing || isSyncing) ? 'not-allowed' : 'pointer',
+              display: 'flex', alignItems: 'center', gap: 4,
+            }}
+          >
+            <RefreshCw
+              size={12}
               style={{
-                background: isSelecting ? 'var(--accent-primary)' : 'var(--bg-surface)',
-                border: '1px solid var(--border-subtle)',
-                color: isSelecting ? 'white' : 'var(--text-secondary)',
-                fontSize: 11, fontWeight: 700,
-                borderRadius: 'var(--radius-full)', padding: '5px 10px',
-                cursor: 'pointer',
+                animation: (isManualRefreshing || isSyncing) ? 'spin 1s linear infinite' : 'none',
               }}
-            >
-              {isSelecting ? 'Listo' : 'Seleccionar'}
-            </button>
+            />
+            <span>Actualizar</span>
+          </button>
 
-            {!isSelecting && (
+          {entries.length > 0 && (
+            <>
               <button
-                onClick={handleClear}
+                onClick={() => {
+                  setIsSelecting(!isSelecting);
+                  if (isSelecting) setSelectedIds(new Set());
+                }}
                 style={{
-                  background: 'rgba(239, 68, 68, 0.1)',
-                  border: '1px solid rgba(239, 68, 68, 0.2)',
-                  color: '#ef4444',
+                  background: isSelecting ? 'var(--accent-primary)' : 'var(--bg-surface)',
+                  border: '1px solid var(--border-subtle)',
+                  color: isSelecting ? 'white' : 'var(--text-secondary)',
                   fontSize: 11, fontWeight: 700,
                   borderRadius: 'var(--radius-full)', padding: '5px 10px',
                   cursor: 'pointer',
                 }}
               >
-                Borrar Todo
+                {isSelecting ? 'Listo' : 'Seleccionar'}
               </button>
-            )}
-          </div>
-        )}
+
+              {!isSelecting && (
+                <button
+                  onClick={handleClear}
+                  style={{
+                    background: 'rgba(239, 68, 68, 0.1)',
+                    border: '1px solid rgba(239, 68, 68, 0.2)',
+                    color: '#ef4444',
+                    fontSize: 11, fontWeight: 700,
+                    borderRadius: 'var(--radius-full)', padding: '5px 10px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Borrar Todo
+                </button>
+              )}
+            </>
+          )}
+        </div>
       </div>
+
+      {/* Banner de Sincronización Pausada en Móvil */}
+      {isSyncPausedByLocalClear && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '10px 12px',
+            borderRadius: 'var(--radius-md)',
+            background: 'rgba(245, 158, 11, 0.12)',
+            border: '1px solid rgba(245, 158, 11, 0.3)',
+            marginBottom: 12,
+            gap: 8,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#fbbf24', fontSize: 11 }}>
+            <AlertTriangle size={15} style={{ flexShrink: 0 }} />
+            <span>Sincronización pausada por borrado local.</span>
+          </div>
+          <button
+            onClick={resumeSync}
+            style={{
+              background: '#f59e0b',
+              border: 'none',
+              borderRadius: '4px',
+              color: 'black',
+              fontWeight: 700,
+              fontSize: 11,
+              padding: '4px 10px',
+              cursor: 'pointer',
+              flexShrink: 0,
+            }}
+          >
+            Reanudar
+          </button>
+        </div>
+      )}
 
       {entries.length > 0 && (
         <div style={{

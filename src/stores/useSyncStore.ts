@@ -7,6 +7,7 @@ import type {
   HistoryEntry,
   AnimeResult,
   TombstoneItem,
+  HistoryTombstone,
 } from '@/types';
 import {
   saveSecureSecret,
@@ -25,6 +26,8 @@ import {
   getAllFavoritesForSync,
   getAllSettings,
   upsertHistory,
+  batchUpsertHistory,
+  removeHistoryBatch,
   addFavorite,
   removeFavorite,
 } from '@/services/storageService';
@@ -40,6 +43,10 @@ import {
   areHashesEqual,
   isLocalDataEmpty,
   getCurrentDevicePlatform,
+  findExistingGist,
+  getCalibratedTimestamp,
+  makeHistoryCanonicalKey,
+  makeHistoryAnimeKey,
 } from '@/services/syncService';
 import {
   deriveKeyFromPin,
@@ -54,6 +61,7 @@ interface SyncState {
   isSyncing: boolean;
   syncStatus: 'idle' | 'success' | 'error' | 'not_modified';
   lastError: string | null;
+  isSyncPausedByLocalClear: boolean;
 
   // Manejo de PIN y CryptoKey en RAM
   isPinModalOpen: boolean;
@@ -65,6 +73,9 @@ interface SyncState {
   initSync: () => Promise<void>;
   saveToken: (token: string) => Promise<void>;
   clearToken: () => Promise<void>;
+  linkExistingGist: (gistId: string) => Promise<void>;
+  pauseSyncByLocalClear: () => Promise<void>;
+  resumeSync: () => Promise<void>;
   updateConfig: (partial: Partial<GistSyncConfig>) => Promise<void>;
   requestPin: (mode: 'unlock' | 'setup' | 'disable') => Promise<string | null>;
   submitPin: (pin: string) => void;
@@ -94,10 +105,46 @@ function setupPeriodicSync(get: () => SyncState) {
   // Sincronizar automáticamente cada 15 minutos en background (solo comprueba ETag 304 ligero)
   periodicSyncInterval = setInterval(() => {
     const state = get();
-    if (state.config.autoSync && state.config.githubToken && state.config.gistId && !state.isSyncing) {
+    if (state.config.autoSync && state.config.githubToken && state.config.gistId && !state.isSyncing && !state.isSyncPausedByLocalClear) {
       state.syncNow().catch(e => console.warn('Background periodic sync skipped:', e));
     }
   }, 15 * 60 * 1000);
+}
+
+async function applyDeletedHistoryTombstonesLocally(
+  currentHistory: HistoryEntry[],
+  deletedHistory?: HistoryTombstone[]
+) {
+  if (!deletedHistory || deletedHistory.length === 0 || currentHistory.length === 0) return;
+  const graceMarginMs = 5000;
+  const idsToDelete: string[] = [];
+
+  for (const h of currentHistory) {
+    const wTime = new Date(h.watchedAt).getTime();
+    for (const dt of deletedHistory) {
+      const dTime = new Date(dt.deletedAt).getTime();
+      if (dt.type === 'clear' && dt.profileId === (h.profileId || 'default') && wTime <= dTime + graceMarginMs) {
+        idsToDelete.push(h.id);
+        break;
+      }
+      if (dt.type === 'anime' && dt.key === makeHistoryAnimeKey(h) && wTime <= dTime + graceMarginMs) {
+        idsToDelete.push(h.id);
+        break;
+      }
+      if (dt.type === 'episode' && dt.key === makeHistoryCanonicalKey(h) && wTime <= dTime + graceMarginMs) {
+        idsToDelete.push(h.id);
+        break;
+      }
+    }
+  }
+
+  if (idsToDelete.length > 0) {
+    try {
+      await removeHistoryBatch(idsToDelete);
+    } catch (e) {
+      console.warn('[AniCS Sync] Error eliminando historial suprimido por lápidas:', e);
+    }
+  }
 }
 
 export const useSyncStore = create<SyncState>((set, get) => ({
@@ -113,6 +160,7 @@ export const useSyncStore = create<SyncState>((set, get) => ({
   isSyncing: false,
   syncStatus: 'idle',
   lastError: null,
+  isSyncPausedByLocalClear: false,
 
   isPinModalOpen: false,
   pinModalMode: 'unlock',
@@ -133,6 +181,7 @@ export const useSyncStore = create<SyncState>((set, get) => ({
       const encryptionEnabled = configMap['encryption_enabled'] === 'true';
       const lastSyncAt = configMap['last_sync_at'] || '';
       const gistUrl = configMap['gist_url'] || (gistId ? `https://gist.github.com/${gistId}` : '');
+      const isPaused = configMap['sync_paused_by_clear'] === 'true';
 
       set({
         config: {
@@ -144,12 +193,13 @@ export const useSyncStore = create<SyncState>((set, get) => ({
           lastSyncAt,
           gistUrl,
         },
+        isSyncPausedByLocalClear: isPaused,
       });
 
       setupPeriodicSync(get);
 
-      // Si autoSync está habilitado y hay token + gistId, hacer verificación inicial
-      if (token && gistId && autoSync) {
+      // Si autoSync está habilitado y hay token + gistId (y no está en pausa), hacer verificación inicial
+      if (token && gistId && autoSync && !isPaused) {
         get().syncNow().catch(e => console.warn('Background initial sync skipped:', e));
       }
     } catch (e) {
@@ -161,10 +211,27 @@ export const useSyncStore = create<SyncState>((set, get) => ({
     const trimmed = token.trim();
     if (trimmed) {
       await saveSecureSecret('github_token', trimmed);
+      set(state => ({ config: { ...state.config, githubToken: trimmed } }));
+
+      // Si no tenemos gistId configurado, intentar auto-descubrir uno existente
+      if (!get().config.gistId) {
+        try {
+          const found = await findExistingGist(trimmed);
+          if (found) {
+            await get().updateConfig({
+              gistId: found.gistId,
+              gistUrl: `https://gist.github.com/${found.gistId}`,
+            });
+            console.log(`[AniCS Sync] Gist existente detectado y vinculado: ${found.gistId}`);
+          }
+        } catch (e) {
+          console.warn('[AniCS Sync] Fallo al buscar Gist existente:', e);
+        }
+      }
     } else {
       await deleteSecureSecret('github_token');
+      set(state => ({ config: { ...state.config, githubToken: '' } }));
     }
-    set(state => ({ config: { ...state.config, githubToken: trimmed } }));
     setupPeriodicSync(get);
   },
 
@@ -191,6 +258,32 @@ export const useSyncStore = create<SyncState>((set, get) => ({
       },
       sessionDerivedKey: null,
     }));
+  },
+
+  linkExistingGist: async (gistId: string) => {
+    const trimmed = gistId.trim();
+    await get().updateConfig({
+      gistId: trimmed,
+      gistUrl: trimmed ? `https://gist.github.com/${trimmed}` : '',
+      lastEtag: '',
+    });
+    await setSyncConfig('last_synced_hashes', '');
+    if (trimmed && get().config.githubToken) {
+      await get().syncNow();
+    }
+  },
+
+  pauseSyncByLocalClear: async () => {
+    await setSyncConfig('sync_paused_by_clear', 'true');
+    await get().updateConfig({ autoSync: false });
+    set({ isSyncPausedByLocalClear: true });
+  },
+
+  resumeSync: async () => {
+    await setSyncConfig('sync_paused_by_clear', 'false');
+    await get().updateConfig({ autoSync: true });
+    set({ isSyncPausedByLocalClear: false });
+    await get().syncNow();
   },
 
   updateConfig: async (partial: Partial<GistSyncConfig>) => {
@@ -229,8 +322,12 @@ export const useSyncStore = create<SyncState>((set, get) => ({
   },
 
   syncNow: async () => {
-    const { config, isSyncing } = get();
+    const { config, isSyncing, isSyncPausedByLocalClear } = get();
     if (isSyncing) return;
+    if (isSyncPausedByLocalClear) {
+      console.log('[AniCS Sync] Sincronización en pausa debido a limpieza local previa.');
+      return;
+    }
     if (!config.githubToken) {
       set({ syncStatus: 'error', lastError: 'No hay token de GitHub configurado' });
       return;
@@ -284,7 +381,7 @@ export const useSyncStore = create<SyncState>((set, get) => ({
         syncMeta: {
           schemaVersion: CURRENT_SCHEMA_VERSION,
           appVersion: CURRENT_VERSION,
-          lastModifiedAt: new Date().toISOString(),
+          lastModifiedAt: getCalibratedTimestamp(),
           lastModifiedDevice: getCurrentDevicePlatform(),
           pbkdf2Salt: config.encryptionEnabled ? saltB64 : undefined,
           fileHashes: localHashes,
@@ -297,6 +394,14 @@ export const useSyncStore = create<SyncState>((set, get) => ({
             profileId: t.profileId,
             deletedAt: t.deletedAt,
           })),
+          deletedHistory: tombstones
+            .filter((t: TombstoneItem) => t.entityType.startsWith('history_'))
+            .map((t: TombstoneItem) => ({
+              type: t.entityType.replace('history_', '') as 'episode' | 'anime' | 'clear',
+              key: t.entityId,
+              profileId: t.profileId,
+              deletedAt: t.deletedAt,
+            })),
         },
         profiles,
         history,
@@ -338,7 +443,7 @@ export const useSyncStore = create<SyncState>((set, get) => ({
             }
             // Solo local cambió -> Subir cambios locales
             const uploadResult = await createOrUpdateGist(get().config, localPayload, currentKey, saltB64);
-            const nowIso = new Date().toISOString();
+            const nowIso = getCalibratedTimestamp();
             await get().updateConfig({
               lastEtag: uploadResult.etag,
               lastSyncAt: nowIso,
@@ -362,7 +467,7 @@ export const useSyncStore = create<SyncState>((set, get) => ({
               await setSyncConfig('last_synced_hashes', JSON.stringify(localHashes));
               await get().updateConfig({
                 lastEtag: fetchResult.etag,
-                lastSyncAt: new Date().toISOString(),
+                lastSyncAt: getCalibratedTimestamp(),
               });
               set({ isSyncing: false, syncStatus: 'not_modified' });
               return;
@@ -374,8 +479,9 @@ export const useSyncStore = create<SyncState>((set, get) => ({
               for (const p of remotePayload.profiles) {
                 await upsertProfile(p);
               }
-              for (const h of remotePayload.history) {
-                await upsertHistory(h);
+              await applyDeletedHistoryTombstonesLocally(history, remotePayload.syncMeta?.deletedHistory);
+              if (remotePayload.history.length > 0) {
+                await batchUpsertHistory(remotePayload.history);
               }
               for (const f of remotePayload.favorites) {
                 await addFavorite(f, f.profileId);
@@ -388,7 +494,7 @@ export const useSyncStore = create<SyncState>((set, get) => ({
               await setSyncConfig('last_synced_hashes', JSON.stringify(remoteHashes));
               await get().updateConfig({
                 lastEtag: fetchResult.etag,
-                lastSyncAt: new Date().toISOString(),
+                lastSyncAt: getCalibratedTimestamp(),
               });
 
               try {
@@ -410,8 +516,9 @@ export const useSyncStore = create<SyncState>((set, get) => ({
             for (const p of mergedPayload.profiles) {
               await upsertProfile(p);
             }
-            for (const h of mergedPayload.history) {
-              await upsertHistory(h);
+            await applyDeletedHistoryTombstonesLocally(history, mergedPayload.syncMeta?.deletedHistory);
+            if (mergedPayload.history.length > 0) {
+              await batchUpsertHistory(mergedPayload.history);
             }
             for (const f of mergedPayload.favorites) {
               await addFavorite(f, f.profileId);
@@ -422,7 +529,7 @@ export const useSyncStore = create<SyncState>((set, get) => ({
             await cleanupOldTombstones(30);
 
             const uploadResult = await createOrUpdateGist(get().config, mergedPayload, currentKey, saltB64);
-            const nowIso = new Date().toISOString();
+            const nowIso = getCalibratedTimestamp();
             await get().updateConfig({
               lastEtag: uploadResult.etag,
               lastSyncAt: nowIso,
@@ -445,9 +552,27 @@ export const useSyncStore = create<SyncState>((set, get) => ({
         }
       }
 
-      // 5. Si no hay gistId (primer sync / creación inicial de Gist)
+      // 5. Si no hay gistId (primer sync o segundo dispositivo configurando el mismo token)
+      // Buscar primero si ya existe un Gist AniCS en GitHub para vincularlo automáticamente
+      if (config.githubToken) {
+        try {
+          const found = await findExistingGist(config.githubToken);
+          if (found) {
+            console.log(`[AniCS Sync] Gist existente detectado en la nube: ${found.gistId}. Vinculando...`);
+            await get().updateConfig({
+              gistId: found.gistId,
+              gistUrl: `https://gist.github.com/${found.gistId}`,
+            });
+            set({ isSyncing: false });
+            return await get().syncNow();
+          }
+        } catch (e) {
+          console.warn('[AniCS Sync] Fallo al buscar Gist existente en syncNow:', e);
+        }
+      }
+
       const uploadResult = await createOrUpdateGist(get().config, localPayload, currentKey, saltB64);
-      const nowIso = new Date().toISOString();
+      const nowIso = getCalibratedTimestamp();
 
       await get().updateConfig({
         gistId: uploadResult.gistId,

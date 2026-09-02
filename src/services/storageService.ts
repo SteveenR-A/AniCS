@@ -4,6 +4,9 @@ import type { HistoryEntry, AnimeResult } from '@/types';
 export const upsertHistory = (entry: HistoryEntry): Promise<void> =>
   invoke('upsert_history', { entry });
 
+export const batchUpsertHistory = (entries: HistoryEntry[]): Promise<void> =>
+  invoke('batch_upsert_history', { entries });
+
 export const getHistory = (limit = 50, offset = 0, profileId?: string): Promise<HistoryEntry[]> =>
   invoke('get_history', { limit, offset, profileId });
 
@@ -72,16 +75,18 @@ export const resetDatabase = (): Promise<void> =>
 
 /**
  * Normalizador de títulos para deduplicación canónica de animes e historial
- * Elimina acentos, mayúsculas, signos de puntuación y espacios para unificar
- * registros provenientes de descargas locales y servidores online (JKAnime, etc.).
+ * Elimina acentos, mayúsculas, signos de puntuación, caracteres de reemplazo (\uFFFD / )
+ * y espacios redundantes para unificar registros provenientes de descargas locales y
+ * servidores online (JKAnime, etc.).
  */
 export function normalizeAnimeTitleKey(str: string): string {
   if (!str) return '';
   return str
+    .replace(/\uFFFD/g, 'e')         // Manejar decodificación corrupta de 'é' (ej. Caraméliser)
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '') // Eliminar tildes/diacríticos
-    .replace(/[^a-z0-9]/g, '')       // Eliminar caracteres especiales y espacios
+    .replace(/[^a-z0-9]/g, '')       // Eliminar caracteres especiales, signos (!, _, etc.) y espacios
     .trim();
 }
 

@@ -6,15 +6,18 @@ import type {
   HistoryEntry,
   AnimeResult,
   TombstoneItem,
+  HistoryTombstone,
 } from '@/types';
 import {
   computeSha256,
   encryptText,
   decryptText,
 } from '@/services/cryptoService';
+import { normalizeAnimeTitleKey } from '@/services/storageService';
 
-export const CURRENT_SCHEMA_VERSION = 1;
+export const CURRENT_SCHEMA_VERSION = 2;
 export const GIST_APP_NAME = 'AniCS Cloud Sync (Secret)';
+export const MAX_CLOUD_HISTORY_ENTRIES = 1500;
 
 export class SyncSchemaError extends Error {
   constructor(message: string) {
@@ -30,6 +33,69 @@ export class GistNotFoundError extends Error {
   }
 }
 
+// ─── Calibración de Reloj (*Clock Skew*) ───
+
+let serverClockSkewMs = 0;
+
+export function setServerClockSkew(serverDateStr?: string | null): number {
+  if (!serverDateStr) return serverClockSkewMs;
+  try {
+    const serverTime = new Date(serverDateStr).getTime();
+    if (!isNaN(serverTime)) {
+      serverClockSkewMs = serverTime - Date.now();
+      if (Math.abs(serverClockSkewMs) > 60_000) {
+        console.warn(`[AniCS Sync] Clock skew detectado con GitHub: ${Math.round(serverClockSkewMs / 1000)}s`);
+      }
+    }
+  } catch {}
+  return serverClockSkewMs;
+}
+
+export function getServerClockSkewMs(): number {
+  return serverClockSkewMs;
+}
+
+export function getCalibratedDate(): Date {
+  return new Date(Date.now() + serverClockSkewMs);
+}
+
+export function getCalibratedTimestamp(): string {
+  return getCalibratedDate().toISOString();
+}
+
+// ─── Búsqueda Automática de Gist Existente ───
+
+export async function findExistingGist(
+  token: string
+): Promise<{ gistId: string; description: string } | null> {
+  if (!token) return null;
+  try {
+    const response = await fetch('https://api.github.com/gists?per_page=100', {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+      },
+    });
+    if (!response.ok) return null;
+
+    setServerClockSkew(response.headers.get('date'));
+
+    const gists = await response.json();
+    if (!Array.isArray(gists)) return null;
+
+    for (const g of gists) {
+      if (g.description === GIST_APP_NAME || (g.files && g.files['sync_meta.json'])) {
+        return { gistId: g.id, description: g.description || GIST_APP_NAME };
+      }
+    }
+    return null;
+  } catch (e) {
+    console.warn('[AniCS Sync] Error buscando Gist existente:', e);
+    return null;
+  }
+}
+
 // ─── Migraciones de Esquema ───
 
 export function migratePayload(payload: any): GistFilesPayload {
@@ -41,62 +107,159 @@ export function migratePayload(payload: any): GistFilesPayload {
     );
   }
 
-  // Migraciones hacia adelante si en el futuro CURRENT_SCHEMA_VERSION > 1
   let migrated = { ...payload };
+
+  // Migración v1 -> v2: Sanitización de títulos y re-normalización de claves duplicadas en Gist
+  if (schemaVer < 2) {
+    if (Array.isArray(migrated.history)) {
+      const sanitizedMap = new Map<string, HistoryEntry>();
+      for (const h of migrated.history) {
+        const cleanTitle = (h.animeTitle || '')
+          .replace(/\uFFFD/g, 'e')
+          .trim();
+        const cleanEntry: HistoryEntry = {
+          ...h,
+          animeTitle: cleanTitle,
+        };
+        const key = makeHistoryCanonicalKey(cleanEntry);
+        const existing = sanitizedMap.get(key);
+        if (!existing) {
+          sanitizedMap.set(key, cleanEntry);
+        } else {
+          const rTime = new Date(cleanEntry.watchedAt).getTime();
+          const lTime = new Date(existing.watchedAt).getTime();
+          if (rTime > lTime) {
+            sanitizedMap.set(key, cleanEntry);
+          } else if (rTime === lTime && (cleanEntry.watchProgress || 0) > (existing.watchProgress || 0)) {
+            sanitizedMap.set(key, cleanEntry);
+          }
+        }
+      }
+      migrated.history = Array.from(sanitizedMap.values());
+    }
+
+    if (!migrated.syncMeta) {
+      migrated.syncMeta = {} as any;
+    }
+    if (!Array.isArray(migrated.syncMeta.deletedHistory)) {
+      migrated.syncMeta.deletedHistory = [];
+    }
+    migrated.syncMeta.schemaVersion = CURRENT_SCHEMA_VERSION;
+  }
+
   return migrated as GistFilesPayload;
 }
 
-// ─── Algoritmo de Fusión Bidireccional (*Merge Engine*) ───
+// ─── Algoritmo de Claves Canónicas (*Canonical Keys*) ───
 
-export function mergeHistoryEntries(local: HistoryEntry[], remote: HistoryEntry[]): HistoryEntry[] {
-  const map = new HashMapHistory();
+export function makeHistoryCanonicalKey(e: HistoryEntry): string {
+  const pid = e.profileId || 'default';
+  const norm = normalizeAnimeTitleKey(e.animeTitle) || e.animeUrl.toLowerCase().trim();
+  const epNum = e.episodeNumber;
+  return `${norm}::ep${epNum}::${pid}`;
+}
 
-  for (const item of local) {
-    map.set(item);
+export function makeHistoryAnimeKey(e: HistoryEntry): string {
+  const pid = e.profileId || 'default';
+  const norm = normalizeAnimeTitleKey(e.animeTitle) || e.animeUrl.toLowerCase().trim();
+  return `${norm}::${pid}`;
+}
+
+// ─── Algoritmo de Fusión de Historial con Lápidas Temporales ───
+
+export function mergeHistoryWithTombstones(
+  local: HistoryEntry[],
+  remote: HistoryEntry[],
+  tombstones: HistoryTombstone[] = []
+): HistoryEntry[] {
+  // 1. Indexar lápidas con sus marcas de tiempo (ms)
+  const episodeTombstones = new Map<string, number>();
+  const animeTombstones = new Map<string, number>();
+  const clearTombstones = new Map<string, number>();
+
+  for (const t of tombstones) {
+    const tTime = new Date(t.deletedAt).getTime();
+    if (t.type === 'clear') {
+      const existing = clearTombstones.get(t.profileId) || 0;
+      if (tTime > existing) clearTombstones.set(t.profileId, tTime);
+    } else if (t.type === 'anime') {
+      const existing = animeTombstones.get(t.key) || 0;
+      if (tTime > existing) animeTombstones.set(t.key, tTime);
+    } else {
+      const existing = episodeTombstones.get(t.key) || 0;
+      if (tTime > existing) episodeTombstones.set(t.key, tTime);
+    }
   }
 
+  const isSuppressedByTombstone = (e: HistoryEntry): boolean => {
+    const wTime = new Date(e.watchedAt).getTime();
+    const graceMarginMs = 5000; // 5 segundos de tolerancia para clock skew
+
+    // A. Borrado total de historial para el perfil
+    const pid = e.profileId || 'default';
+    const clearTime = clearTombstones.get(pid);
+    if (clearTime && wTime <= clearTime + graceMarginMs) {
+      return true;
+    }
+
+    // B. Borrado de toda la serie
+    const animeKey = makeHistoryAnimeKey(e);
+    const animeTime = animeTombstones.get(animeKey);
+    if (animeTime && wTime <= animeTime + graceMarginMs) {
+      return true;
+    }
+
+    // C. Borrado de episodio individual
+    const epKey = makeHistoryCanonicalKey(e);
+    const epTime = episodeTombstones.get(epKey);
+    if (epTime && wTime <= epTime + graceMarginMs) {
+      return true;
+    }
+
+    return false;
+  };
+
+  const map = new Map<string, HistoryEntry>();
+
+  // 2. Procesar locales no suprimidos
+  for (const item of local) {
+    if (!isSuppressedByTombstone(item)) {
+      map.set(makeHistoryCanonicalKey(item), item);
+    }
+  }
+
+  // 3. Procesar remotos no suprimidos con resolución estricta de conflicto
   for (const rItem of remote) {
-    const lItem = map.get(rItem);
+    if (isSuppressedByTombstone(rItem)) continue;
+
+    const key = makeHistoryCanonicalKey(rItem);
+    const lItem = map.get(key);
     if (!lItem) {
-      map.set(rItem);
+      map.set(key, rItem);
     } else {
-      // Política de resolución de conflictos por episodio:
-      // 1. Si alguno ya alcanzó o superó el 80% (completado), gana el de mayor progreso
-      if (rItem.watchProgress >= 0.80 || lItem.watchProgress >= 0.80) {
-        map.set(rItem.watchProgress >= lItem.watchProgress ? rItem : lItem);
+      const rTime = new Date(rItem.watchedAt).getTime();
+      const lTime = new Date(lItem.watchedAt).getTime();
+
+      // Regla de conflicto estricta:
+      // Prioridad 1: watchedAt más reciente gana SIEMPRE (representa la última sesión real)
+      if (rTime !== lTime) {
+        map.set(key, rTime > lTime ? rItem : lItem);
       } else {
-        // 2. Si ninguno está completado, gana el más recientemente visto
-        const rTime = new Date(rItem.watchedAt).getTime();
-        const lTime = new Date(lItem.watchedAt).getTime();
-        map.set(rTime >= lTime ? rItem : lItem);
+        // Prioridad 2: Desempate por mayor watchProgress
+        map.set(key, (rItem.watchProgress || 0) >= (lItem.watchProgress || 0) ? rItem : lItem);
       }
     }
   }
 
-  return map.values();
+  // 4. Ordenar por watchedAt DESC (más recientes primero)
+  return Array.from(map.values()).sort(
+    (a, b) => new Date(b.watchedAt).getTime() - new Date(a.watchedAt).getTime()
+  );
 }
 
-class HashMapHistory {
-  private items = new Map<string, HistoryEntry>();
-
-  private makeKey(e: HistoryEntry): string {
-    const pid = e.profileId || 'default';
-    const normUrl = e.animeUrl.toLowerCase().trim();
-    const epNum = e.episodeNumber;
-    return `${normUrl}::ep${epNum}::${pid}`;
-  }
-
-  get(e: HistoryEntry): HistoryEntry | undefined {
-    return this.items.get(this.makeKey(e));
-  }
-
-  set(e: HistoryEntry) {
-    this.items.set(this.makeKey(e), e);
-  }
-
-  values(): HistoryEntry[] {
-    return Array.from(this.items.values());
-  }
+// Compatibilidad hacia atrás
+export function mergeHistoryEntries(local: HistoryEntry[], remote: HistoryEntry[]): HistoryEntry[] {
+  return mergeHistoryWithTombstones(local, remote, []);
 }
 
 export function mergeFavoritesWithTombstones(
@@ -121,7 +284,6 @@ export function mergeFavoritesWithTombstones(
     const pid = (fav as any).profileId || 'default';
     const key = `${fav.url.toLowerCase().trim()}::${pid}`;
     const deletedTime = tombstoneMap.get(key);
-    // Si no fue eliminado, o si no hay registro de borrado posterior
     if (!deletedTime) {
       result.set(key, fav);
     }
@@ -157,41 +319,57 @@ export function mergeProfiles(local: UserProfile[], remote: UserProfile[]): User
 }
 
 export function mergeSyncData(local: GistFilesPayload, remote: GistFilesPayload): GistFilesPayload {
-  // Validar versión
-  migratePayload(remote);
+  // Validar versión y migrar si procede
+  const migratedRemote = migratePayload(remote);
 
   // Unificar tombstones y podar > 30 días
   const now = Date.now();
   const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
 
-  const allTombstonesMap = new Map<string, { url: string; profileId: string; deletedAt: string }>();
-  for (const t of [...local.syncMeta.deletedFavorites, ...remote.syncMeta.deletedFavorites]) {
+  // Tombstones de favoritos
+  const allFavTombstonesMap = new Map<string, { url: string; profileId: string; deletedAt: string }>();
+  for (const t of [...(local.syncMeta.deletedFavorites || []), ...(migratedRemote.syncMeta.deletedFavorites || [])]) {
     const key = `${t.url.toLowerCase()}::${t.profileId}`;
     const tTime = new Date(t.deletedAt).getTime();
     if (now - tTime < thirtyDaysMs) {
-      allTombstonesMap.set(key, t);
+      allFavTombstonesMap.set(key, t);
     }
   }
-  const mergedTombstones = Array.from(allTombstonesMap.values());
+  const mergedFavTombstones = Array.from(allFavTombstonesMap.values());
 
-  const mergedHistory = mergeHistoryEntries(local.history, remote.history);
-  const mergedFavorites = mergeFavoritesWithTombstones(local.favorites, remote.favorites, mergedTombstones);
-  const mergedProfiles = mergeProfiles(local.profiles, remote.profiles);
-  const mergedSettings = { ...remote.settings, ...local.settings };
+  // Tombstones de historial
+  const allHistoryTombstonesMap = new Map<string, HistoryTombstone>();
+  for (const t of [...(local.syncMeta.deletedHistory || []), ...(migratedRemote.syncMeta.deletedHistory || [])]) {
+    const key = `${t.type}::${t.key}::${t.profileId}`;
+    const tTime = new Date(t.deletedAt).getTime();
+    if (now - tTime < thirtyDaysMs) {
+      allHistoryTombstonesMap.set(key, t);
+    }
+  }
+  const mergedHistoryTombstones = Array.from(allHistoryTombstonesMap.values());
+
+  const mergedHistory = mergeHistoryWithTombstones(local.history, migratedRemote.history, mergedHistoryTombstones);
+  // Ventana deslizante para la nube: últimos 1,500 episodios
+  const cloudHistory = mergedHistory.slice(0, MAX_CLOUD_HISTORY_ENTRIES);
+
+  const mergedFavorites = mergeFavoritesWithTombstones(local.favorites, migratedRemote.favorites, mergedFavTombstones);
+  const mergedProfiles = mergeProfiles(local.profiles, migratedRemote.profiles);
+  const mergedSettings = { ...migratedRemote.settings, ...local.settings };
 
   return {
     syncMeta: {
       schemaVersion: CURRENT_SCHEMA_VERSION,
-      appVersion: local.syncMeta.appVersion || '0.1.8',
-      lastModifiedAt: new Date().toISOString(),
+      appVersion: local.syncMeta.appVersion || '0.2.0',
+      lastModifiedAt: getCalibratedTimestamp(),
       lastModifiedDevice: local.syncMeta.lastModifiedDevice || 'windows',
-      pbkdf2Salt: local.syncMeta.pbkdf2Salt || remote.syncMeta.pbkdf2Salt,
+      pbkdf2Salt: local.syncMeta.pbkdf2Salt || migratedRemote.syncMeta.pbkdf2Salt,
       fileHashes: { profiles: '', history: '', favorites: '', settings: '' },
-      deletedFavorites: mergedTombstones,
+      deletedFavorites: mergedFavTombstones,
       deletedProfiles: [],
+      deletedHistory: mergedHistoryTombstones,
     },
     profiles: mergedProfiles,
-    history: mergedHistory,
+    history: cloudHistory,
     favorites: mergedFavorites,
     settings: mergedSettings,
   };
@@ -221,6 +399,8 @@ export async function fetchGistData(
     method: 'GET',
     headers,
   });
+
+  setServerClockSkew(response.headers.get('date'));
 
   if (response.status === 304) {
     return { payload: null, notModified: true, etag: config.lastEtag };
@@ -365,11 +545,11 @@ export async function createOrUpdateGist(
     throw new Error('Falta el Token de GitHub para sincronizar');
   }
 
-  // 1. Serializar JSON plano y calcular hashes deterministas
-  const profilesJson = JSON.stringify(payload.profiles, null, 2);
-  const historyJson = JSON.stringify(payload.history, null, 2);
-  const favoritesJson = JSON.stringify(payload.favorites, null, 2);
-  const settingsJson = JSON.stringify(payload.settings, null, 2);
+  // 1. Serializar JSON minificado y calcular hashes deterministas
+  const profilesJson = JSON.stringify(payload.profiles);
+  const historyJson = JSON.stringify(payload.history);
+  const favoritesJson = JSON.stringify(payload.favorites);
+  const settingsJson = JSON.stringify(payload.settings);
 
   const fileHashes = {
     profiles: payload.syncMeta.fileHashes?.profiles || (await computeSha256(profilesJson)),
@@ -379,7 +559,7 @@ export async function createOrUpdateGist(
   };
 
   payload.syncMeta.fileHashes = fileHashes;
-  payload.syncMeta.lastModifiedAt = new Date().toISOString();
+  payload.syncMeta.lastModifiedAt = getCalibratedTimestamp();
 
   // 2. Cifrar si el cifrado está activado
   let finalProfilesContent = profilesJson;
@@ -398,7 +578,7 @@ export async function createOrUpdateGist(
     payload.syncMeta.pbkdf2Salt = undefined;
   }
 
-  const syncMetaJson = JSON.stringify(payload.syncMeta, null, 2);
+  const syncMetaJson = JSON.stringify(payload.syncMeta);
 
   const gistFilesPayload: Record<string, { content: string }> = {
     'sync_meta.json': { content: syncMetaJson },
@@ -438,6 +618,8 @@ export async function createOrUpdateGist(
       }),
     });
   }
+
+  setServerClockSkew(response.headers.get('date'));
 
   if (response.status === 404) {
     throw new GistNotFoundError();

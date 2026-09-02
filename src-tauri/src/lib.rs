@@ -20,10 +20,7 @@ pub fn run() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
 
     tauri::Builder::default()
-        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_opener::init())
@@ -42,6 +39,14 @@ pub fn run() {
             if let Err(e) = storage::mark_active_downloads_as_paused_db() {
                 log::warn!("No se pudieron marcar descargas activas como pausadas: {}", e);
             }
+
+            // Iniciar servidor HTTP local para streaming de videos descargados síncronamente en el runtime
+            let app_handle_media = app.handle().clone();
+            let media_port = tauri::async_runtime::block_on(async {
+                crate::downloader::media_server::start_media_server(app_handle_media).await
+            }).expect("Failed to start media server");
+
+            log::info!("Media server initialized on port {} (matches strict CSP: http://127.0.0.1:{})", media_port, media_port);
 
             #[cfg(desktop)]
             if let Some(main_win) = app.get_webview_window("main") {
@@ -83,14 +88,7 @@ pub fn run() {
                 storage::warmup_image_cache(&app_handle_warmup).await;
             });
 
-            // Iniciar servidor HTTP local para streaming de videos descargados
-            tauri::async_runtime::spawn(async move {
-                if let Err(e) = crate::downloader::media_server::start_media_server().await {
-                    log::error!("Failed to start media server: {}", e);
-                }
-            });
-
-            log::info!("AniCS started");
+            log::info!("AniCS started with media server on port {}", media_port);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -132,6 +130,7 @@ pub fn run() {
             commands::download_and_run_installer,
             // Almacenamiento e Historial
             commands::upsert_history,
+            commands::batch_upsert_history,
             commands::get_history,
             commands::get_all_history,
             commands::get_episode_progress,

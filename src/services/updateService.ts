@@ -1,6 +1,6 @@
 import { showUpdateNotification } from '@/services/downloadService';
 
-export const CURRENT_VERSION = '0.1.22';
+export const CURRENT_VERSION = '0.2.0';
 export const DEFAULT_REPO = 'SteveenR-A/AniCS';
 
 export interface GitHubRelease {

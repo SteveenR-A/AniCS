@@ -343,7 +343,7 @@ pub fn delete_sync_config(key: &str) -> AppResult<()> {
 
 pub fn get_all_sync_config() -> AppResult<HashMap<String, String>> {
     with_db(|conn| {
-        let mut stmt = conn.prepare("SELECT key, value FROM sync_config")?;
+        let mut stmt = conn.prepare("SELECT key, value FROM sync_config WHERE key NOT LIKE '\\_sec\\_%' ESCAPE '\\'")?;
         let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
         let mut map = HashMap::new();
         for r in rows.flatten() {
@@ -426,6 +426,44 @@ pub fn upsert_history(entry: &HistoryEntry) -> AppResult<()> {
                 entry.watched_at, entry.source, profile_id
             ],
         )?;
+        Ok(())
+    })
+}
+
+pub fn batch_upsert_history(entries: &[HistoryEntry]) -> AppResult<()> {
+    if entries.is_empty() {
+        return Ok(());
+    }
+    with_db(|conn| {
+        let tx = conn.unchecked_transaction()?;
+        {
+            let mut stmt = tx.prepare_cached(
+                "INSERT INTO watch_history (id, anime_title, anime_url, thumbnail_url, episode_number, episode_url, watch_progress, watched_at, source, profile_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                 ON CONFLICT(id) DO UPDATE SET
+                   anime_title = CASE WHEN excluded.anime_title != '' THEN excluded.anime_title ELSE watch_history.anime_title END,
+                   thumbnail_url = CASE WHEN excluded.thumbnail_url != '' THEN excluded.thumbnail_url ELSE watch_history.thumbnail_url END,
+                   episode_url = CASE WHEN excluded.episode_url != '' THEN excluded.episode_url ELSE watch_history.episode_url END,
+                   watch_progress = excluded.watch_progress,
+                   watched_at = excluded.watched_at,
+                   source = CASE WHEN excluded.source != '' THEN excluded.source ELSE watch_history.source END,
+                   profile_id = excluded.profile_id"
+            )?;
+
+            for entry in entries {
+                let profile_id = if entry.profile_id.is_empty() {
+                    "default"
+                } else {
+                    &entry.profile_id
+                };
+                stmt.execute(params![
+                    entry.id, entry.anime_title, entry.anime_url, entry.thumbnail_url,
+                    entry.episode_number, entry.episode_url, entry.watch_progress,
+                    entry.watched_at, entry.source, profile_id
+                ])?;
+            }
+        }
+        tx.commit()?;
         Ok(())
     })
 }
@@ -537,12 +575,34 @@ pub fn get_episode_progress(episode_url: &str, profile_id: Option<&str>) -> AppR
     })
 }
 
+pub fn normalize_anime_title_key(s: &str) -> String {
+    s.chars()
+        .filter_map(|c| match c {
+            'a'..='z' | '0'..='9' => Some(c),
+            'A'..='Z' => Some(c.to_ascii_lowercase()),
+            'á' | 'à' | 'ä' | 'â' | 'Á' | 'À' | 'Ä' | 'Â' => Some('a'),
+            'é' | 'è' | 'ë' | 'ê' | 'É' | 'È' | 'Ë' | 'Ê' => Some('e'),
+            'í' | 'ì' | 'ï' | 'î' | 'Í' | 'Ì' | 'Ï' | 'Î' => Some('i'),
+            'ó' | 'ò' | 'ö' | 'ô' | 'Ó' | 'Ò' | 'Ö' | 'Ô' => Some('o'),
+            'ú' | 'ù' | 'ü' | 'û' | 'Ú' | 'Ù' | 'Ü' | 'Û' => Some('u'),
+            'ñ' | 'Ñ' => Some('n'),
+            _ => None,
+        })
+        .collect()
+}
+
 pub fn clear_history(profile_id: Option<&str>) -> AppResult<()> {
     with_db(|conn| {
         let target_profile = match profile_id {
             Some(pid) => pid.to_string(),
             None => get_active_profile_id_inner(conn),
         };
+        let now = chrono::Utc::now().to_rfc3339();
+        let tombstone_id = uuid::Uuid::new_v4().to_string();
+        let _ = conn.execute(
+            "INSERT INTO tombstones (id, entity_type, entity_id, profile_id, deleted_at) VALUES (?1, 'history_clear', ?2, ?2, ?3)",
+            params![tombstone_id, target_profile, now],
+        );
         conn.execute("DELETE FROM watch_history WHERE profile_id = ?1", params![target_profile])?;
         Ok(())
     })
@@ -550,6 +610,24 @@ pub fn clear_history(profile_id: Option<&str>) -> AppResult<()> {
 
 pub fn remove_history(id: &str) -> AppResult<()> {
     with_db(|conn| {
+        let row_opt: Option<(String, String, i32, String)> = conn.query_row(
+            "SELECT anime_title, anime_url, episode_number, profile_id FROM watch_history WHERE id = ?1",
+            params![id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        ).optional()?;
+
+        if let Some((anime_title, anime_url, ep_num, profile_id)) = row_opt {
+            let norm = normalize_anime_title_key(&anime_title);
+            let canon = if norm.is_empty() { anime_url } else { norm };
+            let key = format!("{canon}::ep{ep_num}::{profile_id}");
+            let now = chrono::Utc::now().to_rfc3339();
+            let tombstone_id = uuid::Uuid::new_v4().to_string();
+            let _ = conn.execute(
+                "INSERT INTO tombstones (id, entity_type, entity_id, profile_id, deleted_at) VALUES (?1, 'history_episode', ?2, ?3, ?4)",
+                params![tombstone_id, key, profile_id, now],
+            );
+        }
+
         conn.execute("DELETE FROM watch_history WHERE id = ?1", params![id])?;
         Ok(())
     })
@@ -560,6 +638,26 @@ pub fn remove_history_batch(ids: &[String]) -> AppResult<()> {
         return Ok(());
     }
     with_db(|conn| {
+        let now = chrono::Utc::now().to_rfc3339();
+        for id in ids {
+            let row_opt: Option<(String, String, i32, String)> = conn.query_row(
+                "SELECT anime_title, anime_url, episode_number, profile_id FROM watch_history WHERE id = ?1",
+                params![id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            ).optional()?;
+
+            if let Some((anime_title, anime_url, ep_num, profile_id)) = row_opt {
+                let norm = normalize_anime_title_key(&anime_title);
+                let canon = if norm.is_empty() { anime_url } else { norm };
+                let key = format!("{canon}::ep{ep_num}::{profile_id}");
+                let tombstone_id = uuid::Uuid::new_v4().to_string();
+                let _ = conn.execute(
+                    "INSERT INTO tombstones (id, entity_type, entity_id, profile_id, deleted_at) VALUES (?1, 'history_episode', ?2, ?3, ?4)",
+                    params![tombstone_id, key, profile_id, now],
+                );
+            }
+        }
+
         let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
         let query = format!("DELETE FROM watch_history WHERE id IN ({})", placeholders);
         let params_vec: Vec<&dyn rusqlite::ToSql> = ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
@@ -575,6 +673,28 @@ pub fn remove_history_by_anime(anime_url: &str, profile_id: Option<&str>) -> App
             None => get_active_profile_id_inner(conn),
         };
         let clean_url = anime_url.trim_end_matches('/').trim();
+
+        let anime_title_opt: Option<String> = conn.query_row(
+            "SELECT anime_title FROM watch_history WHERE (anime_url = ?1 OR anime_url LIKE ?2 OR anime_title = ?1 OR anime_title LIKE ?2) AND profile_id = ?3 LIMIT 1",
+            params![clean_url, format!("{}%", clean_url), target_profile],
+            |r| r.get(0),
+        ).optional()?;
+
+        let norm = if let Some(ref title) = anime_title_opt {
+            normalize_anime_title_key(title)
+        } else {
+            normalize_anime_title_key(clean_url)
+        };
+        let canon = if norm.is_empty() { clean_url.to_string() } else { norm };
+        let key = format!("{canon}::{target_profile}");
+        let now = chrono::Utc::now().to_rfc3339();
+        let tombstone_id = uuid::Uuid::new_v4().to_string();
+
+        let _ = conn.execute(
+            "INSERT INTO tombstones (id, entity_type, entity_id, profile_id, deleted_at) VALUES (?1, 'history_anime', ?2, ?3, ?4)",
+            params![tombstone_id, key, target_profile, now],
+        );
+
         conn.execute(
             "DELETE FROM watch_history WHERE (anime_url = ?1 OR anime_url LIKE ?2 OR anime_title = ?1 OR anime_title LIKE ?2) AND profile_id = ?3",
             params![clean_url, format!("{}%", clean_url), target_profile],
@@ -1309,6 +1429,40 @@ mod tests {
             ).unwrap();
             // (0.90 + 0.80) * 24 / 60 = 1.70 * 0.4 = 0.68 horas
             assert!((hours_watched - 0.68).abs() < 0.01, "Horas calculadas deben ser ~0.68");
+        }
+
+        let _ = fs::remove_dir_all(test_dir);
+    }
+
+    #[test]
+    fn test_sync_config_secret_filtering() {
+        let base_temp_dir = env::temp_dir();
+        let mut test_dir = base_temp_dir.clone();
+        test_dir.push(format!("anics_test_sync_sec_{}", get_unique_id()));
+        fs::create_dir_all(&test_dir).unwrap();
+
+        {
+            let conn = init_database_inner(&test_dir).unwrap();
+
+            // Insertar configuración pública y secretos internos
+            conn.execute("INSERT INTO sync_config (key, value) VALUES ('gist_id', 'abc123gist')", []).unwrap();
+            conn.execute("INSERT INTO sync_config (key, value) VALUES ('auto_sync', 'true')", []).unwrap();
+            conn.execute("INSERT INTO sync_config (key, value) VALUES ('_sec_github_token', 'ghp_secret_token')", []).unwrap();
+            conn.execute("INSERT INTO sync_config (key, value) VALUES ('_sec_pbkdf2_salt', 'salt_base64_secret')", []).unwrap();
+
+            // Consultar con la cláusula filtrada
+            let mut stmt = conn.prepare("SELECT key, value FROM sync_config WHERE key NOT LIKE '\\_sec\\_%' ESCAPE '\\'").unwrap();
+            let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))).unwrap();
+            let mut map = std::collections::HashMap::new();
+            for r in rows.flatten() {
+                map.insert(r.0, r.1);
+            }
+
+            assert_eq!(map.len(), 2);
+            assert_eq!(map.get("gist_id"), Some(&"abc123gist".to_string()));
+            assert_eq!(map.get("auto_sync"), Some(&"true".to_string()));
+            assert!(!map.contains_key("_sec_github_token"), "Los secretos _sec_ no deben ser expuestos");
+            assert!(!map.contains_key("_sec_pbkdf2_salt"), "Los secretos _sec_ no deben ser expuestos");
         }
 
         let _ = fs::remove_dir_all(test_dir);
