@@ -7,6 +7,17 @@ El formato está basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1
 
 ## [0.1.21] - 2026-09-02
 
+### 🎨 Nuevos Temas Visuales y Personalización
+- **6 Nuevas Paletas de Color Populares:**
+  - **Gruvbox Dark:** Tonos cálidos terrosos diseñados para no cansar la vista en sesiones largas (*Clásico del ricing*).
+  - **Rosé Pine:** Púrpura profundo con acentos durazno y lavanda (*Popular en Hyprland*).
+  - **Everforest:** Verde bosque oscuro con toques cálidos (*Inspirado en naturaleza*).
+  - **Oxocarbon:** Minimalismo extremo con fondo negro puro y acentos azul IBM/magenta (*Ideal para OLED*).
+  - **Kanagawa:** Inspirado en la pintura "La gran ola" con azules índigo y rojos suaves (*Estética japonesa*).
+  - **Mellow:** Pastel oscuro con verde sage y lila apagado (*Underrated*).
+- **Selector de Temas Mejorado:**
+  - Badges informativos de estilo y previsualización de 4 tonos (fondo, superficie, acento primario y secundario) en escritorio y móvil.
+
 ### 🧹 Limpieza de Descargas Canceladas, Portadas Internas Privadas y Gestión Segura de Carpetas
 - **Limpieza de Archivos al Cancelar o Descartar Descargas:**
   - `cancel_download` y `delete_download_record` eliminan físicamente archivos parciales (`.part`), fragmentos temporales (`.hls_parts`) y videos incompletos.
@@ -21,6 +32,12 @@ El formato está basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1
   - Paso 2: Si el conteo es cero, elimina residuos (`poster.jpg`, `.nomedia`, `.tmp`) y remueve la carpeta vacía al borrar el último episodio.
 - **Deduplicación Canónica de Series:**
   - Agrupación por ruta física normalizada y título para evitar carpetas o series duplicadas por alias del sistema de archivos.
+
+### 🔄 Motor de Sincronización Bidireccional Inteligente y Corrección Móvil
+- **Hashes Deterministas Locales:** Comparación previa de hashes SHA-256 antes de interactuar con la red.
+- **Cero Escrituras Innecesarias:** Los clientes nuevos descargan datos remotos a SQLite sin forzar subidas vacías a GitHub Gists.
+- **Corrección Visual en Móvil:** Enmascaramiento inteligente del token GitHub (`ghp_••••••••••••`), compactación de Gist ID y protección contra desbordamientos en pantallas estrechas (<400px).
+- **Optimización de GitHub Actions:** Pipeline de release restringido exclusivamente a tags `v*` y `workflow_dispatch`, con retención de 1 día en artifacts intermedios.
 
 ---
 

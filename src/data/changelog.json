@@ -2,15 +2,17 @@
   {
     "version": "0.1.21",
     "date": "2026-09-02",
-    "title": "Limpieza de Descargas Canceladas, Portadas Internas Privadas y Gestión Segura de Carpetas",
-    "type": "patch",
+    "title": "Limpieza de Descargas, Motor de Sync Inteligente, 6 Nuevos Temas y UI Móvil",
+    "type": "minor",
     "highlights": [
+      "6 Nuevos Temas Visuales: Gruvbox Dark, Rosé Pine, Everforest, Oxocarbon (OLED), Kanagawa y Mellow con badges de estilo y paletas armónicas",
       "Limpieza integral de archivos al cancelar descargas: eliminación automática de .part, .hls_parts y videos temporales",
-      "Almacenamiento privado de portadas de anime en memoria interna (covers/) evitando contaminación y duplicación en la galería de fotos en Android y Windows",
-      "Migración transparente de portadas heredadas (poster.jpg) hacia el almacenamiento interno con auto-limpieza de la carpeta de descargas",
+      "Almacenamiento privado de portadas de anime en memoria interna (covers/) evitando contaminación y duplicación en la galería de Android y Windows",
+      "Migración transparente de portadas heredadas (poster.jpg) hacia el almacenamiento interno con auto-limpieza",
+      "Motor de Sincronización Bidireccional Inteligente (Gist): comparación previa de hashes SHA-256 y cero escrituras redundantes en la API de GitHub",
+      "Corrección de interfaz móvil en el modal de Sincronización: enmascaramiento adaptable del token, prevención de desbordamientos y badges compactos",
       "Algoritmo de eliminación segura en 2 pasos para carpetas de anime vacías al borrar episodios",
-      "Deduplicación canónica de carpetas y series locales para evitar colisiones y carpetas duplicadas",
-      "Sincronización reactiva inmediata de la cola de descargas y prevención de condiciones de carrera al pausar o cancelar"
+      "Deduplicación canónica de carpetas locales y optimización del pipeline de GitHub Actions para builds por tag"
     ]
   },
   {

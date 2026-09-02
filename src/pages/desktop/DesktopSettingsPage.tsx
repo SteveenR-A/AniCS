@@ -514,9 +514,25 @@ export function DesktopSettingsPage() {
                     <div style={{ width: 22, height: 22, borderRadius: '50%', background: theme.secondaryColor }} />
                   </div>
 
-                  <p style={{ fontSize: 11, color: theme.isDark ? '#94a3b8' : '#64748b', lineHeight: 1.3, margin: 0 }}>
+                  <p style={{ fontSize: 11, color: theme.isDark ? '#94a3b8' : '#64748b', lineHeight: 1.3, margin: 0, flex: 1 }}>
                     {theme.description}
                   </p>
+
+                  {theme.tag && (
+                    <div style={{
+                      alignSelf: 'flex-start',
+                      padding: '2px 8px',
+                      borderRadius: '12px',
+                      background: `${theme.primaryColor}20`,
+                      border: `1px solid ${theme.primaryColor}40`,
+                      color: theme.primaryColor,
+                      fontSize: 10,
+                      fontWeight: 700,
+                      letterSpacing: '0.02em',
+                    }}>
+                      {theme.tag}
+                    </div>
+                  )}
                 </motion.div>
               );
             })}

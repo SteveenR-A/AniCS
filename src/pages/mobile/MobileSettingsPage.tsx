@@ -425,19 +425,35 @@ export function MobileSettingsPage() {
                     border: isSelected ? `2px solid ${theme.primaryColor}` : '1px solid var(--border-subtle)',
                     borderRadius: 'var(--radius-md)', padding: '10px 12px',
                     cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 6,
+                    boxShadow: isSelected ? `0 0 12px ${theme.primaryColor}30` : 'none',
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: theme.isDark ? '#f8fafc' : '#0f172a' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: theme.isDark ? '#f8fafc' : '#0f172a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {theme.name}
                     </span>
-                    {isSelected && <Check size={12} color={theme.primaryColor} />}
+                    {isSelected && <Check size={12} color={theme.primaryColor} style={{ flexShrink: 0 }} />}
                   </div>
                   <div style={{ display: 'flex', gap: 4 }}>
-                    <div style={{ width: 14, height: 14, borderRadius: '50%', background: theme.baseColor }} />
+                    <div style={{ width: 14, height: 14, borderRadius: '50%', background: theme.baseColor, border: '1px solid rgba(255,255,255,0.15)' }} />
+                    <div style={{ width: 14, height: 14, borderRadius: '50%', background: theme.surfaceColor, border: '1px solid rgba(255,255,255,0.15)' }} />
                     <div style={{ width: 14, height: 14, borderRadius: '50%', background: theme.primaryColor }} />
                     <div style={{ width: 14, height: 14, borderRadius: '50%', background: theme.secondaryColor }} />
                   </div>
+                  {theme.tag && (
+                    <span style={{
+                      fontSize: 9,
+                      fontWeight: 700,
+                      color: theme.primaryColor,
+                      background: `${theme.primaryColor}18`,
+                      borderRadius: '8px',
+                      padding: '1px 6px',
+                      alignSelf: 'flex-start',
+                      whiteSpace: 'nowrap',
+                    }}>
+                      {theme.tag}
+                    </span>
+                  )}
                 </div>
               );
             })}

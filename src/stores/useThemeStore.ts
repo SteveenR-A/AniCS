@@ -5,6 +5,7 @@ export interface ThemeDefinition {
   id: string;
   name: string;
   description: string;
+  tag?: string;
   primaryColor: string;
   secondaryColor: string;
   surfaceColor: string;
@@ -21,6 +22,72 @@ export const THEMES: ThemeDefinition[] = [
     secondaryColor: '#ec4899',
     surfaceColor: '#111318',
     baseColor: '#0a0b0f',
+    isDark: true,
+  },
+  {
+    id: 'gruvbox',
+    name: 'Gruvbox Dark',
+    tag: 'Clásico del ricing',
+    description: 'Tonos cálidos terrosos. Diseñado para no cansar la vista en sesiones largas.',
+    primaryColor: '#d79921',
+    secondaryColor: '#cc241d',
+    surfaceColor: '#282828',
+    baseColor: '#1d2021',
+    isDark: true,
+  },
+  {
+    id: 'rosepine',
+    name: 'Rosé Pine',
+    tag: 'Popular en Hyprland',
+    description: 'Púrpura profundo con acentos durazno y lavanda. Elegante y minimalista.',
+    primaryColor: '#ebbcba',
+    secondaryColor: '#c4a7e7',
+    surfaceColor: '#1f1d2e',
+    baseColor: '#191724',
+    isDark: true,
+  },
+  {
+    id: 'everforest',
+    name: 'Everforest',
+    tag: 'Inspirado en naturaleza',
+    description: 'Verde bosque oscuro con toques cálidos. Muy relajante visualmente.',
+    primaryColor: '#a7c080',
+    secondaryColor: '#e69875',
+    surfaceColor: '#2d353b',
+    baseColor: '#232a2e',
+    isDark: true,
+  },
+  {
+    id: 'oxocarbon',
+    name: 'Oxocarbon',
+    tag: 'Ideal para OLED',
+    description: 'Minimalismo extremo. Negro casi puro con azules IBM y magenta. Excelente para OLED.',
+    primaryColor: '#78a9ff',
+    secondaryColor: '#ee5396',
+    surfaceColor: '#262626',
+    baseColor: '#161616',
+    isDark: true,
+  },
+  {
+    id: 'kanagawa',
+    name: 'Kanagawa',
+    tag: 'Estética japonesa',
+    description: 'Inspirado en la pintura japonesa "La gran ola". Azules índigo y rojos suaves.',
+    primaryColor: '#7e9cd8',
+    secondaryColor: '#e46876',
+    surfaceColor: '#2a2a37',
+    baseColor: '#1f1f28',
+    isDark: true,
+  },
+  {
+    id: 'mellow',
+    name: 'Mellow',
+    tag: 'Underrated',
+    description: 'Pastel oscuro con verdes sage y lilas apagados. Calmado y diferente a todos los actuales.',
+    primaryColor: '#caa6df',
+    secondaryColor: '#a9b665',
+    surfaceColor: '#1b1b23',
+    baseColor: '#16161d',
     isDark: true,
   },
   {
