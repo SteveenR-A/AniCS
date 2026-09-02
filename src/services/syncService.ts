@@ -305,12 +305,62 @@ export async function fetchGistData(
   return { payload, notModified: false, etag: newEtag };
 }
 
+export function getCurrentDevicePlatform(): 'windows' | 'android' | 'web' {
+  if (typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)) {
+    return 'android';
+  }
+  return 'windows';
+}
+
+export async function computePayloadHashes(data: {
+  profiles: UserProfile[];
+  history: HistoryEntry[];
+  favorites: AnimeResult[];
+  settings: Record<string, string>;
+}): Promise<{ profiles: string; history: string; favorites: string; settings: string }> {
+  const profilesJson = JSON.stringify(data.profiles, null, 2);
+  const historyJson = JSON.stringify(data.history, null, 2);
+  const favoritesJson = JSON.stringify(data.favorites, null, 2);
+  const settingsJson = JSON.stringify(data.settings, null, 2);
+
+  return {
+    profiles: await computeSha256(profilesJson),
+    history: await computeSha256(historyJson),
+    favorites: await computeSha256(favoritesJson),
+    settings: await computeSha256(settingsJson),
+  };
+}
+
+export function areHashesEqual(
+  h1?: Record<string, string> | null,
+  h2?: Record<string, string> | null
+): boolean {
+  if (!h1 || !h2) return false;
+  return (
+    h1.profiles === h2.profiles &&
+    h1.history === h2.history &&
+    h1.favorites === h2.favorites &&
+    h1.settings === h2.settings
+  );
+}
+
+export function isLocalDataEmpty(data: {
+  profiles: UserProfile[];
+  history: HistoryEntry[];
+  favorites: AnimeResult[];
+}): boolean {
+  const hasFavorites = data.favorites.length > 0;
+  const hasHistory = data.history.length > 0;
+  const hasCustomProfiles = data.profiles.some(p => p.id !== 'default');
+  return !hasFavorites && !hasHistory && !hasCustomProfiles;
+}
+
 export async function createOrUpdateGist(
   config: GistSyncConfig,
   payload: GistFilesPayload,
   sessionDerivedKey?: CryptoKey | null,
   pbkdf2Salt?: string
-): Promise<{ gistId: string; etag?: string; gistUrl?: string }> {
+): Promise<{ gistId: string; etag?: string; gistUrl?: string; hashes: { profiles: string; history: string; favorites: string; settings: string } }> {
   if (!config.githubToken) {
     throw new Error('Falta el Token de GitHub para sincronizar');
   }
@@ -322,10 +372,10 @@ export async function createOrUpdateGist(
   const settingsJson = JSON.stringify(payload.settings, null, 2);
 
   const fileHashes = {
-    profiles: await computeSha256(profilesJson),
-    history: await computeSha256(historyJson),
-    favorites: await computeSha256(favoritesJson),
-    settings: await computeSha256(settingsJson),
+    profiles: payload.syncMeta.fileHashes?.profiles || (await computeSha256(profilesJson)),
+    history: payload.syncMeta.fileHashes?.history || (await computeSha256(historyJson)),
+    favorites: payload.syncMeta.fileHashes?.favorites || (await computeSha256(favoritesJson)),
+    settings: payload.syncMeta.fileHashes?.settings || (await computeSha256(settingsJson)),
   };
 
   payload.syncMeta.fileHashes = fileHashes;
@@ -405,6 +455,7 @@ export async function createOrUpdateGist(
     gistId: resJson.id,
     etag,
     gistUrl: resJson.html_url,
+    hashes: fileHashes,
   };
 }
 

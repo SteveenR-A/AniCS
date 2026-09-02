@@ -434,10 +434,7 @@ export const useDownloadStore = create<DownloadStore>((set, get) => ({
       await cancelDownload(id);
       set((state) => {
         const next = new Map(state.tasks);
-        const task = next.get(id);
-        if (task) {
-          next.set(id, { ...task, status: 'canceled' });
-        }
+        next.delete(id);
         return { tasks: next };
       });
       triggerNotificationSync();

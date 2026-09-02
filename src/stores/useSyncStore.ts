@@ -36,6 +36,10 @@ import {
   exportPayloadToJsonString,
   importPayloadFromJsonString,
   GistNotFoundError,
+  computePayloadHashes,
+  areHashesEqual,
+  isLocalDataEmpty,
+  getCurrentDevicePlatform,
 } from '@/services/syncService';
 import {
   deriveKeyFromPin,
@@ -43,6 +47,7 @@ import {
   uint8ArrayToBase64,
   base64ToUint8Array,
 } from '@/services/cryptoService';
+import { CURRENT_VERSION } from '@/services/updateService';
 
 interface SyncState {
   config: GistSyncConfig;
@@ -234,14 +239,13 @@ export const useSyncStore = create<SyncState>((set, get) => ({
     set({ isSyncing: true, lastError: null, syncStatus: 'idle' });
 
     try {
-      // 1. Obtener clave de cifrado si está habilitado y aún no está en RAM
+      // 1. Obtener o derivar clave de sesión si el cifrado está activado
       let currentKey = get().sessionDerivedKey;
       let saltB64: string | undefined = undefined;
 
       if (config.encryptionEnabled) {
-        saltB64 = (await getSecureSecret('pbkdf2_salt')) || undefined;
+        saltB64 = (await getSecureSecret('pbkdf2_salt')) || (await getSecureSecret('sync_salt')) || undefined;
         if (!saltB64) {
-          // Generar nuevo salt si no existía
           const newSalt = generateRandomSalt(16);
           saltB64 = uint8ArrayToBase64(newSalt);
           await saveSecureSecret('pbkdf2_salt', saltB64);
@@ -268,14 +272,22 @@ export const useSyncStore = create<SyncState>((set, get) => ({
         getAllSettings(),
       ]);
 
+      // Calcular hashes deterministas del estado local ANTES de la llamada de red
+      const localHashes = await computePayloadHashes({
+        profiles,
+        history,
+        favorites,
+        settings,
+      });
+
       const localPayload: GistFilesPayload = {
         syncMeta: {
           schemaVersion: CURRENT_SCHEMA_VERSION,
-          appVersion: '0.1.20',
+          appVersion: CURRENT_VERSION,
           lastModifiedAt: new Date().toISOString(),
-          lastModifiedDevice: 'windows',
+          lastModifiedDevice: getCurrentDevicePlatform(),
           pbkdf2Salt: config.encryptionEnabled ? saltB64 : undefined,
-          fileHashes: { profiles: '', history: '', favorites: '', settings: '' },
+          fileHashes: localHashes,
           deletedFavorites: tombstones.filter((t: TombstoneItem) => t.entityType === 'favorite').map((t: TombstoneItem) => ({
             url: t.entityId,
             profileId: t.profileId,
@@ -292,82 +304,160 @@ export const useSyncStore = create<SyncState>((set, get) => ({
         settings,
       };
 
-      // 3. Descargar y combinar con el Gist si ya existe
-      let finalPayload = localPayload;
-
-      if (config.gistId) {
+      const lastHashesJson = await getSyncConfig('last_synced_hashes').catch(() => '');
+      let lastSyncedHashes: Record<string, string> | null = null;
+      if (lastHashesJson) {
         try {
-          const fetchResult = await fetchGistData(config, currentKey);
+          lastSyncedHashes = JSON.parse(lastHashesJson);
+        } catch {}
+      }
+      const hasLocalPendingChanges = !lastSyncedHashes || !areHashesEqual(localHashes, lastSyncedHashes);
+      const isLocalEmpty = isLocalDataEmpty({ profiles, history, favorites });
 
-          if (fetchResult.notModified) {
-            // El Gist remoto no cambió en GitHub.
-            // Si el estado local tiene cambios no subidos, procedemos a subir localPayload;
-            // de lo contrario, marcamos como "Al día"
-            const localHashes = localPayload.syncMeta.fileHashes;
-            const lastHashesJson = await getSyncConfig('last_synced_hashes').catch(() => '');
-            let hasLocalChanges = true;
-            if (lastHashesJson) {
-              try {
-                const parsed = JSON.parse(lastHashesJson);
-                if (
-                  parsed.profiles === localHashes.profiles &&
-                  parsed.history === localHashes.history &&
-                  parsed.favorites === localHashes.favorites &&
-                  parsed.settings === localHashes.settings
-                ) {
-                  hasLocalChanges = false;
-                }
-              } catch {}
-            }
-
-            if (!hasLocalChanges) {
-              set({ isSyncing: false, syncStatus: 'not_modified' });
-              return;
-            }
-          } else if (fetchResult.payload) {
-            finalPayload = mergeSyncData(localPayload, fetchResult.payload);
-
-            // Aplicar datos combinados a SQLite local
-            for (const p of finalPayload.profiles) {
-              await upsertProfile(p);
-            }
-            for (const h of finalPayload.history) {
-              await upsertHistory(h);
-            }
-            for (const f of finalPayload.favorites) {
-              await addFavorite(f, f.profileId);
-            }
-            // Purgar favoritos eliminados por tombstones
-            for (const del of finalPayload.syncMeta.deletedFavorites) {
-              await removeFavorite(del.url, del.profileId);
-            }
-            await cleanupOldTombstones(30);
-          }
+      // 4. Si ya existe un Gist remoto configurado
+      if (config.gistId) {
+        let fetchResult;
+        try {
+          fetchResult = await fetchGistData(config, currentKey);
         } catch (e: any) {
           if (e instanceof GistNotFoundError) {
             console.warn('Gist no encontrado (404), recreando...');
             await get().updateConfig({ gistId: '', lastEtag: '' });
+            fetchResult = null;
           } else {
             throw e;
           }
         }
+
+        if (fetchResult) {
+          // Caso A: El Gist remoto no cambió en GitHub (HTTP 304 Not Modified)
+          if (fetchResult.notModified) {
+            if (!hasLocalPendingChanges) {
+              set({ isSyncing: false, syncStatus: 'not_modified' });
+              return;
+            }
+            // Solo local cambió -> Subir cambios locales
+            const uploadResult = await createOrUpdateGist(get().config, localPayload, currentKey, saltB64);
+            const nowIso = new Date().toISOString();
+            await get().updateConfig({
+              lastEtag: uploadResult.etag,
+              lastSyncAt: nowIso,
+              gistUrl: uploadResult.gistUrl || `https://gist.github.com/${uploadResult.gistId}`,
+            });
+            await setSyncConfig('last_synced_hashes', JSON.stringify(uploadResult.hashes));
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('anics:sync-completed'));
+            }
+            set({ isSyncing: false, syncStatus: 'success' });
+            return;
+          }
+
+          // Caso B: Se obtuvieron datos remotos desde GitHub (HTTP 200)
+          if (fetchResult.payload) {
+            const remotePayload = fetchResult.payload;
+            const remoteHashes = remotePayload.syncMeta.fileHashes;
+
+            // Si local es exactamente idéntico al remoto -> Cero escrituras
+            if (areHashesEqual(localHashes, remoteHashes)) {
+              await setSyncConfig('last_synced_hashes', JSON.stringify(localHashes));
+              await get().updateConfig({
+                lastEtag: fetchResult.etag,
+                lastSyncAt: new Date().toISOString(),
+              });
+              set({ isSyncing: false, syncStatus: 'not_modified' });
+              return;
+            }
+
+            // Subcaso B.1: Si la base local está vacía (dispositivo nuevo) o no tenía cambios locales pendientes:
+            // Descargar e importar datos remotos a SQLite sin subir nada a GitHub (0 escrituras)
+            if (isLocalEmpty || !hasLocalPendingChanges) {
+              for (const p of remotePayload.profiles) {
+                await upsertProfile(p);
+              }
+              for (const h of remotePayload.history) {
+                await upsertHistory(h);
+              }
+              for (const f of remotePayload.favorites) {
+                await addFavorite(f, f.profileId);
+              }
+              for (const del of remotePayload.syncMeta.deletedFavorites) {
+                await removeFavorite(del.url, del.profileId);
+              }
+              await cleanupOldTombstones(30);
+
+              await setSyncConfig('last_synced_hashes', JSON.stringify(remoteHashes));
+              await get().updateConfig({
+                lastEtag: fetchResult.etag,
+                lastSyncAt: new Date().toISOString(),
+              });
+
+              try {
+                const { useProfileStore } = await import('@/stores/useProfileStore');
+                await useProfileStore.getState().loadProfiles();
+              } catch {}
+
+              if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('anics:sync-completed'));
+              }
+
+              set({ isSyncing: false, syncStatus: 'success' });
+              return;
+            }
+
+            // Subcaso B.2: Ambos dispositivos tienen cambios concurrentes -> Fusionar y subir (1 escritura)
+            const mergedPayload = mergeSyncData(localPayload, remotePayload);
+
+            for (const p of mergedPayload.profiles) {
+              await upsertProfile(p);
+            }
+            for (const h of mergedPayload.history) {
+              await upsertHistory(h);
+            }
+            for (const f of mergedPayload.favorites) {
+              await addFavorite(f, f.profileId);
+            }
+            for (const del of mergedPayload.syncMeta.deletedFavorites) {
+              await removeFavorite(del.url, del.profileId);
+            }
+            await cleanupOldTombstones(30);
+
+            const uploadResult = await createOrUpdateGist(get().config, mergedPayload, currentKey, saltB64);
+            const nowIso = new Date().toISOString();
+            await get().updateConfig({
+              lastEtag: uploadResult.etag,
+              lastSyncAt: nowIso,
+              gistUrl: uploadResult.gistUrl || `https://gist.github.com/${uploadResult.gistId}`,
+            });
+            await setSyncConfig('last_synced_hashes', JSON.stringify(uploadResult.hashes));
+
+            try {
+              const { useProfileStore } = await import('@/stores/useProfileStore');
+              await useProfileStore.getState().loadProfiles();
+            } catch {}
+
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('anics:sync-completed'));
+            }
+
+            set({ isSyncing: false, syncStatus: 'success' });
+            return;
+          }
+        }
       }
 
-      // 4. Subir datos al Gist
-      const result = await createOrUpdateGist(get().config, finalPayload, currentKey, saltB64);
+      // 5. Si no hay gistId (primer sync / creación inicial de Gist)
+      const uploadResult = await createOrUpdateGist(get().config, localPayload, currentKey, saltB64);
       const nowIso = new Date().toISOString();
 
       await get().updateConfig({
-        gistId: result.gistId,
-        lastEtag: result.etag,
+        gistId: uploadResult.gistId,
+        lastEtag: uploadResult.etag,
         lastSyncAt: nowIso,
-        gistUrl: result.gistUrl || `https://gist.github.com/${result.gistId}`,
+        gistUrl: uploadResult.gistUrl || `https://gist.github.com/${uploadResult.gistId}`,
       });
 
-      // Guardar hashes sincronizados para evitar subidas redundantes
-      await setSyncConfig('last_synced_hashes', JSON.stringify(finalPayload.syncMeta.fileHashes));
+      await setSyncConfig('last_synced_hashes', JSON.stringify(uploadResult.hashes));
 
-      // Recargar perfiles en memoria y notificar a vistas abiertas
       try {
         const { useProfileStore } = await import('@/stores/useProfileStore');
         await useProfileStore.getState().loadProfiles();
@@ -416,7 +506,7 @@ export const useSyncStore = create<SyncState>((set, get) => ({
     const payload: GistFilesPayload = {
       syncMeta: {
         schemaVersion: CURRENT_SCHEMA_VERSION,
-        appVersion: '0.1.20',
+        appVersion: CURRENT_VERSION,
         lastModifiedAt: new Date().toISOString(),
         lastModifiedDevice: 'windows',
         fileHashes: { profiles: '', history: '', favorites: '', settings: '' },

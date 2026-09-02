@@ -109,6 +109,96 @@ pub async fn get_existing_download_progress(output_path: &Path) -> u64 {
     0
 }
 
+/// Obtiene y asegura la existencia del directorio interno de portadas de la app
+pub fn get_covers_dir(app_handle: &AppHandle) -> AppResult<PathBuf> {
+    let base_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Parse(e.to_string()))?;
+    let covers_dir = base_dir.join("covers");
+    if !covers_dir.exists() {
+        let _ = fs::create_dir_all(&covers_dir);
+    }
+    Ok(covers_dir)
+}
+
+/// Verifica en dos pasos si una carpeta de anime ya no tiene videos y la elimina de forma segura.
+/// Paso 1: Cuenta rigurosamente archivos de video (.mp4, .mkv, .ts, etc.) y fragmentos (.part, .hls_parts).
+///         Si video_count > 0, NO toca la carpeta.
+/// Paso 2: Solo si video_count == 0, remueve archivos residuales conocidos (poster.jpg, .nomedia, .tmp) y borra el directorio.
+pub fn clean_empty_anime_folder_safely(folder_path: &Path, base_dir: &Path) {
+    if !folder_path.exists() || !folder_path.is_dir() {
+        return;
+    }
+
+    // Validación para no borrar la carpeta base raíz de descargas
+    let Ok(folder_canonical) = folder_path.canonicalize() else { return; };
+    let Ok(base_canonical) = base_dir.canonicalize() else { return; };
+
+    if folder_canonical == base_canonical {
+        log::warn!("Prevented deletion of root download directory: {}", folder_canonical.display());
+        return;
+    }
+
+    #[cfg(target_os = "android")]
+    {
+        if let Ok(shared_canonical) = Path::new("/storage/emulated/0/Anime").canonicalize() {
+            if folder_canonical == shared_canonical {
+                log::warn!("Prevented deletion of shared Anime directory: {}", folder_canonical.display());
+                return;
+            }
+        }
+    }
+
+    // Paso 1: Contar archivos de video y descargas activas
+    let Ok(entries) = fs::read_dir(folder_path) else { return; };
+    let mut video_count = 0usize;
+    let mut residual_files = Vec::new();
+
+    for entry in entries.flatten() {
+        let p = entry.path();
+        if p.is_file() {
+            let file_name_lower = p.file_name().and_then(|n| n.to_str()).unwrap_or("").to_lowercase();
+            if file_name_lower.ends_with(".part") || file_name_lower.ends_with(".downloading") || file_name_lower.ends_with(".tmp") {
+                video_count += 1;
+                break;
+            }
+
+            if let Some(ext) = p.extension().and_then(|e| e.to_str()) {
+                let ext_lower = ext.to_lowercase();
+                if ["mp4", "mkv", "ts", "webm", "avi", "mov", "flv"].contains(&ext_lower.as_str()) {
+                    video_count += 1;
+                    break;
+                } else if ["jpg", "jpeg", "png", "webp", "nomedia", "tmp", "json", "txt"].contains(&ext_lower.as_str())
+                    || file_name_lower == ".nomedia"
+                {
+                    residual_files.push(p);
+                }
+            } else if file_name_lower == ".nomedia" {
+                residual_files.push(p);
+            }
+        } else if p.is_dir() {
+            let dir_name_lower = p.file_name().and_then(|n| n.to_str()).unwrap_or("").to_lowercase();
+            if dir_name_lower.ends_with(".hls_parts") {
+                video_count += 1;
+                break;
+            }
+        }
+    }
+
+    if video_count > 0 {
+        log::debug!("Folder {} still contains {} video(s), preserving.", folder_path.display(), video_count);
+        return;
+    }
+
+    // Paso 2: video_count == 0, borrar archivos residuales y carpeta vacía
+    log::info!("Anime folder {} has 0 videos. Cleaning up residual files and deleting folder.", folder_path.display());
+    for f in residual_files {
+        let _ = fs::remove_file(f);
+    }
+    let _ = fs::remove_dir_all(folder_path);
+}
+
 fn spawn_download(
     download_id: String,
     task_record: DownloadTask,
@@ -523,13 +613,60 @@ pub async fn retry_download(
 #[tauri::command]
 pub async fn cancel_download(
     download_id: String,
+    app_handle: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let mut tasks = state.download_manager.tasks.lock().await;
-    if let Some(handle) = tasks.remove(&download_id) {
+    // 1. Obtener registro de la tarea antes de eliminarla para conocer rutas
+    let task_opt = storage::get_all_downloads_db().ok().and_then(|all| {
+        all.into_iter().find(|t| t.id == download_id)
+    });
+
+    // 2. Detener y esperar al worker para evitar condición de carrera y file locking
+    let handle_opt = {
+        let mut tasks = state.download_manager.tasks.lock().await;
+        tasks.remove(&download_id)
+    };
+
+    if let Some(handle) = handle_opt {
         let _ = handle.cancel_tx.send(());
+        let _ = tokio::time::timeout(std::time::Duration::from_millis(1500), handle.task).await;
     }
+
+    // 3. Limpiar archivos parciales o corruptos en disco
+    if let Some(task) = task_opt {
+        let output_path = PathBuf::from(&task.output_path);
+        if output_path.exists() {
+            let _ = fs::remove_file(&output_path);
+        }
+        let part_p = PathBuf::from(format!("{}.part", task.output_path));
+        if part_p.exists() {
+            let _ = fs::remove_file(part_p);
+        }
+        let hls_parts_dir = PathBuf::from(format!("{}.hls_parts", task.output_path));
+        if hls_parts_dir.exists() {
+            let _ = fs::remove_dir_all(hls_parts_dir);
+        }
+
+        // Comprobar si la carpeta padre del anime quedó vacía
+        if let Some(parent) = output_path.parent() {
+            if let Ok(base_dir_str) = get_default_download_dir(app_handle.clone()) {
+                clean_empty_anime_folder_safely(parent, Path::new(&base_dir_str));
+            }
+        }
+    }
+
+    // 4. Eliminar de SQLite y notificar a la UI
     let _ = storage::delete_download_task_db(&download_id);
+    let _ = app_handle.emit("download-progress", DownloadProgress {
+        id: download_id,
+        progress: 0.0,
+        speed_kbps: 0.0,
+        downloaded_bytes: 0,
+        total_bytes: None,
+        status: DownloadStatus::Canceled,
+        error: None,
+    });
+
     Ok(())
 }
 
@@ -538,28 +675,43 @@ pub async fn cancel_download(
 pub async fn delete_download_record(
     download_id: String,
     delete_file: bool,
+    app_handle: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let mut tasks = state.download_manager.tasks.lock().await;
-    if let Some(handle) = tasks.remove(&download_id) {
-        let _ = handle.cancel_tx.send(());
-    }
-    drop(tasks);
+    let task_opt = storage::get_all_downloads_db().ok().and_then(|all| {
+        all.into_iter().find(|t| t.id == download_id)
+    });
 
-    if delete_file {
-        if let Ok(all) = storage::get_all_downloads_db() {
-            if let Some(task) = all.iter().find(|t| t.id == download_id) {
-                let p = Path::new(&task.output_path);
-                if p.exists() {
-                    let _ = fs::remove_file(p);
-                }
-                let part_p = PathBuf::from(format!("{}.part", task.output_path));
-                if part_p.exists() {
-                    let _ = fs::remove_file(part_p);
-                }
-                let hls_parts_dir = PathBuf::from(format!("{}.hls_parts", task.output_path));
-                if hls_parts_dir.exists() {
-                    let _ = fs::remove_dir_all(hls_parts_dir);
+    let handle_opt = {
+        let mut tasks = state.download_manager.tasks.lock().await;
+        tasks.remove(&download_id)
+    };
+
+    if let Some(handle) = handle_opt {
+        let _ = handle.cancel_tx.send(());
+        let _ = tokio::time::timeout(std::time::Duration::from_millis(1500), handle.task).await;
+    }
+
+    if let Some(ref task) = task_opt {
+        let is_incomplete = task.status != "completed";
+        // Si se pide borrar archivo explícitamente O si la descarga no estaba completada
+        if delete_file || is_incomplete {
+            let p = Path::new(&task.output_path);
+            if delete_file && p.exists() {
+                let _ = fs::remove_file(p);
+            }
+            let part_p = PathBuf::from(format!("{}.part", task.output_path));
+            if part_p.exists() {
+                let _ = fs::remove_file(part_p);
+            }
+            let hls_parts_dir = PathBuf::from(format!("{}.hls_parts", task.output_path));
+            if hls_parts_dir.exists() {
+                let _ = fs::remove_dir_all(hls_parts_dir);
+            }
+
+            if let Some(parent) = p.parent() {
+                if let Ok(base_dir_str) = get_default_download_dir(app_handle.clone()) {
+                    clean_empty_anime_folder_safely(parent, Path::new(&base_dir_str));
                 }
             }
         }
@@ -898,8 +1050,9 @@ pub async fn scan_local_downloads(
         return Ok(vec![]);
     }
 
-    // Mapa: Nombre de Anime -> Lista de Episodios
-    let mut groups: HashMap<String, (PathBuf, Vec<LocalEpisodeItem>)> = HashMap::new();
+    // Mapa: (Ruta Canónica, Nombre Anime) -> (Ruta Real, Lista de Episodios)
+    // Deduplica robustamente por ruta física canónica y título para evitar colisiones
+    let mut groups: HashMap<(PathBuf, String), (PathBuf, Vec<LocalEpisodeItem>)> = HashMap::new();
 
     // Obtener historial completo para mapear progreso
     let history_list = storage::get_history(500, 0, None).unwrap_or_default();
@@ -914,8 +1067,23 @@ pub async fn scan_local_downloads(
         title_history_map.entry(key).or_insert(h.watch_progress);
     }
 
-    // 1. Escanear subdirectorios (cada subdirectorio representa un Anime)
-    if let Ok(mut entries) = tokio::fs::read_dir(&base_dir).await {
+    #[allow(unused_mut)]
+    let mut scan_dirs = vec![base_dir.clone()];
+
+    #[cfg(target_os = "android")]
+    {
+        let shared_anime = PathBuf::from("/storage/emulated/0/Anime");
+        if shared_anime.exists() {
+            let shared_canon = shared_anime.canonicalize().unwrap_or_else(|_| shared_anime.clone());
+            let base_canon = base_dir.canonicalize().unwrap_or_else(|_| base_dir.clone());
+            if shared_canon != base_canon {
+                scan_dirs.push(shared_anime);
+            }
+        }
+    }
+
+    for dir in scan_dirs {
+        let Ok(mut entries) = tokio::fs::read_dir(&dir).await else { continue; };
         while let Ok(Some(entry)) = entries.next_entry().await {
             let path = entry.path();
             if path.is_dir() {
@@ -925,10 +1093,13 @@ pub async fn scan_local_downloads(
                 let mut episodes = vec![];
                 scan_episodes_in_dir(&path, &clean_title, &mut episodes, &path_history_map, &title_history_map).await;
 
-                if !episodes.is_empty() {
-                    // Ordenar episodios ascendentemente por número
+                if episodes.is_empty() {
+                    // Auto-limpieza segura de carpetas huérfanas o residuales sin videos
+                    clean_empty_anime_folder_safely(&path, &dir);
+                } else {
                     episodes.sort_by_key(|e| e.episode_number);
-                    groups.insert(clean_title, (path, episodes));
+                    let canon_path = path.canonicalize().unwrap_or_else(|_| path.clone());
+                    groups.insert((canon_path, clean_title), (path, episodes));
                 }
             } else if path.is_file() {
                 // Archivo suelto en raíz (ignorar archivos temporales o incompletos)
@@ -965,7 +1136,8 @@ pub async fn scan_local_downloads(
                             watch_status,
                         };
 
-                        let entry = groups.entry(anime_title.clone()).or_insert_with(|| (base_dir.clone(), vec![]));
+                        let canon_dir = dir.canonicalize().unwrap_or_else(|_| dir.clone());
+                        let entry = groups.entry((canon_dir, anime_title.clone())).or_insert_with(|| (dir.clone(), vec![]));
                         entry.1.push(item);
                     }
                 }
@@ -973,49 +1145,56 @@ pub async fn scan_local_downloads(
         }
     }
 
-    // Si estamos en Android, también escanear /storage/emulated/0/Anime si existe y es diferente de base_dir
-    #[cfg(target_os = "android")]
-    {
-        let shared_anime = PathBuf::from("/storage/emulated/0/Anime");
-        if shared_anime.exists() && shared_anime != base_dir {
-            if let Ok(mut entries) = tokio::fs::read_dir(&shared_anime).await {
-                while let Ok(Some(entry)) = entries.next_entry().await {
-                    let path = entry.path();
-                    if path.is_dir() {
-                        let folder_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("Anime").to_string();
-                        let clean_title = sanitize_anime_folder_name(&folder_name.replace('_', " "));
-                        let mut episodes = vec![];
-                        scan_episodes_in_dir(&path, &clean_title, &mut episodes, &path_history_map, &title_history_map).await;
-                        if !episodes.is_empty() {
-                            episodes.sort_by_key(|e| e.episode_number);
-                            groups.insert(clean_title, (path, episodes));
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    let history_list = storage::get_history(500, 0, None).unwrap_or_default();
     let favorites_list = storage::get_favorites(None).unwrap_or_default();
+    let covers_dir = get_covers_dir(&app_handle).ok();
 
     let mut result = vec![];
-    for (anime_title, (folder_path, mut episodes)) in groups {
+    for ((_canon_path, anime_title), (folder_path, mut episodes)) in groups {
         episodes.sort_by_key(|e| e.episode_number);
         let total_size: u64 = episodes.iter().map(|e| e.file_size).sum();
         let total_episodes = episodes.len();
+        let safe_title = sanitize_anime_folder_name(&anime_title);
 
-        // 1. Buscar si existe un poster.jpg o cover.png en la carpeta que sea válido (> 100 bytes)
-        let local_cover = [
-            folder_path.join("poster.jpg"),
-            folder_path.join("cover.jpg"),
-            folder_path.join("poster.png"),
-            folder_path.join("cover.png"),
-        ].iter().find(|p| {
-            p.exists() && p.metadata().map(|m| m.len() > 100).unwrap_or(false)
-        }).map(|p| p.to_string_lossy().to_string());
+        // 1. Buscar en almacenamiento interno de portadas de la app
+        let mut resolved_cover: Option<String> = None;
+        if let Some(ref c_dir) = covers_dir {
+            for ext in &["jpg", "jpeg", "png", "webp"] {
+                let candidate = c_dir.join(format!("{}.{}", safe_title, ext));
+                if candidate.exists() && candidate.metadata().map(|m| m.len() > 100).unwrap_or(false) {
+                    resolved_cover = Some(candidate.to_string_lossy().to_string());
+                    break;
+                }
+            }
+        }
 
-        // 2. Buscar en historial o favoritos de SQLite
+        // 2. Si no está en almacenamiento interno, comprobar si hay un poster.jpg/cover.png heredado
+        //    y MIGRARLO automáticamente al almacenamiento interno para no perder la portada offline
+        if resolved_cover.is_none() {
+            let legacy_candidates = [
+                folder_path.join("poster.jpg"),
+                folder_path.join("cover.jpg"),
+                folder_path.join("poster.png"),
+                folder_path.join("cover.png"),
+            ];
+
+            if let Some(legacy_p) = legacy_candidates.iter().find(|p| p.exists() && p.metadata().map(|m| m.len() > 100).unwrap_or(false)) {
+                if let Some(ref c_dir) = covers_dir {
+                    let ext = legacy_p.extension().and_then(|e| e.to_str()).unwrap_or("jpg");
+                    let internal_target = c_dir.join(format!("{}.{}", safe_title, ext));
+                    if fs::copy(legacy_p, &internal_target).is_ok() {
+                        // Limpiar el poster heredado del almacenamiento externo para limpiar la galería
+                        let _ = fs::remove_file(legacy_p);
+                        resolved_cover = Some(internal_target.to_string_lossy().to_string());
+                    } else {
+                        resolved_cover = Some(legacy_p.to_string_lossy().to_string());
+                    }
+                } else {
+                    resolved_cover = Some(legacy_p.to_string_lossy().to_string());
+                }
+            }
+        }
+
+        // 3. Buscar en historial o favoritos de SQLite
         let db_cover = history_list.iter()
             .find(|h| h.anime_title.eq_ignore_ascii_case(&anime_title) || h.anime_title.to_lowercase().contains(&anime_title.to_lowercase()))
             .map(|h| h.thumbnail_url.clone())
@@ -1025,7 +1204,7 @@ pub async fn scan_local_downloads(
                     .map(|f| f.thumbnail_url.clone())
             });
 
-        // 3. Fallback inteligente a CDN con slug normalizado
+        // 4. Fallback inteligente a CDN con slug normalizado
         let slug = anime_title
             .to_lowercase()
             .chars()
@@ -1041,7 +1220,7 @@ pub async fn scan_local_downloads(
             None
         };
 
-        let cover_image = local_cover.or(db_cover).or(fallback_cover);
+        let cover_image = resolved_cover.or(db_cover).or(fallback_cover);
 
         result.push(LocalAnimeFolder {
             anime_title,
@@ -1060,7 +1239,7 @@ pub async fn scan_local_downloads(
     Ok(result)
 }
 
-/// Elimina un archivo de episodio descargado localmente
+/// Elimina un archivo de episodio descargado localmente y limpia la carpeta si era el último episodio
 #[tauri::command]
 pub fn delete_local_download(file_path: String, app_handle: AppHandle) -> Result<(), String> {
     let path = Path::new(&file_path);
@@ -1088,6 +1267,21 @@ pub fn delete_local_download(file_path: String, app_handle: AppHandle) -> Result
         }
 
         fs::remove_file(path).map_err(|e| e.to_string())?;
+
+        // Limpiar archivos temporales asociados si existieran
+        let part_p = PathBuf::from(format!("{}.part", file_path));
+        if part_p.exists() {
+            let _ = fs::remove_file(part_p);
+        }
+        let hls_parts_dir = PathBuf::from(format!("{}.hls_parts", file_path));
+        if hls_parts_dir.exists() {
+            let _ = fs::remove_dir_all(hls_parts_dir);
+        }
+
+        // Verificación en dos pasos de la carpeta contenedora
+        if let Some(parent) = path.parent() {
+            clean_empty_anime_folder_safely(parent, &base_canonical);
+        }
     }
     Ok(())
 }
@@ -1136,11 +1330,12 @@ pub async fn cache_image(url: String, app_handle: AppHandle) -> Result<String, S
         .map_err(|e| e.to_string())
 }
 
-/// Guarda la portada de un anime en disco como poster.jpg dentro de la carpeta del anime.
-/// Esto garantiza disponibilidad offline permanente sin depender del CDN.
+/// Guarda la portada de un anime en el almacenamiento interno de la app (app_data_dir/covers/{title}.jpg).
+/// Garantiza disponibilidad offline permanente sin contaminar la carpeta pública de descargas ni la galería en Android.
 #[tauri::command]
 pub async fn save_local_anime_cover(
-    folder_path: String,
+    folder_path: Option<String>,
+    anime_title: Option<String>,
     cover_url: String,
     app_handle: AppHandle,
 ) -> Result<String, String> {
@@ -1148,17 +1343,20 @@ pub async fn save_local_anime_cover(
         return Err("URL de portada inválida".to_string());
     }
 
-    let anime_folder = Path::new(&folder_path);
-    if !anime_folder.exists() {
-        return Err(format!("Carpeta no existe: {}", folder_path));
-    }
+    let title = anime_title.or_else(|| {
+        folder_path.as_ref().and_then(|fp| {
+            Path::new(fp).file_name().and_then(|n| n.to_str()).map(|s| s.to_string())
+        })
+    }).unwrap_or_else(|| "Anime".to_string());
 
-    // 1. Asegurarnos de que esté descargada y en caché
+    let safe_title = sanitize_anime_folder_name(&title);
+
+    // 1. Asegurar descarga y presencia en caché interna
     let _ = crate::storage::get_cached_image(&cover_url, &app_handle)
         .await
         .map_err(|e| e.to_string())?;
 
-    // 2. Localizar el archivo en el directorio de caché de imágenes
+    // 2. Obtener archivo desde el caché de imágenes
     let cache_dir = crate::storage::get_image_cache_dir(&app_handle)
         .map_err(|e| e.to_string())?;
     let filename = crate::storage::hash_image_url(&cover_url);
@@ -1168,28 +1366,34 @@ pub async fn save_local_anime_cover(
         return Err("No se pudo guardar la imagen en caché".to_string());
     }
 
-    // 3. Determinar la extensión y el nombre del poster
+    // 3. Guardar en carpeta interna de portadas (app_data_dir/covers/{safe_title}.jpg)
+    let covers_dir = get_covers_dir(&app_handle).map_err(|e| e.to_string())?;
     let ext = cached_file
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("jpg");
-    let poster_path = anime_folder.join(format!("poster.{}", ext));
+    let internal_cover_path = covers_dir.join(format!("{}.{}", safe_title, ext));
 
-    // 4. Si ya existe un poster válido e idéntico (> 100 bytes y mismo tamaño), no re-copiar
-    if poster_path.exists() {
-        if let (Ok(src_meta), Ok(dst_meta)) = (fs::metadata(&cached_file), fs::metadata(&poster_path)) {
-            if src_meta.len() == dst_meta.len() && dst_meta.len() > 100 {
-                return Ok(poster_path.to_string_lossy().to_string());
+    // Copiar a covers interno si no existe o difiere en tamaño
+    if !internal_cover_path.exists() {
+        fs::copy(&cached_file, &internal_cover_path)
+            .map_err(|e| format!("Error guardando portada interna: {}", e))?;
+    }
+
+    // 4. Si existía un poster.jpg heredado en la carpeta externa del anime, limpiarlo
+    if let Some(ref fp) = folder_path {
+        let external_folder = Path::new(fp);
+        if external_folder.exists() && external_folder.is_dir() {
+            for name in &["poster.jpg", "poster.png", "cover.jpg", "cover.png"] {
+                let p = external_folder.join(name);
+                if p.exists() {
+                    let _ = fs::remove_file(p);
+                }
             }
         }
     }
 
-    // 5. Copiar desde la caché al directorio del anime (sobrescribe archivos dañados/vacíos)
-    fs::copy(&cached_file, &poster_path)
-        .map_err(|e| format!("Error copiando portada: {}", e))?;
-
-
-    Ok(poster_path.to_string_lossy().to_string())
+    Ok(internal_cover_path.to_string_lossy().to_string())
 }
 
 /// Obtiene estadísticas del tamaño de la caché de imágenes
@@ -1547,5 +1751,41 @@ mod tests {
         let filename3 = "installer.txt";
         let safe3 = std::path::Path::new(filename3).file_name().unwrap().to_string_lossy();
         assert!(!safe3.ends_with(".exe") && !safe3.ends_with(".apk"));
+    }
+
+    #[test]
+    fn test_clean_empty_anime_folder_safely_preserves_videos() {
+        use super::*;
+        let temp_dir = std::env::temp_dir().join(format!("anics_test_cleanup_{}", uuid::Uuid::new_v4()));
+        let base_dir = temp_dir.join("Anime");
+        let anime_dir = base_dir.join("Solo Leveling");
+        fs::create_dir_all(&anime_dir).unwrap();
+
+        // Create a video file and residual files
+        let video_path = anime_dir.join("Ep001.mp4");
+        fs::write(&video_path, b"dummy video content").unwrap();
+        let poster_path = anime_dir.join("poster.jpg");
+        fs::write(&poster_path, b"dummy poster").unwrap();
+
+        // When video exists, folder MUST NOT be deleted
+        clean_empty_anime_folder_safely(&anime_dir, &base_dir);
+        assert!(anime_dir.exists(), "Folder should not be deleted when video exists");
+        assert!(video_path.exists());
+
+        // Remove video, now only residual files remain
+        fs::remove_file(&video_path).unwrap();
+        clean_empty_anime_folder_safely(&anime_dir, &base_dir);
+        assert!(!anime_dir.exists(), "Folder should be deleted when 0 videos remain");
+
+        // Clean up base temp dir
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_sanitize_anime_folder_name() {
+        use super::*;
+        assert_eq!(sanitize_anime_folder_name("Naruto: Shippuden?"), "Naruto Shippuden");
+        assert_eq!(sanitize_anime_folder_name("Solo/Leveling <Season 2>"), "Solo Leveling Season 2");
+        assert_eq!(sanitize_anime_folder_name("   "), "Anime");
     }
 }

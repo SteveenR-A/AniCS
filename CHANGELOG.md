@@ -5,6 +5,25 @@ El formato está basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1
 
 ---
 
+## [0.1.21] - 2026-09-02
+
+### 🧹 Limpieza de Descargas Canceladas, Portadas Internas Privadas y Gestión Segura de Carpetas
+- **Limpieza de Archivos al Cancelar o Descartar Descargas:**
+  - `cancel_download` y `delete_download_record` eliminan físicamente archivos parciales (`.part`), fragmentos temporales (`.hls_parts`) y videos incompletos.
+  - Mitigación de condiciones de carrera esperando a que el worker asíncrono libere los descriptores de archivo antes del borrado en disco.
+- **Almacenamiento Privado de Portadas (`covers/`):**
+  - Las portadas de animes descargados ahora se guardan en el directorio interno de la aplicación (`app_data_dir/covers/{titulo}.jpg`).
+  - Cero contaminación en la galería multimedia de Android y en el explorador de Windows, evitando la duplicidad de archivos `poster.jpg`.
+- **Migración Transparente y Auto-limpieza:**
+  - `scan_local_downloads` detecta portadas `poster.jpg` heredadas de versiones anteriores y las migra al almacenamiento interno privado, eliminando el archivo público para mantener limpio el almacenamiento del usuario.
+- **Eliminación Segura en Dos Pasos (`clean_empty_anime_folder_safely`):**
+  - Paso 1: Conteo estricto de videos y descargas en curso. Si contiene al menos un video, la carpeta se preserva intacta.
+  - Paso 2: Si el conteo es cero, elimina residuos (`poster.jpg`, `.nomedia`, `.tmp`) y remueve la carpeta vacía al borrar el último episodio.
+- **Deduplicación Canónica de Series:**
+  - Agrupación por ruta física normalizada y título para evitar carpetas o series duplicadas por alias del sistema de archivos.
+
+---
+
 ## [0.1.20] - 2026-09-01
 
 ### 🚀 Sincronización por Episodio, Estadísticas de Perfil y Escaneo Manual de Descargas

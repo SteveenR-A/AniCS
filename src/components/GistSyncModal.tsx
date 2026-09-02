@@ -224,9 +224,11 @@ export const GistSyncModal: React.FC<Props> = ({ isOpen, onClose }) => {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: 12,
               }}
             >
-              <div>
+              <div style={{ flex: '1 1 auto', minWidth: 0 }}>
                 <div style={{ fontSize: 12, color: 'rgba(255, 255, 255, 0.5)', fontWeight: 600 }}>
                   ESTADO DE SINCRONIZACIÓN
                 </div>
@@ -248,7 +250,7 @@ export const GistSyncModal: React.FC<Props> = ({ isOpen, onClose }) => {
                   )}
                 </div>
                 {config.lastSyncAt && (
-                  <div style={{ fontSize: 11, color: 'rgba(255, 255, 255, 0.4)', marginTop: 2 }}>
+                  <div style={{ fontSize: 11, color: 'rgba(255, 255, 255, 0.4)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     Último sync: {new Date(config.lastSyncAt).toLocaleString()}
                   </div>
                 )}
@@ -262,7 +264,7 @@ export const GistSyncModal: React.FC<Props> = ({ isOpen, onClose }) => {
                     background: 'var(--accent-primary, #3b82f6)',
                     border: 'none',
                     borderRadius: '8px',
-                    padding: '8px 16px',
+                    padding: '8px 14px',
                     color: 'white',
                     fontSize: 13,
                     fontWeight: 700,
@@ -270,6 +272,7 @@ export const GistSyncModal: React.FC<Props> = ({ isOpen, onClose }) => {
                     display: 'flex',
                     alignItems: 'center',
                     gap: 6,
+                    flexShrink: 0,
                     opacity: isSyncing ? 0.7 : 1,
                     transition: 'all 0.2s ease',
                   }}
@@ -347,7 +350,7 @@ export const GistSyncModal: React.FC<Props> = ({ isOpen, onClose }) => {
 
             {/* Token Section */}
             <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginBottom: 6 }}>
                 <label style={{ fontSize: 12, fontWeight: 700, color: 'rgba(255, 255, 255, 0.8)' }}>
                   GitHub Personal Access Token (PAT)
                 </label>
@@ -363,6 +366,7 @@ export const GistSyncModal: React.FC<Props> = ({ isOpen, onClose }) => {
                     display: 'flex',
                     alignItems: 'center',
                     gap: 3,
+                    flexShrink: 0,
                   }}
                 >
                   <span>Crear Token (permiso 'gist')</span>
@@ -376,25 +380,41 @@ export const GistSyncModal: React.FC<Props> = ({ isOpen, onClose }) => {
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-between',
-                    padding: '10px 14px',
-                    borderRadius: '8px',
+                    padding: '10px 12px',
+                    borderRadius: '10px',
                     background: 'rgba(255, 255, 255, 0.04)',
                     border: '1px solid rgba(255, 255, 255, 0.1)',
+                    gap: 8,
+                    minWidth: 0,
                   }}
                 >
-                  <div style={{ fontSize: 13, color: 'rgba(255, 255, 255, 0.8)', fontFamily: 'monospace' }}>
-                    ••••••••••••••••••••••••••••••••
+                  <div
+                    style={{
+                      fontSize: 13,
+                      color: 'rgba(255, 255, 255, 0.85)',
+                      fontFamily: 'monospace',
+                      flex: 1,
+                      minWidth: 0,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    ghp_••••••••••••
                   </div>
-                  <div style={{ display: 'flex', gap: 8 }}>
+                  <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
                     <button
                       onClick={() => setIsEditingToken(true)}
                       style={{
-                        background: 'transparent',
-                        border: 'none',
-                        color: 'rgba(255, 255, 255, 0.7)',
+                        background: 'rgba(255, 255, 255, 0.06)',
+                        border: '1px solid rgba(255, 255, 255, 0.1)',
+                        borderRadius: '6px',
+                        color: 'rgba(255, 255, 255, 0.8)',
                         fontSize: 12,
                         fontWeight: 600,
                         cursor: 'pointer',
+                        padding: '5px 8px',
+                        whiteSpace: 'nowrap',
                       }}
                     >
                       Cambiar
@@ -402,12 +422,15 @@ export const GistSyncModal: React.FC<Props> = ({ isOpen, onClose }) => {
                     <button
                       onClick={clearToken}
                       style={{
-                        background: 'transparent',
-                        border: 'none',
-                        color: '#ef4444',
+                        background: 'rgba(239, 68, 68, 0.12)',
+                        border: '1px solid rgba(239, 68, 68, 0.25)',
+                        borderRadius: '6px',
+                        color: '#f87171',
                         fontSize: 12,
                         fontWeight: 600,
                         cursor: 'pointer',
+                        padding: '5px 8px',
+                        whiteSpace: 'nowrap',
                       }}
                     >
                       Desvincular
@@ -416,7 +439,7 @@ export const GistSyncModal: React.FC<Props> = ({ isOpen, onClose }) => {
                 </div>
               ) : (
                 <form onSubmit={handleSaveToken} style={{ display: 'flex', gap: 8 }}>
-                  <div style={{ position: 'relative', flex: 1, display: 'flex', alignItems: 'center' }}>
+                  <div style={{ position: 'relative', flex: 1, display: 'flex', alignItems: 'center', minWidth: 0 }}>
                     <input
                       type={showToken ? 'text' : 'password'}
                       value={inputToken}
@@ -459,6 +482,7 @@ export const GistSyncModal: React.FC<Props> = ({ isOpen, onClose }) => {
                       fontSize: 13,
                       fontWeight: 700,
                       cursor: 'pointer',
+                      flexShrink: 0,
                     }}
                   >
                     Guardar
@@ -469,9 +493,21 @@ export const GistSyncModal: React.FC<Props> = ({ isOpen, onClose }) => {
 
             {/* Gist Info & Link */}
             {config.gistId && (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <div style={{ fontSize: 12, color: 'rgba(255, 255, 255, 0.6)' }}>
-                  Gist ID: <span style={{ fontFamily: 'monospace', color: 'white' }}>{config.gistId}</span>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  flexWrap: 'wrap',
+                  gap: 8,
+                  padding: '10px 12px',
+                  borderRadius: '10px',
+                  background: 'rgba(255, 255, 255, 0.03)',
+                  border: '1px solid rgba(255, 255, 255, 0.06)',
+                }}
+              >
+                <div style={{ fontSize: 12, color: 'rgba(255, 255, 255, 0.6)', minWidth: 0, flex: '1 1 auto', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  Gist ID: <span style={{ fontFamily: 'monospace', color: 'white' }}>{config.gistId.length > 18 ? `${config.gistId.slice(0, 8)}...${config.gistId.slice(-6)}` : config.gistId}</span>
                 </div>
                 <button
                   onClick={handleOpenGistUrl}
@@ -485,6 +521,9 @@ export const GistSyncModal: React.FC<Props> = ({ isOpen, onClose }) => {
                     display: 'flex',
                     alignItems: 'center',
                     gap: 4,
+                    flexShrink: 0,
+                    padding: 0,
+                    whiteSpace: 'nowrap',
                   }}
                 >
                   <span>Ver en GitHub</span>

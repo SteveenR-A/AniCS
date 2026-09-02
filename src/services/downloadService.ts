@@ -220,14 +220,20 @@ export const preloadImagesBatch = (urls: string[]): Promise<Record<string, strin
 };
 
 /**
- * Copia la portada de un anime al directorio local de la serie como poster.jpg.
- * Garantiza disponibilidad offline sin depender del CDN.
- * Retorna la ruta local del poster o lanza un error si falla.
+ * Guarda la portada de un anime en el almacenamiento interno de la app (app_data_dir/covers).
+ * Garantiza disponibilidad offline permanente sin contaminar la carpeta pública de descargas ni la galería en Android.
+ * Retorna la ruta local interna del poster.
  */
 export const saveLocalAnimeCover = (
-  folderPath: string,
-  coverUrl: string
-): Promise<string> => invoke('save_local_anime_cover', { folderPath, coverUrl });
+  folderPathOrTitle: string,
+  coverUrl: string,
+  animeTitle?: string
+): Promise<string> =>
+  invoke('save_local_anime_cover', {
+    folderPath: folderPathOrTitle.includes('/') || folderPathOrTitle.includes('\\') ? folderPathOrTitle : undefined,
+    animeTitle: animeTitle || (!folderPathOrTitle.includes('/') && !folderPathOrTitle.includes('\\') ? folderPathOrTitle : undefined),
+    coverUrl,
+  });
 
 /** Obtener estadísticas de uso de caché de imágenes */
 export const getCacheStats = (): Promise<import('@/types').CacheStats> =>

@@ -1,5 +1,19 @@
 [
   {
+    "version": "0.1.21",
+    "date": "2026-09-02",
+    "title": "Limpieza de Descargas Canceladas, Portadas Internas Privadas y Gestión Segura de Carpetas",
+    "type": "patch",
+    "highlights": [
+      "Limpieza integral de archivos al cancelar descargas: eliminación automática de .part, .hls_parts y videos temporales",
+      "Almacenamiento privado de portadas de anime en memoria interna (covers/) evitando contaminación y duplicación en la galería de fotos en Android y Windows",
+      "Migración transparente de portadas heredadas (poster.jpg) hacia el almacenamiento interno con auto-limpieza de la carpeta de descargas",
+      "Algoritmo de eliminación segura en 2 pasos para carpetas de anime vacías al borrar episodios",
+      "Deduplicación canónica de carpetas y series locales para evitar colisiones y carpetas duplicadas",
+      "Sincronización reactiva inmediata de la cola de descargas y prevención de condiciones de carrera al pausar o cancelar"
+    ]
+  },
+  {
     "version": "0.1.20",
     "date": "2026-09-01",
     "title": "Sincronización por Episodio, Estadísticas de Perfil de Anime y Escaneo Manual de Descargas",
