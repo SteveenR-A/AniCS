@@ -5,10 +5,10 @@ import { convertFileSrc } from '@tauri-apps/api/core';
 import {
   ArrowLeft, Play, Download, Bookmark, BookmarkCheck,
   ChevronDown, ChevronUp, Check, HardDrive, CheckCircle2,
-  Calendar, Layers, Tag, Tv, Globe, Sparkles, Clock
+  Calendar, Layers, Tag, Tv, Globe, Sparkles, Clock, DownloadCloud
 } from 'lucide-react';
 import { getDetails, getServers, resolveStream } from '@/services/animeService';
-import { addFavorite, removeFavorite, isFavorite as checkFavorite, getHistory } from '@/services/storageService';
+import { addFavorite, removeFavorite, isFavorite as checkFavorite, getHistory, getFavorites, updateFavoriteStatus } from '@/services/storageService';
 import { startDownload, scanLocalDownloads, saveLocalAnimeCover, getLocalMediaUrl } from '@/services/downloadService';
 import { usePlayerStore } from '@/stores/usePlayerStore';
 import { useAnimeStore } from '@/stores/useAnimeStore';
@@ -16,7 +16,9 @@ import { useDownloadStore } from '@/stores/useDownloadStore';
 import { useProfileStore } from '@/stores/useProfileStore';
 import { useSyncStore } from '@/stores/useSyncStore';
 import { CachedImage } from '@/components/CachedImage';
-import type { AnimeDetails, Episode, VideoServer, LocalEpisodeItem } from '@/types';
+import { BatchDownloadModal } from '@/components/BatchDownloadModal';
+import { FavoriteStatusDropdown } from '@/components/FavoriteStatusDropdown';
+import type { AnimeDetails, Episode, VideoServer, LocalEpisodeItem, FavoriteStatus } from '@/types';
 
 export function DesktopDetailsPage() {
   const { url } = useParams<{ url: string }>();
@@ -50,6 +52,8 @@ export function DesktopDetailsPage() {
 
   const [isLoading, setIsLoading] = useState(!cached && (!passedAnime || !passedAnime.episodes?.length));
   const [isFavorite, setIsFavorite] = useState(false);
+  const [favoriteStatus, setFavoriteStatus] = useState<FavoriteStatus>('favorite');
+  const [showBatchModal, setShowBatchModal] = useState(false);
   const [showAllEps, setShowAllEps] = useState(false);
   const [epSearch, setEpSearch] = useState('');
   const [loadingEpisode, setLoadingEpisode] = useState<number | null>(null);
@@ -76,7 +80,15 @@ export function DesktopDetailsPage() {
       if (cached && cached.episodes && cached.episodes.length > 0) {
         setDetails(cached);
         setIsLoading(false);
-        checkFavorite(decodedUrl, activeProfile?.id).then(setIsFavorite).catch(() => {});
+        checkFavorite(decodedUrl, activeProfile?.id).then(fav => {
+          setIsFavorite(fav);
+          if (fav) {
+            getFavorites(activeProfile?.id).then(list => {
+              const found = list.find(f => f.url === decodedUrl);
+              if (found?.status) setFavoriteStatus(found.status as FavoriteStatus);
+            }).catch(() => {});
+          }
+        }).catch(() => {});
         return;
       }
 
@@ -91,6 +103,12 @@ export function DesktopDetailsPage() {
         setDetails(det);
         cacheDetails(det);
         setIsFavorite(fav);
+        if (fav) {
+          getFavorites(activeProfile?.id).then(list => {
+            const found = list.find(f => f.url === decodedUrl);
+            if (found?.status) setFavoriteStatus(found.status as FavoriteStatus);
+          }).catch(() => {});
+        }
       } catch (e) {
         console.error(e);
       } finally {
@@ -190,23 +208,23 @@ export function DesktopDetailsPage() {
       const isTs = localEp.filePath.toLowerCase().endsWith('.ts');
       setCurrentAnime({
         title: details.title,
-        url: localEp.filePath,
+        url: details.url,
         thumbnailUrl: details.thumbnailUrl,
         synopsis: details.synopsis,
         genres: details.genres,
         episodes: details.episodes.map(e => ({
           number: e.number,
           title: e.title || `Episodio ${e.number}`,
-          url: localEpisodesMap.get(e.number)?.filePath || e.url,
+          url: e.url,
           watched: (historyMap.get(e.number) ?? 0) >= 0.85,
           watchProgress: historyMap.get(e.number) ?? 0,
         })),
-        source: 'local',
+        source: details.source || source,
       });
       setCurrentEpisode({
         number: ep.number,
-        title: `Episodio ${ep.number}`,
-        url: localEp.filePath,
+        title: ep.title || `Episodio ${ep.number}`,
+        url: ep.url,
         watched: (historyMap.get(ep.number) ?? 0) >= 0.85,
         watchProgress: historyMap.get(ep.number) ?? 0,
       });
@@ -358,10 +376,33 @@ export function DesktopDetailsPage() {
           url: decodedUrl,
           thumbnailUrl: details.thumbnailUrl,
           source: details.source,
-        }, activeProfile?.id);
+          status: favoriteStatus,
+        }, activeProfile?.id, favoriteStatus);
         setIsFavorite(true);
         useSyncStore.getState().triggerDebouncedSync();
       }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleStatusChange = async (newStatus: FavoriteStatus) => {
+    if (!details) return;
+    try {
+      if (!isFavorite) {
+        await addFavorite({
+          title: details.title,
+          url: decodedUrl,
+          thumbnailUrl: details.thumbnailUrl,
+          source: details.source,
+          status: newStatus,
+        }, activeProfile?.id, newStatus);
+        setIsFavorite(true);
+      } else {
+        await updateFavoriteStatus(decodedUrl, newStatus, activeProfile?.id);
+      }
+      setFavoriteStatus(newStatus);
+      useSyncStore.getState().triggerDebouncedSync();
     } catch (e) {
       console.error(e);
     }
@@ -412,61 +453,81 @@ export function DesktopDetailsPage() {
   }
 
   return (
-    <div style={{ paddingBottom: 60, minHeight: '100%' }}>
-      {/* Toast de descarga */}
+    <div style={{ paddingBottom: 60 }}>
+      {/* Toast flotante de éxito de descarga */}
       <AnimatePresence>
         {downloadSuccessToast && (
           <motion.div
-            initial={{ opacity: 0, y: -20, scale: 0.9 }}
+            initial={{ opacity: 0, y: -20, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -20, scale: 0.9 }}
+            exit={{ opacity: 0, y: -20, scale: 0.95 }}
             style={{
-              position: 'fixed', top: 24, left: '50%', transform: 'translateX(-50%)',
-              background: 'rgba(16, 185, 129, 0.95)', backdropFilter: 'blur(16px)',
-              color: 'white', padding: '10px 24px', borderRadius: 'var(--radius-full)',
-              display: 'flex', alignItems: 'center', gap: 8, zIndex: 100,
-              boxShadow: '0 4px 20px rgba(16, 185, 129, 0.4)', fontSize: 13, fontWeight: 700,
+              position: 'fixed', top: 20, right: 28, zIndex: 9999,
+              background: 'var(--bg-elevated)',
+              border: '1px solid var(--accent-primary)',
+              boxShadow: 'var(--shadow-glow)',
+              borderRadius: 'var(--radius-lg)',
+              padding: '12px 20px',
+              display: 'flex', alignItems: 'center', gap: 10,
+              color: 'var(--text-primary)', fontSize: 13, fontWeight: 600,
             }}
           >
-            <Check size={16} /> {downloadSuccessToast}
+            <CheckCircle2 size={18} color="var(--accent-primary)" />
+            <span>{downloadSuccessToast}</span>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Hero Banner Desktop con Gran Blur Panorámico */}
-      <div style={{ position: 'relative', height: 350, overflow: 'hidden' }}>
-        {details.thumbnailUrl && (
-          <img
-            src={details.thumbnailUrl}
-            alt={details.title}
-            style={{ width: '100%', height: '100%', objectFit: 'cover', filter: 'blur(32px) brightness(0.32)', transform: 'scale(1.15)' }}
-          />
-        )}
+      {/* Hero Banner Desktop */}
+      <div style={{
+        position: 'relative',
+        minHeight: 280,
+        display: 'flex',
+        alignItems: 'flex-end',
+        padding: '36px 36px 28px',
+        overflow: 'hidden',
+        background: 'var(--bg-surface)',
+        borderBottom: '1px solid var(--border-subtle)',
+      }}>
+        {/* Imagen de Fondo Desenfundada */}
         <div style={{
-          position: 'absolute', inset: 0,
-          background: 'linear-gradient(to bottom, transparent 15%, var(--bg-base) 100%)',
+          position: 'absolute', inset: 0, zIndex: 0,
+          backgroundImage: `url(${details.thumbnailUrl})`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          filter: 'blur(32px) brightness(0.25)',
+          transform: 'scale(1.1)',
+        }} />
+
+        {/* Gradientes de Integración */}
+        <div style={{
+          position: 'absolute', inset: 0, zIndex: 1,
+          background: 'linear-gradient(to top, var(--bg-base) 0%, rgba(13,17,23,0.7) 60%, rgba(13,17,23,0.9) 100%)',
         }} />
 
         {/* Botón Volver */}
         <button
           onClick={() => navigate(-1)}
           style={{
-            position: 'absolute', top: 24, left: 32,
-            background: 'rgba(10,11,15,0.75)', border: '1px solid var(--border-subtle)',
-            borderRadius: 'var(--radius-full)', padding: '8px 18px',
-            color: 'var(--text-primary)', cursor: 'pointer',
-            display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 600,
-            backdropFilter: 'blur(12px)', zIndex: 10,
+            position: 'absolute', top: 20, left: 24, zIndex: 10,
+            background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(8px)',
+            border: '1px solid rgba(255,255,255,0.1)',
+            borderRadius: 'var(--radius-full)',
+            width: 38, height: 38,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: 'white', cursor: 'pointer',
           }}
         >
-          <ArrowLeft size={16} /> Volver
+          <ArrowLeft size={18} />
         </button>
 
-        {/* Poster Panorámico + Título Desktop */}
+        {/* Contenido del Banner */}
         <div style={{
-          position: 'absolute', bottom: 12, left: 36, right: 36,
+          position: 'relative', zIndex: 2,
           display: 'flex', gap: 28, alignItems: 'flex-end',
+          maxWidth: 1400, width: '100%', margin: '0 auto',
         }}>
+          {/* Poster del Anime */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -576,22 +637,51 @@ export function DesktopDetailsPage() {
             </motion.button>
           )}
 
-          <motion.button
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.97 }}
-            onClick={handleToggleFavorite}
-            style={{
-              background: isFavorite ? 'rgba(239, 68, 68, 0.15)' : 'var(--bg-surface)',
-              border: `1px solid ${isFavorite ? 'rgba(239, 68, 68, 0.4)' : 'var(--border-moderate)'}`,
-              color: isFavorite ? '#f87171' : 'var(--text-primary)',
-              borderRadius: 'var(--radius-lg)', padding: '12px 20px',
-              fontSize: 14, fontWeight: 600, cursor: 'pointer',
-              display: 'flex', alignItems: 'center', gap: 8,
-            }}
-          >
-            {isFavorite ? <BookmarkCheck size={18} /> : <Bookmark size={18} />}
-            {isFavorite ? 'En Favoritos' : 'Añadir a Favoritos'}
-          </motion.button>
+          {/* Botón Favorito y Dropdown de Estado */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <motion.button
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.97 }}
+              onClick={handleToggleFavorite}
+              style={{
+                background: isFavorite ? 'rgba(236, 72, 153, 0.15)' : 'var(--bg-surface)',
+                border: `1px solid ${isFavorite ? 'rgba(236, 72, 153, 0.4)' : 'var(--border-moderate)'}`,
+                color: isFavorite ? '#ec4899' : 'var(--text-primary)',
+                borderRadius: 'var(--radius-lg)', padding: '12px 20px',
+                fontSize: 14, fontWeight: 600, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: 8,
+              }}
+            >
+              {isFavorite ? <BookmarkCheck size={18} /> : <Bookmark size={18} />}
+              {isFavorite ? 'En Favoritos' : 'Añadir a Favoritos'}
+            </motion.button>
+
+            {isFavorite && (
+              <FavoriteStatusDropdown
+                currentStatus={favoriteStatus}
+                onSelectStatus={handleStatusChange}
+              />
+            )}
+          </div>
+
+          {/* Botón Descarga por Lotes */}
+          {details.episodes.length > 0 && (
+            <motion.button
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.97 }}
+              onClick={() => setShowBatchModal(true)}
+              style={{
+                background: 'rgba(59, 130, 246, 0.15)',
+                border: '1px solid rgba(59, 130, 246, 0.4)',
+                color: '#60a5fa',
+                borderRadius: 'var(--radius-lg)', padding: '12px 20px',
+                fontSize: 14, fontWeight: 600, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: 8,
+              }}
+            >
+              <DownloadCloud size={18} /> Descarga por Lotes
+            </motion.button>
+          )}
         </div>
 
         {/* Ficha Técnica Desktop */}
@@ -1078,6 +1168,21 @@ export function DesktopDetailsPage() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Modal de Descarga por Lotes */}
+      {showBatchModal && details && (
+        <BatchDownloadModal
+          isOpen={showBatchModal}
+          onClose={() => setShowBatchModal(false)}
+          animeTitle={details.title}
+          episodes={details.episodes}
+          source={source}
+          onSuccessToast={(msg) => {
+            setDownloadSuccessToast(msg);
+            setTimeout(() => setDownloadSuccessToast(null), 4000);
+          }}
+        />
+      )}
     </div>
   );
 }

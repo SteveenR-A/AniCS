@@ -1,63 +1,64 @@
 use crate::core::{AppError, AppResult};
+use crate::storage::database;
 
 const SERVICE_NAME: &str = "AniCS";
 
+#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
 fn make_entry(key: &str) -> AppResult<keyring::Entry> {
-    // En Windows, el target visible en Credential Manager será "AniCS/key"
-    // Esto asegura TargetName explícito y evita colisiones en el Administrador de credenciales
     let target = format!("{SERVICE_NAME}/{key}");
     keyring::Entry::new_with_target(&target, SERVICE_NAME, key)
         .map_err(|e| AppError::Generic(format!("Keyring init error for '{key}': {e}")))
 }
 
-/// Guarda un token o secreto en el Keyring seguro del sistema operativo (Windows Credential Manager / macOS Keychain / Linux Secret Service).
+/// Guarda un token o secreto en el Keyring seguro del SO o en sync_config interno en Android / entornos sin keyring.
 pub fn set_secure_secret(key: &str, secret: &str) -> AppResult<()> {
     #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
     {
-        make_entry(key)?
-            .set_password(secret)
-            .map_err(|e| AppError::Generic(format!("Failed to save '{key}': {e}")))?;
-        Ok(())
+        if let Ok(entry) = make_entry(key) {
+            if entry.set_password(secret).is_ok() {
+                // También limpiamos cualquier entrada fallback antigua para mantener consistencia
+                let _ = database::delete_sync_config(&format!("_sec_{key}"));
+                return Ok(());
+            }
+        }
     }
-    #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
-    {
-        let _ = (key, secret);
-        Ok(())
-    }
+
+    // Fallback garantizado para Android o entornos sin soporte de keyring
+    database::set_sync_config(&format!("_sec_{key}"), secret)
 }
 
-/// Obtiene un token o secreto desde el Keyring seguro del sistema operativo.
+/// Obtiene un token o secreto desde el Keyring seguro o sync_config en Android.
 pub fn get_secure_secret(key: &str) -> AppResult<Option<String>> {
     #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
     {
-        match make_entry(key)?.get_password() {
-            Ok(secret) => Ok(Some(secret)),
-            Err(keyring::Error::NoEntry) => Ok(None),
-            Err(e) => Err(AppError::Generic(format!("Failed to get '{key}': {e}"))),
+        if let Ok(entry) = make_entry(key) {
+            match entry.get_password() {
+                Ok(secret) => return Ok(Some(secret)),
+                Err(keyring::Error::NoEntry) => return Ok(None),
+                Err(_) => {},
+            }
         }
     }
-    #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
-    {
-        let _ = key;
-        Ok(None)
+
+    // Fallback garantizado para Android
+    match database::get_sync_config(&format!("_sec_{key}")) {
+        Ok(v) => Ok(v),
+        Err(AppError::Generic(msg)) if msg.contains("DB not initialized") => Ok(None),
+        Err(e) => Err(e),
     }
 }
 
-/// Elimina un token o secreto del Keyring del sistema operativo.
+/// Elimina un token o secreto del Keyring o sync_config.
 pub fn delete_secure_secret(key: &str) -> AppResult<()> {
     #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
     {
-        match make_entry(key)?.delete_credential() {
-            Ok(()) => Ok(()),
-            Err(keyring::Error::NoEntry) => Ok(()),
-            Err(e) => Err(AppError::Generic(format!("Failed to delete '{key}': {e}"))),
+        if let Ok(entry) = make_entry(key) {
+            let _ = entry.delete_credential();
         }
     }
-    #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
-    {
-        let _ = key;
-        Ok(())
-    }
+
+    let _ = database::delete_sync_config(&format!("_sec_{key}"));
+    Ok(())
 }
 
 #[cfg(test)]

@@ -12,6 +12,7 @@ import {
   getDatabaseStats,
   optimizeDatabase,
   resetDatabase,
+  normalizeAnimeTitleKey,
 } from '../storageService';
 import { invoke } from '@tauri-apps/api/core';
 import type { HistoryEntry, AnimeResult } from '@/types';
@@ -94,5 +95,13 @@ describe('storageService', () => {
   it('resetDatabase should call invoke with correct arguments', async () => {
     await resetDatabase();
     expect(invoke).toHaveBeenCalledWith('reset_database');
+  });
+
+  it('normalizeAnimeTitleKey should normalize accents, casing and special characters', () => {
+    expect(normalizeAnimeTitleKey('Solo Leveling')).toBe('sololeveling');
+    expect(normalizeAnimeTitleKey('Shingeki no Kyojin: The Final Season')).toBe('shingekinokyojinthefinalseason');
+    expect(normalizeAnimeTitleKey('Pokémon: Los Viajes')).toBe('pokemonlosviajes');
+    expect(normalizeAnimeTitleKey('  One-Piece! (2024) ')).toBe('onepiece2024');
+    expect(normalizeAnimeTitleKey('')).toBe('');
   });
 });

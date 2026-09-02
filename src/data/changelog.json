@@ -1,5 +1,19 @@
 [
   {
+    "version": "0.1.22",
+    "date": "2026-09-02",
+    "title": "Descargas por Lotes, Barra de Almacenamiento, Favoritos por Estado y Fix de Sync Android",
+    "type": "minor",
+    "highlights": [
+      "Descarga por Lotes (Batch Download): Modal inteligente en la vista de detalles con modos 'No Vistos', 'Por Rango' y 'Selección Manual' para encolar múltiples capítulos en background",
+      "Barra de Almacenamiento: Indicador visual en la pestaña de descargas que muestra el espacio de animes descargados respecto al espacio libre del disco o almacenamiento interno",
+      "Organización de Favoritos por Estado: Clasificación rápida en pestañas 'Todos', 'Viendo', 'Pendiente', 'Completado' y 'Favoritos' con dropdown para cambiar de estado al instante",
+      "Historial Unificado por Serie: Consolidación de múltiples capítulos de una misma serie en una sola tarjeta con indicador de último visto, barra de progreso global y desplegable de episodios vistos",
+      "Fix Crítico de Sincronía en Android: Fallback seguro a SQLite en caso de indisponibilidad de Keyring nativo, garantizando la persistencia del token de GitHub y la sal de cifrado",
+      "Nuevo comando Tauri nativo para cálculo recursivo de tamaño de descargas y espacio libre multiplataforma (Win32 API y POSIX statvfs)"
+    ]
+  },
+  {
     "version": "0.1.21",
     "date": "2026-09-02",
     "title": "Limpieza de Descargas, Motor de Sync Inteligente, 6 Nuevos Temas y UI Móvil",

@@ -378,10 +378,15 @@ export function PlayerPage() {
       setIsLoadingInitial(true);
       setLoadError(null);
 
+      const queryAnimeUrl = searchParams.get('animeUrl');
+      const targetAnimeUrl = (queryAnimeUrl && (queryAnimeUrl.startsWith('http://') || queryAnimeUrl.startsWith('https://')))
+        ? decodeURIComponent(queryAnimeUrl)
+        : decoded;
+
       try {
-        let details = getCachedDetails(decoded);
-        if (!details || details.url !== decoded) {
-          details = await getDetails(decoded, querySource);
+        let details = getCachedDetails(targetAnimeUrl);
+        if (!details || details.url !== targetAnimeUrl) {
+          details = await getDetails(targetAnimeUrl, querySource);
           cacheDetails(details);
         }
 
@@ -389,7 +394,7 @@ export function PlayerPage() {
         const targetEp = details.episodes.find(e => e.number === epNum) || details.episodes[0] || {
           number: epNum,
           title: `Episodio ${epNum}`,
-          url: `${decoded.replace(/\/$/, '')}/${epNum}/`,
+          url: `${targetAnimeUrl.replace(/\/$/, '')}/${epNum}/`,
           watched: false,
         };
         setCurrentEpisode(targetEp);

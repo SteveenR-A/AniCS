@@ -229,3 +229,13 @@ export interface Source {
   name: string;
   baseUrl: string;
 }
+
+export type FavoriteStatus = 'watching' | 'plan_to_watch' | 'completed' | 'favorite';
+
+export interface StorageSpaceInfo {
+  downloadsBytes: number;
+  availableBytes: number;
+  totalBytes: number;
+  downloadPath: string;
+}
+

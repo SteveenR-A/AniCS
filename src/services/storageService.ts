@@ -25,8 +25,11 @@ export const removeHistoryBatch = (ids: string[]): Promise<void> =>
 export const removeHistoryByAnime = (animeUrl: string, profileId?: string): Promise<void> =>
   invoke('remove_history_by_anime', { animeUrl, profileId });
 
-export const addFavorite = (anime: AnimeResult, profileId?: string): Promise<void> =>
-  invoke('add_favorite', { anime, profileId });
+export const addFavorite = (anime: AnimeResult, profileId?: string, status?: string): Promise<void> =>
+  invoke('add_favorite', { anime, profileId, status });
+
+export const updateFavoriteStatus = (url: string, status: string, profileId?: string): Promise<void> =>
+  invoke('update_favorite_status', { url, status, profileId });
 
 export const removeFavorite = (url: string, profileId?: string): Promise<void> =>
   invoke('remove_favorite', { url, profileId });
@@ -39,6 +42,9 @@ export const getFavorites = (profileId?: string): Promise<AnimeResult[]> =>
 
 export const getAllFavoritesForSync = (profileId?: string): Promise<AnimeResult[]> =>
   invoke('get_all_favorites_for_sync', { profileId });
+
+export const getStorageSpaceInfo = (): Promise<import('@/types').StorageSpaceInfo> =>
+  invoke('get_storage_space_info');
 
 export const getAllSettings = (): Promise<Record<string, string>> =>
   invoke('get_all_settings');
@@ -63,4 +69,20 @@ export const optimizeDatabase = (): Promise<void> =>
 /** Restablece de forma segura las tablas de SQLite sin romper la integridad de la app */
 export const resetDatabase = (): Promise<void> =>
   invoke('reset_database');
+
+/**
+ * Normalizador de títulos para deduplicación canónica de animes e historial
+ * Elimina acentos, mayúsculas, signos de puntuación y espacios para unificar
+ * registros provenientes de descargas locales y servidores online (JKAnime, etc.).
+ */
+export function normalizeAnimeTitleKey(str: string): string {
+  if (!str) return '';
+  return str
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // Eliminar tildes/diacríticos
+    .replace(/[^a-z0-9]/g, '')       // Eliminar caracteres especiales y espacios
+    .trim();
+}
+
 

@@ -5,6 +5,38 @@ El formato está basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1
 
 ---
 
+## [0.1.22] - 2026-09-02
+
+### 📥 Gestión Avanzada de Descargas
+- **Descarga por Lotes (Batch Download):**
+  - Nuevo modal interactivo en la vista de detalles del anime con 3 modos de descarga:
+    - *No Vistos:* Identifica automáticamente y encola únicamente los episodios que el usuario no ha completado.
+    - *Por Rango:* Permite descargar un bloque continuo de episodios (ej. del capítulo 1 al 12).
+    - *Selección Manual:* Selección personalizada con casillas interactivas y botones rápidos ("Todos", "Ninguno", "Invertir").
+  - Resolución secuencial de enlaces directos de video en segundo plano con notificación de progreso y respaldo inteligente de servidores.
+- **Barra de Almacenamiento en Disco:**
+  - Componente visual interactivo en la pestaña de descargas que muestra cuánto espacio ocupan los animes descargados respecto al espacio libre del disco o memoria interna.
+  - Nuevo comando Tauri nativo (`get_storage_space_info`) con cálculo recursivo en Rust y soporte multiplataforma (`GetDiskFreeSpaceExW` en Windows y `statvfs` en POSIX / Android).
+
+### ⭐ Organización de Favoritos por Estado
+- **Listas de Seguimiento:**
+  - Clasificación rápida de tus animes favoritos en pestañas dedicadas: *"Todos"*, *"Viendo"*, *"Pendiente"*, *"Completado"* y *"Favoritos"*.
+  - Selector de estado (`FavoriteStatusDropdown`) estilizado con iconos Lucide y colores temáticos, accesible directamente desde la tarjeta de favoritos y la barra de acciones de la vista de detalles.
+  - Migración segura en SQLite (`ALTER TABLE favorites ADD COLUMN status TEXT NOT NULL DEFAULT 'favorite'`) e indexación optimizada.
+
+### 🕒 Historial Unificado por Serie
+- **Consolidación de Episodios por Anime:**
+  - El historial ahora agrupa todas las visualizaciones de una misma serie en una única tarjeta principal, evitando la saturación de entradas duplicadas.
+  - Indicador destacado del último capítulo visto con porcentaje de progreso y botón de reanudación directa.
+  - Sub-lista desplegable interactiva (acordeón) para explorar todos los capítulos vistos de la serie, reproducir episodios anteriores o eliminarlos de forma individual.
+
+### 🔐 Fix de Sincronía en Android y Persistencia Segura
+- **Fallback Resiliente de Credenciales:**
+  - Implementado mecanismo de almacenamiento seguro con SQLite (`sync_config` con prefijo privado `_sec_`) en entornos móviles o sistemas sin soporte para Keyring del SO.
+  - Garantiza que el Personal Access Token (PAT) de GitHub y la sal de PBKDF2 persistan correctamente en Android para sincronizaciones automáticas y arranque en frío.
+
+---
+
 ## [0.1.21] - 2026-09-02
 
 ### 🎨 Nuevos Temas Visuales y Personalización

@@ -82,14 +82,26 @@ pub async fn remove_history_by_anime(
     storage::remove_history_by_anime(&anime_url, profile_id.as_deref()).map_err(|e| e.to_string())
 }
 
-/// Agregar a favoritos (opcionalmente por perfil)
+/// Agregar a favoritos (opcionalmente por perfil y estado)
 #[tauri::command]
 pub async fn add_favorite(
     anime: AnimeResult,
     profile_id: Option<String>,
+    status: Option<String>,
     _state: State<'_, AppState>,
 ) -> Result<(), String> {
-    storage::add_favorite(&anime, profile_id.as_deref()).map_err(|e| e.to_string())
+    storage::add_favorite(&anime, profile_id.as_deref(), status.as_deref()).map_err(|e| e.to_string())
+}
+
+/// Actualizar el estado de seguimiento de un favorito
+#[tauri::command]
+pub async fn update_favorite_status(
+    url: String,
+    status: String,
+    profile_id: Option<String>,
+    _state: State<'_, AppState>,
+) -> Result<(), String> {
+    storage::update_favorite_status(&url, &status, profile_id.as_deref()).map_err(|e| e.to_string())
 }
 
 /// Eliminar de favoritos (opcionalmente por perfil)

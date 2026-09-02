@@ -4,10 +4,10 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import {
   ArrowLeft, Play, Download, Bookmark, BookmarkCheck,
-  ChevronDown, ChevronUp, Check, HardDrive, CheckCircle2, Loader2, Calendar
+  ChevronDown, ChevronUp, Check, HardDrive, CheckCircle2, Loader2, Calendar, DownloadCloud
 } from 'lucide-react';
 import { getDetails, getServers, resolveStream } from '@/services/animeService';
-import { addFavorite, removeFavorite, isFavorite as checkFavorite, getHistory } from '@/services/storageService';
+import { addFavorite, removeFavorite, isFavorite as checkFavorite, getHistory, getFavorites, updateFavoriteStatus } from '@/services/storageService';
 import { startDownload, scanLocalDownloads, saveLocalAnimeCover, getLocalMediaUrl } from '@/services/downloadService';
 import { usePlayerStore } from '@/stores/usePlayerStore';
 import { useAnimeStore } from '@/stores/useAnimeStore';
@@ -15,7 +15,9 @@ import { useDownloadStore } from '@/stores/useDownloadStore';
 import { useProfileStore } from '@/stores/useProfileStore';
 import { useSyncStore } from '@/stores/useSyncStore';
 import { CachedImage } from '@/components/CachedImage';
-import type { AnimeDetails, Episode, VideoServer, LocalEpisodeItem } from '@/types';
+import { BatchDownloadModal } from '@/components/BatchDownloadModal';
+import { FavoriteStatusDropdown } from '@/components/FavoriteStatusDropdown';
+import type { AnimeDetails, Episode, VideoServer, LocalEpisodeItem, FavoriteStatus } from '@/types';
 
 export function MobileDetailsPage() {
   const { url } = useParams<{ url: string }>();
@@ -49,6 +51,8 @@ export function MobileDetailsPage() {
 
   const [isLoading, setIsLoading] = useState(!cached && (!passedAnime || !passedAnime.episodes?.length));
   const [isFavorite, setIsFavorite] = useState(false);
+  const [favoriteStatus, setFavoriteStatus] = useState<FavoriteStatus>('favorite');
+  const [showBatchModal, setShowBatchModal] = useState(false);
   const [showAllEps, setShowAllEps] = useState(false);
   const [epSearch, setEpSearch] = useState('');
   const [loadingEpisode, setLoadingEpisode] = useState<number | null>(null);
@@ -75,7 +79,15 @@ export function MobileDetailsPage() {
       if (cached && cached.episodes && cached.episodes.length > 0) {
         setDetails(cached);
         setIsLoading(false);
-        checkFavorite(decodedUrl, activeProfile?.id).then(setIsFavorite).catch(() => {});
+        checkFavorite(decodedUrl, activeProfile?.id).then(fav => {
+          setIsFavorite(fav);
+          if (fav) {
+            getFavorites(activeProfile?.id).then(list => {
+              const found = list.find(f => f.url === decodedUrl);
+              if (found?.status) setFavoriteStatus(found.status as FavoriteStatus);
+            }).catch(() => {});
+          }
+        }).catch(() => {});
         return;
       }
 
@@ -90,6 +102,12 @@ export function MobileDetailsPage() {
         setDetails(det);
         cacheDetails(det);
         setIsFavorite(fav);
+        if (fav) {
+          getFavorites(activeProfile?.id).then(list => {
+            const found = list.find(f => f.url === decodedUrl);
+            if (found?.status) setFavoriteStatus(found.status as FavoriteStatus);
+          }).catch(() => {});
+        }
       } catch (e) {
         console.error(e);
       } finally {
@@ -189,23 +207,23 @@ export function MobileDetailsPage() {
       const isTs = localEp.filePath.toLowerCase().endsWith('.ts');
       setCurrentAnime({
         title: details.title,
-        url: localEp.filePath,
+        url: details.url,
         thumbnailUrl: details.thumbnailUrl,
         synopsis: details.synopsis,
         genres: details.genres,
         episodes: details.episodes.map(e => ({
           number: e.number,
           title: e.title || `Episodio ${e.number}`,
-          url: localEpisodesMap.get(e.number)?.filePath || e.url,
+          url: e.url,
           watched: (historyMap.get(e.number) ?? 0) >= 0.85,
           watchProgress: historyMap.get(e.number) ?? 0,
         })),
-        source: 'local',
+        source: details.source || source,
       });
       setCurrentEpisode({
         number: ep.number,
-        title: `Episodio ${ep.number}`,
-        url: localEp.filePath,
+        title: ep.title || `Episodio ${ep.number}`,
+        url: ep.url,
         watched: (historyMap.get(ep.number) ?? 0) >= 0.85,
         watchProgress: historyMap.get(ep.number) ?? 0,
       });
@@ -357,10 +375,33 @@ export function MobileDetailsPage() {
           url: decodedUrl,
           thumbnailUrl: details.thumbnailUrl,
           source: details.source,
-        }, activeProfile?.id);
+          status: favoriteStatus,
+        }, activeProfile?.id, favoriteStatus);
         setIsFavorite(true);
         useSyncStore.getState().triggerDebouncedSync();
       }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleStatusChange = async (newStatus: FavoriteStatus) => {
+    if (!details) return;
+    try {
+      if (!isFavorite) {
+        await addFavorite({
+          title: details.title,
+          url: decodedUrl,
+          thumbnailUrl: details.thumbnailUrl,
+          source: details.source,
+          status: newStatus,
+        }, activeProfile?.id, newStatus);
+        setIsFavorite(true);
+      } else {
+        await updateFavoriteStatus(decodedUrl, newStatus, activeProfile?.id);
+      }
+      setFavoriteStatus(newStatus);
+      useSyncStore.getState().triggerDebouncedSync();
     } catch (e) {
       console.error(e);
     }
@@ -458,35 +499,32 @@ export function MobileDetailsPage() {
             backdropFilter: 'blur(12px)', zIndex: 10,
           }}
         >
-          <ArrowLeft size={14} /> Volver
+          <ArrowLeft size={16} /> Volver
         </button>
 
-        {/* Poster + Título y Badges */}
+        {/* Poster Panorámico + Título Móvil */}
         <div style={{
           position: 'absolute', bottom: 10, left: 14, right: 14,
           display: 'flex', gap: 12, alignItems: 'flex-end',
         }}>
-          <motion.div
-            initial={{ opacity: 0, y: 15 }}
-            animate={{ opacity: 1, y: 0 }}
-            style={{
-              width: 95, height: 138, borderRadius: 'var(--radius-lg)',
-              overflow: 'hidden', flexShrink: 0,
-              border: '2px solid var(--border-moderate)',
-              boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
-              background: 'var(--bg-elevated)',
-            }}
-          >
+          <div style={{
+            width: 80, height: 115, borderRadius: 'var(--radius-md)',
+            overflow: 'hidden', flexShrink: 0,
+            border: '2px solid var(--border-moderate)',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+            background: 'var(--bg-elevated)',
+          }}>
             <CachedImage
               src={details.thumbnailUrl}
               alt={details.title}
               fallbackIconSize={32}
               style={{ width: '100%', height: '100%', objectFit: 'cover' }}
             />
-          </motion.div>
+          </div>
 
-          <div style={{ flex: 1, minWidth: 0, paddingBottom: 4 }}>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 5, alignItems: 'center' }}>
+          <div style={{ flex: 1, minWidth: 0, paddingBottom: 2 }}>
+            {/* Badges de Tipo y Estado */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 6, alignItems: 'center' }}>
               {details.animeType && (
                 <span style={{
                   background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))',
@@ -549,20 +587,21 @@ export function MobileDetailsPage() {
       {/* Contenido Móvil */}
       <div style={{ padding: '14px 14px 0', display: 'flex', flexDirection: 'column', gap: 16 }}>
         {/* Botones de Acción Táctiles */}
-        <div style={{ display: 'grid', gridTemplateColumns: details.episodes.length > 0 ? '1fr 1fr' : '1fr', gap: 10 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
           {details.episodes.length > 0 && (
             <motion.button
               whileTap={{ scale: 0.95 }}
               onClick={() => handlePlayEpisode(details.episodes[0])}
               style={{
+                flex: 1, minWidth: 120,
                 background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))',
                 color: 'white', border: 'none', borderRadius: 'var(--radius-md)',
-                padding: '10px 14px', fontSize: 13, fontWeight: 700,
+                padding: '10px 12px', fontSize: 12, fontWeight: 700,
                 cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
                 boxShadow: 'var(--shadow-glow)',
               }}
             >
-              <Play size={16} fill="white" /> Ep. {details.episodes[0].number}
+              <Play size={15} fill="white" /> Ep. {details.episodes[0].number}
             </motion.button>
           )}
 
@@ -570,17 +609,43 @@ export function MobileDetailsPage() {
             whileTap={{ scale: 0.95 }}
             onClick={handleToggleFavorite}
             style={{
-              background: isFavorite ? 'rgba(239, 68, 68, 0.15)' : 'var(--bg-surface)',
-              border: `1px solid ${isFavorite ? 'rgba(239, 68, 68, 0.4)' : 'var(--border-moderate)'}`,
-              color: isFavorite ? '#f87171' : 'var(--text-primary)',
-              borderRadius: 'var(--radius-md)', padding: '10px 14px',
-              fontSize: 13, fontWeight: 600, cursor: 'pointer',
+              flex: 1, minWidth: 100,
+              background: isFavorite ? 'rgba(236, 72, 153, 0.15)' : 'var(--bg-surface)',
+              border: `1px solid ${isFavorite ? 'rgba(236, 72, 153, 0.4)' : 'var(--border-moderate)'}`,
+              color: isFavorite ? '#ec4899' : 'var(--text-primary)',
+              borderRadius: 'var(--radius-md)', padding: '10px 12px',
+              fontSize: 12, fontWeight: 600, cursor: 'pointer',
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
             }}
           >
-            {isFavorite ? <BookmarkCheck size={16} /> : <Bookmark size={16} />}
+            {isFavorite ? <BookmarkCheck size={15} /> : <Bookmark size={15} />}
             {isFavorite ? 'Favorito' : 'Guardar'}
           </motion.button>
+
+          {isFavorite && (
+            <FavoriteStatusDropdown
+              currentStatus={favoriteStatus}
+              onSelectStatus={handleStatusChange}
+              size="sm"
+            />
+          )}
+
+          {details.episodes.length > 0 && (
+            <motion.button
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setShowBatchModal(true)}
+              style={{
+                background: 'rgba(59, 130, 246, 0.15)',
+                border: '1px solid rgba(59, 130, 246, 0.4)',
+                color: '#60a5fa',
+                borderRadius: 'var(--radius-md)', padding: '10px 12px',
+                fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+              }}
+            >
+              <DownloadCloud size={15} /> Lotes
+            </motion.button>
+          )}
         </div>
 
         {/* Sinopsis Móvil */}
@@ -910,6 +975,21 @@ export function MobileDetailsPage() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Modal de Descarga por Lotes Móvil */}
+      {showBatchModal && details && (
+        <BatchDownloadModal
+          isOpen={showBatchModal}
+          onClose={() => setShowBatchModal(false)}
+          animeTitle={details.title}
+          episodes={details.episodes}
+          source={source}
+          onSuccessToast={(msg) => {
+            setDownloadSuccessToast(msg);
+            setTimeout(() => setDownloadSuccessToast(null), 3500);
+          }}
+        />
+      )}
     </div>
   );
 }

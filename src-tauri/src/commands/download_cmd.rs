@@ -1719,10 +1719,145 @@ pub fn get_local_media_url(file_path: String) -> String {
     crate::downloader::media_server::get_media_stream_url(&file_path)
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StorageSpaceInfo {
+    pub downloads_bytes: u64,
+    pub available_bytes: u64,
+    pub total_bytes: u64,
+    pub download_path: String,
+}
+
+pub fn calculate_dir_size(path: &std::path::Path) -> u64 {
+    if !path.exists() {
+        return 0;
+    }
+    let mut total_size = 0;
+    if let Ok(entries) = std::fs::read_dir(path) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_file() {
+                if let Ok(meta) = p.metadata() {
+                    total_size += meta.len();
+                }
+            } else if p.is_dir() {
+                total_size += calculate_dir_size(&p);
+            }
+        }
+    }
+    total_size
+}
+
+#[cfg(windows)]
+fn get_disk_space(path: &std::path::Path) -> (u64, u64) {
+    use std::os::windows::ffi::OsStrExt;
+    let wide_path: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    let mut free_bytes_available: u64 = 0;
+    let mut total_number_of_bytes: u64 = 0;
+    let mut total_number_of_free_bytes: u64 = 0;
+    extern "system" {
+        fn GetDiskFreeSpaceExW(
+            lpDirectoryName: *const u16,
+            lpFreeBytesAvailableToCaller: *mut u64,
+            lpTotalNumberOfBytes: *mut u64,
+            lpTotalNumberOfFreeBytes: *mut u64,
+        ) -> i32;
+    }
+    unsafe {
+        if GetDiskFreeSpaceExW(
+            wide_path.as_ptr(),
+            &mut free_bytes_available,
+            &mut total_number_of_bytes,
+            &mut total_number_of_free_bytes,
+        ) != 0 {
+            (free_bytes_available, total_number_of_bytes)
+        } else {
+            (0, 0)
+        }
+    }
+}
+
+#[cfg(unix)]
+fn get_disk_space(path: &std::path::Path) -> (u64, u64) {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    if let Ok(c_path) = CString::new(path.as_os_str().as_bytes()) {
+        #[repr(C)]
+        struct statvfs {
+            f_bsize: std::os::raw::c_ulong,
+            f_frsize: std::os::raw::c_ulong,
+            f_blocks: u64,
+            f_bfree: u64,
+            f_bavail: u64,
+            f_files: u64,
+            f_ffree: u64,
+            f_favail: u64,
+            f_fsid: std::os::raw::c_ulong,
+            f_flag: std::os::raw::c_ulong,
+            f_namemax: std::os::raw::c_ulong,
+            __f_spare: [std::os::raw::c_int; 6],
+        }
+        extern "C" {
+            fn statvfs(path: *const std::os::raw::c_char, buf: *mut statvfs) -> std::os::raw::c_int;
+        }
+        let mut buf = std::mem::MaybeUninit::<statvfs>::uninit();
+        unsafe {
+            if statvfs(c_path.as_ptr(), buf.as_mut_ptr()) == 0 {
+                let stat = buf.assume_init();
+                let block_size = if stat.f_frsize > 0 { stat.f_frsize as u64 } else { stat.f_bsize as u64 };
+                let available = stat.f_bavail * block_size;
+                let total = stat.f_blocks * block_size;
+                (available, total)
+            } else {
+                (0, 0)
+            }
+        }
+    } else {
+        (0, 0)
+    }
+}
+
+#[cfg(not(any(windows, unix)))]
+fn get_disk_space(_path: &std::path::Path) -> (u64, u64) {
+    (0, 0)
+}
+
+/// Obtiene métricas de almacenamiento: espacio de descargas ocupado por AniCS y espacio disponible en disco
+#[tauri::command]
+pub async fn get_storage_space_info(app_handle: AppHandle) -> Result<StorageSpaceInfo, String> {
+    let dl_path_str = get_default_download_dir(app_handle)?;
+    let dl_path = PathBuf::from(&dl_path_str);
+    let downloads_bytes = calculate_dir_size(&dl_path);
+    let (available_bytes, total_bytes) = get_disk_space(&dl_path);
+    Ok(StorageSpaceInfo {
+        downloads_bytes,
+        available_bytes,
+        total_bytes,
+        download_path: dl_path_str,
+    })
+}
+
 
 #[cfg(test)]
 mod tests {
-    // use super::*;
+    use super::*;
+
+    #[test]
+    fn test_calculate_dir_size() {
+        let temp_dir = std::env::temp_dir().join(format!("anics_test_dir_size_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let file1 = temp_dir.join("test1.bin");
+        std::fs::write(&file1, vec![0u8; 1024]).unwrap();
+        let sub_dir = temp_dir.join("subdir");
+        std::fs::create_dir_all(&sub_dir).unwrap();
+        let file2 = sub_dir.join("test2.bin");
+        std::fs::write(&file2, vec![0u8; 2048]).unwrap();
+
+        let total = calculate_dir_size(&temp_dir);
+        assert_eq!(total, 3072);
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
 
     #[test]
     fn test_filename_validation() {

@@ -4,12 +4,13 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Clock, Trash2, Film, Bookmark, BookmarkX, Inbox, History,
   ArrowDownCircle, Play, Folder, Search, X, CheckSquare, Square, RefreshCw,
-  ChevronDown, ChevronUp, Check, Eye, EyeOff, Pause, RotateCcw, Loader2, AlertCircle
+  ChevronDown, ChevronUp, Check, Eye, EyeOff, Pause, RotateCcw, Loader2, AlertCircle, Heart
 } from 'lucide-react';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import {
   getHistory, clearHistory, removeHistory, removeHistoryBatch,
-  removeHistoryByAnime, getFavorites, removeFavorite
+  removeHistoryByAnime, getFavorites, removeFavorite, updateFavoriteStatus,
+  normalizeAnimeTitleKey
 } from '@/services/storageService';
 import {
   scanLocalDownloads, deleteLocalDownload, deleteLocalAnimeFolder,
@@ -20,7 +21,9 @@ import { usePlayerStore } from '@/stores/usePlayerStore';
 import { useProfileStore } from '@/stores/useProfileStore';
 import { useSyncStore } from '@/stores/useSyncStore';
 import { CachedImage } from '@/components/CachedImage';
-import type { HistoryEntry, AnimeResult, LocalAnimeFolder, LocalEpisodeItem } from '@/types';
+import { FavoriteStatusDropdown, FAVORITE_STATUSES } from '@/components/FavoriteStatusDropdown';
+import { StorageSpaceBar } from '@/components/StorageSpaceBar';
+import type { HistoryEntry, AnimeResult, LocalAnimeFolder, LocalEpisodeItem, FavoriteStatus } from '@/types';
 
 function formatSpeed(kbps: number) {
   if (kbps <= 0) return '0 KB/s';
@@ -41,20 +44,44 @@ export function MobileHistoryPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [isSelecting, setIsSelecting] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [expandedAnimeKeys, setExpandedAnimeKeys] = useState<Set<string>>(new Set());
 
   const loadHistory = useCallback(async () => {
     setIsLoading(true);
     try {
-      const data = await getHistory(150, 0, activeProfile?.id);
-      const seen = new Set<string>();
-      const deduplicated = data.filter((item) => {
-        const uniqueAnimeKey = item.animeUrl || item.id || item.animeTitle.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-        const key = `${uniqueAnimeKey}-ep-${item.episodeNumber}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-      setEntries(deduplicated);
+      const data = await getHistory(300, 0, activeProfile?.id);
+      
+      // Unificación inteligente de episodios (evita duplicados local vs jkanime)
+      const episodeMap = new Map<string, HistoryEntry>();
+      for (const item of data) {
+        const normTitle = normalizeAnimeTitleKey(item.animeTitle);
+        const epKey = `${normTitle || item.animeUrl}-ep-${item.episodeNumber}`;
+        const existing = episodeMap.get(epKey);
+
+        if (!existing) {
+          episodeMap.set(epKey, { ...item });
+        } else {
+          // Fusionar registro local y online en una única entrada consolidada
+          const isMoreRecent = new Date(item.watchedAt).getTime() > new Date(existing.watchedAt).getTime();
+          const higherProgress = Math.max(existing.watchProgress || 0, item.watchProgress || 0);
+          const preferOnlineUrl = (item.animeUrl && item.animeUrl.startsWith('http')) ? item.animeUrl : existing.animeUrl;
+          const preferOnlineEpUrl = (item.episodeUrl && item.episodeUrl.startsWith('http')) ? item.episodeUrl : (isMoreRecent ? item.episodeUrl : existing.episodeUrl);
+          const preferThumbnail = (item.thumbnailUrl && item.thumbnailUrl.startsWith('http')) ? item.thumbnailUrl : (existing.thumbnailUrl || item.thumbnailUrl);
+          const preferSource = (existing.source && existing.source !== 'local') ? existing.source : (item.source || 'jkanime');
+
+          episodeMap.set(epKey, {
+            ...existing,
+            animeUrl: preferOnlineUrl,
+            episodeUrl: preferOnlineEpUrl,
+            thumbnailUrl: preferThumbnail,
+            watchProgress: higherProgress,
+            watchedAt: isMoreRecent ? item.watchedAt : existing.watchedAt,
+            source: preferSource,
+          });
+        }
+      }
+
+      setEntries(Array.from(episodeMap.values()));
     } catch (e) {
       console.error(e);
     } finally {
@@ -76,6 +103,72 @@ export function MobileHistoryPage() {
       (e) => e.animeTitle.toLowerCase().includes(q) || `episodio ${e.episodeNumber}`.includes(q)
     );
   }, [entries, searchQuery]);
+
+  const toggleExpandAnime = (key: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setExpandedAnimeKeys(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  // Agrupación unificada por Serie (1 tarjeta por Anime)
+  const groupedAnimes = useMemo(() => {
+    const map = new Map<string, {
+      key: string;
+      animeUrl: string;
+      animeTitle: string;
+      thumbnailUrl: string;
+      source: string;
+      latestWatchedAt: string;
+      latestEpisode: HistoryEntry;
+      episodes: HistoryEntry[];
+    }>();
+
+    for (const entry of filteredEntries) {
+      const normTitle = normalizeAnimeTitleKey(entry.animeTitle);
+      const groupKey = normTitle || entry.animeUrl;
+      const existing = map.get(groupKey);
+
+      if (!existing) {
+        map.set(groupKey, {
+          key: groupKey,
+          animeUrl: entry.animeUrl,
+          animeTitle: entry.animeTitle,
+          thumbnailUrl: entry.thumbnailUrl,
+          source: entry.source,
+          latestWatchedAt: entry.watchedAt,
+          latestEpisode: entry,
+          episodes: [entry],
+        });
+      } else {
+        existing.episodes.push(entry);
+        if (new Date(entry.watchedAt).getTime() > new Date(existing.latestWatchedAt).getTime()) {
+          existing.latestWatchedAt = entry.watchedAt;
+          existing.latestEpisode = entry;
+        }
+        if (!existing.animeUrl.startsWith('http') && entry.animeUrl && entry.animeUrl.startsWith('http')) {
+          existing.animeUrl = entry.animeUrl;
+        }
+        if ((!existing.thumbnailUrl || !existing.thumbnailUrl.startsWith('http')) && entry.thumbnailUrl && entry.thumbnailUrl.startsWith('http')) {
+          existing.thumbnailUrl = entry.thumbnailUrl;
+        }
+        if (existing.source === 'local' && entry.source && entry.source !== 'local') {
+          existing.source = entry.source;
+        }
+      }
+    }
+
+    for (const group of map.values()) {
+      group.episodes.sort((a, b) => b.episodeNumber - a.episodeNumber);
+    }
+
+    return Array.from(map.values()).sort(
+      (a, b) => new Date(b.latestWatchedAt).getTime() - new Date(a.latestWatchedAt).getTime()
+    );
+  }, [filteredEntries]);
 
   const handleClear = async () => {
     if (confirm('¿Estás seguro de que deseas borrar todo el historial?')) {
@@ -107,11 +200,29 @@ export function MobileHistoryPage() {
     e.stopPropagation();
     if (confirm(`¿Eliminar todos los episodios de "${animeTitle}" del historial?`)) {
       try {
+        const normTarget = normalizeAnimeTitleKey(animeTitle);
+        const matchingEntries = entries.filter(it => 
+          (normTarget && normalizeAnimeTitleKey(it.animeTitle) === normTarget) || 
+          it.animeUrl === animeUrl || 
+          it.animeTitle === animeTitle
+        );
+        const idsToDelete = matchingEntries.map(it => it.id);
+        
+        if (idsToDelete.length > 0) {
+          await removeHistoryBatch(idsToDelete);
+        }
         await removeHistoryByAnime(animeUrl, activeProfile?.id);
-        setEntries((prev) => prev.filter((item) => item.animeUrl !== animeUrl));
+        await removeHistoryByAnime(animeTitle, activeProfile?.id);
+
+        setEntries((prev) => prev.filter((item) => {
+          const itemNorm = normalizeAnimeTitleKey(item.animeTitle);
+          if (normTarget && itemNorm === normTarget) return false;
+          return item.animeUrl !== animeUrl && item.animeTitle !== animeTitle;
+        }));
+
         setSelectedIds((prev) => {
           const next = new Set(prev);
-          entries.filter(it => it.animeUrl === animeUrl).forEach(it => next.delete(it.id));
+          idsToDelete.forEach(id => next.delete(id));
           return next;
         });
         useSyncStore.getState().triggerDebouncedSync();
@@ -157,11 +268,10 @@ export function MobileHistoryPage() {
 
   return (
     <div style={{ padding: '12px 14px 24px' }}>
-      {/* Header Móvil */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <History size={20} color="var(--accent-primary)" />
-          <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0 }}>Historial ({entries.length})</h2>
+          <Clock size={20} color="var(--accent-primary)" />
+          <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0 }}>Historial ({groupedAnimes.length})</h2>
         </div>
 
         {entries.length > 0 && (
@@ -172,45 +282,46 @@ export function MobileHistoryPage() {
                 if (isSelecting) setSelectedIds(new Set());
               }}
               style={{
-                background: isSelecting ? 'var(--accent-primary)' : 'var(--bg-elevated)',
+                background: isSelecting ? 'var(--accent-primary)' : 'var(--bg-surface)',
                 border: '1px solid var(--border-subtle)',
-                borderRadius: 'var(--radius-full)', padding: '5px 10px',
                 color: isSelecting ? 'white' : 'var(--text-secondary)',
-                fontSize: 11, fontWeight: 700, cursor: 'pointer',
-                display: 'flex', alignItems: 'center', gap: 4,
+                fontSize: 11, fontWeight: 700,
+                borderRadius: 'var(--radius-full)', padding: '5px 10px',
+                cursor: 'pointer',
               }}
             >
-              <CheckSquare size={12} /> {isSelecting ? 'Listo' : 'Seleccionar'}
+              {isSelecting ? 'Listo' : 'Seleccionar'}
             </button>
 
             {!isSelecting && (
               <button
                 onClick={handleClear}
                 style={{
-                  background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.25)',
+                  background: 'rgba(239, 68, 68, 0.1)',
+                  border: '1px solid rgba(239, 68, 68, 0.2)',
+                  color: '#ef4444',
+                  fontSize: 11, fontWeight: 700,
                   borderRadius: 'var(--radius-full)', padding: '5px 10px',
-                  color: '#ef4444', fontSize: 11, fontWeight: 700, cursor: 'pointer',
-                  display: 'flex', alignItems: 'center', gap: 4,
+                  cursor: 'pointer',
                 }}
               >
-                <Trash2 size={12} /> Borrar Todo
+                Borrar Todo
               </button>
             )}
           </div>
         )}
       </div>
 
-      {/* Buscador Rápido Móvil */}
       {entries.length > 0 && (
         <div style={{
           display: 'flex', alignItems: 'center', gap: 8,
           background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
-          borderRadius: 'var(--radius-md)', padding: '6px 10px', marginBottom: 12,
+          borderRadius: 'var(--radius-md)', padding: '8px 12px', marginBottom: 12,
         }}>
           <Search size={14} color="var(--text-muted)" />
           <input
             type="text"
-            placeholder="Buscar por anime o episodio..."
+            placeholder="Buscar por anime o capítulo..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             style={{
@@ -229,7 +340,6 @@ export function MobileHistoryPage() {
         </div>
       )}
 
-      {/* Barra de Gestión de Selección Móvil */}
       <AnimatePresence>
         {isSelecting && (
           <motion.div
@@ -237,16 +347,21 @@ export function MobileHistoryPage() {
             animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
             style={{
-              background: 'var(--bg-elevated)', border: '1px solid var(--accent-primary)',
-              borderRadius: 'var(--radius-md)', padding: '8px 12px',
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              marginBottom: 12, overflow: 'hidden',
+              background: 'var(--bg-surface)',
+              border: '1px solid var(--accent-primary)',
+              borderRadius: 'var(--radius-md)',
+              padding: '8px 12px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginBottom: 12,
             }}
           >
             <button
               onClick={handleSelectAll}
               style={{
-                background: 'transparent', border: 'none',
+                background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
+                borderRadius: 'var(--radius-full)', padding: '4px 10px',
                 color: 'var(--text-secondary)', fontSize: 11, fontWeight: 700, cursor: 'pointer',
               }}
             >
@@ -274,7 +389,7 @@ export function MobileHistoryPage() {
         <div style={{ display: 'flex', justifyContent: 'center', padding: '40px 0' }}>
           <Loader2 className="animate-spin" size={28} color="var(--accent-primary)" />
         </div>
-      ) : filteredEntries.length === 0 ? (
+      ) : groupedAnimes.length === 0 ? (
         <div style={{
           textAlign: 'center', padding: '60px 16px', background: 'var(--bg-surface)',
           borderRadius: 'var(--radius-lg)', border: '1px solid var(--border-subtle)',
@@ -284,7 +399,7 @@ export function MobileHistoryPage() {
             {searchQuery ? 'Sin resultados' : 'Sin historial aún'}
           </p>
           <p style={{ color: 'var(--text-muted)', fontSize: 12, margin: '0 0 16px' }}>
-            {searchQuery ? `No hay episodios que coincidan con "${searchQuery}"` : 'Los episodios que reproduzcas aparecerán aquí'}
+            {searchQuery ? `No hay series que coincidan con "${searchQuery}"` : 'Los animes que reproduzcas aparecerán aquí agrupados'}
           </p>
           {searchQuery ? (
             <button
@@ -312,101 +427,206 @@ export function MobileHistoryPage() {
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {filteredEntries.map((entry) => {
+          {groupedAnimes.map((group) => {
+            const entry = group.latestEpisode;
             const pct = Math.min(100, Math.max(0, Math.round((entry.watchProgress || 0) * 100)));
-            const isSelected = selectedIds.has(entry.id);
+            const isExpanded = expandedAnimeKeys.has(group.key);
+            const anySelected = group.episodes.some(ep => selectedIds.has(ep.id));
 
             return (
               <div
-                key={entry.id}
-                onClick={() => {
-                  if (isSelecting) {
-                    toggleSelectId(entry.id);
-                  } else {
-                    navigate(`/player?url=${encodeURIComponent(entry.episodeUrl)}&title=${encodeURIComponent(entry.animeTitle)}&ep=${entry.episodeNumber}&source=${entry.source}&animeUrl=${encodeURIComponent(entry.animeUrl)}`);
-                  }
-                }}
+                key={group.key}
                 style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 12,
-                  padding: 10,
                   borderRadius: 'var(--radius-md)',
                   background: 'var(--bg-surface)',
-                  border: isSelected ? '1.5px solid var(--accent-primary)' : '1px solid var(--border-subtle)',
-                  cursor: 'pointer',
+                  border: anySelected ? '1.5px solid var(--accent-primary)' : '1px solid var(--border-subtle)',
+                  overflow: 'hidden',
                 }}
               >
-                {/* Checkbox en modo selección */}
-                {isSelecting && (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    padding: 10,
+                  }}
+                >
+                  {isSelecting && (
+                    <div
+                      onClick={(e) => toggleSelectId(entry.id, e)}
+                      style={{
+                        color: selectedIds.has(entry.id) ? 'var(--accent-primary)' : 'var(--text-muted)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {selectedIds.has(entry.id) ? <CheckSquare size={18} /> : <Square size={18} />}
+                    </div>
+                  )}
+
                   <div
-                    onClick={(e) => toggleSelectId(entry.id, e)}
+                    onClick={() => {
+                      if (isSelecting) toggleSelectId(entry.id);
+                      else navigate(`/player?url=${encodeURIComponent(entry.episodeUrl)}&title=${encodeURIComponent(entry.animeTitle)}&ep=${entry.episodeNumber}&source=${entry.source}&animeUrl=${encodeURIComponent(entry.animeUrl)}`);
+                    }}
+                    style={{ position: 'relative', width: 56, height: 56, borderRadius: 6, overflow: 'hidden', flexShrink: 0, cursor: 'pointer' }}
+                  >
+                    <CachedImage src={entry.thumbnailUrl} alt={entry.animeTitle} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    <div style={{
+                      position: 'absolute', bottom: 0, left: 0, right: 0, height: 3,
+                      background: 'rgba(255,255,255,0.2)',
+                    }}>
+                      <div style={{ width: `${pct}%`, height: '100%', background: 'var(--accent-primary)' }} />
+                    </div>
+                  </div>
+
+                  <div
+                    onClick={() => {
+                      if (isSelecting) toggleSelectId(entry.id);
+                      else navigate(`/details/${encodeURIComponent(entry.animeUrl)}?source=${entry.source}`);
+                    }}
+                    style={{ flex: 1, minWidth: 0, cursor: 'pointer' }}
+                  >
+                    <div style={{ fontSize: 13, fontWeight: 700, color: 'white', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {entry.animeTitle}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--accent-primary)', fontWeight: 600, marginTop: 2 }}>
+                      Episodio {entry.episodeNumber} · {pct}%
+                    </div>
+                    <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
+                      {group.episodes.length} caps vistos · {new Date(group.latestWatchedAt).toLocaleDateString()}
+                    </div>
+                  </div>
+
+                  {!isSelecting && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <button
+                        onClick={() => navigate(`/player?url=${encodeURIComponent(entry.episodeUrl)}&title=${encodeURIComponent(entry.animeTitle)}&ep=${entry.episodeNumber}&source=${entry.source}&animeUrl=${encodeURIComponent(entry.animeUrl)}`)}
+                        style={{
+                          background: 'var(--accent-primary)',
+                          border: 'none',
+                          color: 'white',
+                          padding: '6px 8px',
+                          cursor: 'pointer',
+                          borderRadius: 'var(--radius-sm)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 3,
+                          fontSize: 10,
+                          fontWeight: 700,
+                        }}
+                      >
+                        <Play size={10} fill="white" /> Reanudar
+                      </button>
+
+                      <button
+                        onClick={(e) => handleDeleteEntireAnime(entry.animeUrl, entry.animeTitle, e)}
+                        title="Eliminar serie"
+                        style={{
+                          background: 'transparent',
+                          border: 'none',
+                          color: 'var(--text-muted)',
+                          padding: 6,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ borderTop: '1px solid var(--border-subtle)', background: 'rgba(0,0,0,0.15)' }}>
+                  <button
+                    onClick={(e) => toggleExpandAnime(group.key, e)}
                     style={{
-                      color: isSelected ? 'var(--accent-primary)' : 'var(--text-muted)',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      width: '100%',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      background: 'transparent',
+                      border: 'none',
+                      padding: '5px 10px',
+                      color: 'var(--text-secondary)',
+                      fontSize: 10,
+                      fontWeight: 600,
+                      cursor: 'pointer',
                     }}
                   >
-                    {isSelected ? <CheckSquare size={18} /> : <Square size={18} />}
-                  </div>
-                )}
+                    <span>Ver {group.episodes.length} episodios vistos</span>
+                    {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                  </button>
 
-                <div style={{ position: 'relative', width: 64, height: 64, borderRadius: 8, overflow: 'hidden', flexShrink: 0 }}>
-                  <CachedImage src={entry.thumbnailUrl} alt={entry.animeTitle} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                  <div style={{
-                    position: 'absolute', bottom: 0, left: 0, right: 0, height: 3,
-                    background: 'rgba(255,255,255,0.2)',
-                  }}>
-                    <div style={{ width: `${pct}%`, height: '100%', background: 'var(--accent-primary)' }} />
-                  </div>
+                  <AnimatePresence>
+                    {isExpanded && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        style={{
+                          padding: '4px 10px 8px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 4,
+                        }}
+                      >
+                        {group.episodes.map(ep => {
+                          const epPct = Math.min(100, Math.max(0, Math.round((ep.watchProgress || 0) * 100)));
+                          const isEpSel = selectedIds.has(ep.id);
+
+                          return (
+                            <div
+                              key={ep.id}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                padding: '4px 6px',
+                                background: isEpSel ? 'rgba(59, 130, 246, 0.15)' : 'var(--bg-surface)',
+                                borderRadius: 4,
+                                fontSize: 11,
+                              }}
+                            >
+                              <div
+                                onClick={() => {
+                                  if (isSelecting) toggleSelectId(ep.id);
+                                  else navigate(`/player?url=${encodeURIComponent(ep.episodeUrl)}&title=${encodeURIComponent(ep.animeTitle)}&ep=${ep.episodeNumber}&source=${ep.source}&animeUrl=${encodeURIComponent(ep.animeUrl)}`);
+                                }}
+                                style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, cursor: 'pointer' }}
+                              >
+                                {isSelecting && (
+                                  <div onClick={(e) => toggleSelectId(ep.id, e)} style={{ color: isEpSel ? 'var(--accent-primary)' : 'var(--text-muted)' }}>
+                                    {isEpSel ? <CheckSquare size={13} /> : <Square size={13} />}
+                                  </div>
+                                )}
+                                <Play size={9} color="var(--accent-primary)" />
+                                <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                                  Episodio {ep.episodeNumber}
+                                </span>
+                                <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>
+                                  ({epPct}%)
+                                </span>
+                              </div>
+
+                              {!isSelecting && (
+                                <button
+                                  onClick={(e) => handleDeleteEntry(ep.id, e)}
+                                  title="Eliminar este capítulo"
+                                  style={{
+                                    background: 'none', border: 'none',
+                                    color: 'var(--text-muted)', cursor: 'pointer', padding: 2,
+                                  }}
+                                >
+                                  <Trash2 size={11} />
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
-
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: 'white', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {entry.animeTitle}
-                  </div>
-                  <div style={{ fontSize: 11, color: 'var(--accent-primary)', fontWeight: 600, marginTop: 2 }}>
-                    Episodio {entry.episodeNumber} · {pct}%
-                  </div>
-                  <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
-                    {entry.source.toUpperCase()} · {new Date(entry.watchedAt).toLocaleDateString()}
-                  </div>
-                </div>
-
-                {!isSelecting && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    {/* Eliminar todo el anime del historial */}
-                    <button
-                      onClick={(e) => handleDeleteEntireAnime(entry.animeUrl, entry.animeTitle, e)}
-                      title="Eliminar todo este anime"
-                      style={{
-                        background: 'transparent',
-                        border: 'none',
-                        color: 'var(--text-muted)',
-                        padding: 6,
-                        cursor: 'pointer',
-                        borderRadius: 'var(--radius-sm)',
-                      }}
-                    >
-                      <Film size={14} />
-                    </button>
-
-                    {/* Eliminar este episodio */}
-                    <button
-                      onClick={(e) => handleDeleteEntry(entry.id, e)}
-                      title="Eliminar episodio"
-                      style={{
-                        background: 'transparent',
-                        border: 'none',
-                        color: 'var(--text-muted)',
-                        padding: 6,
-                        cursor: 'pointer',
-                        borderRadius: 'var(--radius-sm)',
-                      }}
-                    >
-                      <Trash2 size={15} />
-                    </button>
-                  </div>
-                )}
               </div>
             );
           })}
@@ -417,13 +637,14 @@ export function MobileHistoryPage() {
 }
 
 // ──────────────────────────────────────────
-// Página de Favoritos Móvil (2 Columnas)
+// Página de Favoritos Móvil (2 Columnas con Estados)
 // ──────────────────────────────────────────
 export function MobileFavoritesPage() {
   const navigate = useNavigate();
   const { activeProfile } = useProfileStore();
   const [favorites, setFavorites] = useState<AnimeResult[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [statusFilter, setStatusFilter] = useState<string>('all');
 
   const loadFavs = useCallback(async () => {
     setIsLoading(true);
@@ -447,24 +668,92 @@ export function MobileFavoritesPage() {
   const handleRemove = async (e: React.MouseEvent, url: string) => {
     e.stopPropagation();
     try {
-      await removeFavorite(url);
+      await removeFavorite(url, activeProfile?.id);
       setFavorites(favorites.filter(f => f.url !== url));
+      useSyncStore.getState().triggerDebouncedSync();
     } catch (err) {
       console.error(err);
     }
   };
 
+  const handleStatusChange = async (url: string, newStatus: FavoriteStatus) => {
+    try {
+      await updateFavoriteStatus(url, newStatus, activeProfile?.id);
+      setFavorites(prev => prev.map(f => f.url === url ? { ...f, status: newStatus } : f));
+      useSyncStore.getState().triggerDebouncedSync();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const counts = useMemo(() => {
+    const map: Record<string, number> = { all: favorites.length, watching: 0, plan_to_watch: 0, completed: 0, favorite: 0 };
+    for (const f of favorites) {
+      const st = f.status || 'favorite';
+      map[st] = (map[st] || 0) + 1;
+    }
+    return map;
+  }, [favorites]);
+
+  const displayedFavorites = useMemo(() => {
+    if (statusFilter === 'all') return favorites;
+    return favorites.filter(f => (f.status || 'favorite') === statusFilter);
+  }, [favorites, statusFilter]);
+
   return (
     <div style={{ padding: '12px 14px 24px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
         <Bookmark size={20} color="var(--accent-primary)" />
         <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0 }}>Favoritos ({favorites.length})</h2>
       </div>
 
-      {!isLoading && favorites.length === 0 && (
-        <div style={{ textAlign: 'center', padding: '60px 16px' }}>
+      <div style={{
+        display: 'flex',
+        gap: 6,
+        overflowX: 'auto',
+        WebkitOverflowScrolling: 'touch',
+        scrollbarWidth: 'none',
+        marginBottom: 12,
+        paddingBottom: 2,
+      }}>
+        <button
+          onClick={() => setStatusFilter('all')}
+          style={{
+            background: statusFilter === 'all' ? 'var(--accent-primary)' : 'var(--bg-surface)',
+            color: statusFilter === 'all' ? 'white' : 'var(--text-secondary)',
+            border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-full)',
+            padding: '5px 12px', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+            whiteSpace: 'nowrap', flexShrink: 0,
+          }}
+        >
+          Todos ({counts.all})
+        </button>
+        {FAVORITE_STATUSES.map(item => {
+          const isSel = statusFilter === item.key;
+          return (
+            <button
+              key={item.key}
+              onClick={() => setStatusFilter(item.key)}
+              style={{
+                background: isSel ? item.color : 'var(--bg-surface)',
+                color: isSel ? 'white' : 'var(--text-secondary)',
+                border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-full)',
+                padding: '5px 12px', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                whiteSpace: 'nowrap', flexShrink: 0,
+              }}
+            >
+              {item.label} ({counts[item.key] || 0})
+            </button>
+          );
+        })}
+      </div>
+
+      {!isLoading && displayedFavorites.length === 0 && (
+        <div style={{ textAlign: 'center', padding: '60px 16px', background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)' }}>
           <BookmarkX size={40} color="var(--text-muted)" style={{ margin: '0 auto 8px', opacity: 0.5 }} />
-          <p style={{ color: 'var(--text-secondary)', fontSize: 15, fontWeight: 600, margin: 0 }}>No tienes favoritos</p>
+          <p style={{ color: 'var(--text-secondary)', fontSize: 14, fontWeight: 600, margin: 0 }}>
+            {statusFilter === 'all' ? 'No tienes favoritos' : `Sin animes en "${FAVORITE_STATUSES.find(s => s.key === statusFilter)?.label || statusFilter}"`}
+          </p>
         </div>
       )}
 
@@ -473,47 +762,62 @@ export function MobileFavoritesPage() {
         gridTemplateColumns: 'repeat(2, 1fr)',
         gap: 10,
       }}>
-        {favorites.map((anime) => (
-          <motion.div
-            key={anime.url}
-            whileTap={{ scale: 0.96 }}
-            onClick={() => navigate(`/details/${encodeURIComponent(anime.url)}?source=${anime.source}`)}
-            style={{
-              background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)',
-              overflow: 'hidden', cursor: 'pointer', border: '1px solid var(--border-subtle)',
-              position: 'relative',
-            }}
-          >
-            <div style={{ position: 'relative', paddingBottom: '140%', background: 'var(--bg-elevated)' }}>
-              <CachedImage
-                src={anime.thumbnailUrl}
-                alt={anime.title}
-                fallbackIconSize={30}
-                style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
-              />
-              <button
-                onClick={(e) => handleRemove(e, anime.url)}
-                style={{
-                  position: 'absolute', top: 6, right: 6,
-                  background: 'rgba(0,0,0,0.65)', border: 'none', borderRadius: '50%',
-                  width: 26, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  color: '#f87171', cursor: 'pointer',
-                }}
-              >
-                <Trash2 size={12} />
-              </button>
-            </div>
-            <div style={{ padding: '8px 10px 10px' }}>
-              <p style={{
-                fontSize: 12, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis',
-                display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
-                margin: 0,
-              }}>
-                {anime.title}
-              </p>
-            </div>
-          </motion.div>
-        ))}
+        {displayedFavorites.map((anime) => {
+          const currentStatus = (anime.status as FavoriteStatus) || 'favorite';
+
+          return (
+            <motion.div
+              key={anime.url}
+              whileTap={{ scale: 0.96 }}
+              onClick={() => navigate(`/details/${encodeURIComponent(anime.url)}?source=${anime.source}`)}
+              style={{
+                background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)',
+                overflow: 'hidden', cursor: 'pointer', border: '1px solid var(--border-subtle)',
+                position: 'relative', display: 'flex', flexDirection: 'column',
+              }}
+            >
+              <div style={{ position: 'relative', paddingBottom: '140%', background: 'var(--bg-elevated)' }}>
+                <CachedImage
+                  src={anime.thumbnailUrl}
+                  alt={anime.title}
+                  fallbackIconSize={30}
+                  style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+                />
+                <button
+                  onClick={(e) => handleRemove(e, anime.url)}
+                  style={{
+                    position: 'absolute', top: 6, right: 6,
+                    background: 'rgba(0,0,0,0.65)', border: 'none', borderRadius: '50%',
+                    width: 26, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    color: '#f87171', cursor: 'pointer',
+                  }}
+                >
+                  <Trash2 size={12} />
+                </button>
+              </div>
+              <div style={{ padding: '8px 10px 10px', display: 'flex', flexDirection: 'column', gap: 6, flex: 1, justifyContent: 'space-between' }}>
+                <p style={{
+                  fontSize: 12, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis',
+                  display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+                  margin: 0,
+                }}>
+                  {anime.title}
+                </p>
+
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <FavoriteStatusDropdown
+                    currentStatus={currentStatus}
+                    onSelectStatus={(newSt) => handleStatusChange(anime.url, newSt)}
+                    size="sm"
+                  />
+                  <span style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                    {anime.source}
+                  </span>
+                </div>
+              </div>
+            </motion.div>
+          );
+        })}
       </div>
     </div>
   );
@@ -631,6 +935,11 @@ export function MobileDownloadsPage() {
 
   return (
     <div style={{ padding: '12px 14px 24px' }}>
+      {/* Barra de Almacenamiento */}
+      <div style={{ marginBottom: 12 }}>
+        <StorageSpaceBar />
+      </div>
+
       {/* Header Móvil Tabs & Refresh */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 14, alignItems: 'center' }}>
         <button

@@ -43,6 +43,7 @@ pub fn init_database_inner(app_data_dir: &PathBuf) -> AppResult<Connection> {
             source TEXT NOT NULL,
             added_at TEXT NOT NULL,
             profile_id TEXT NOT NULL DEFAULT 'default',
+            status TEXT NOT NULL DEFAULT 'favorite',
             PRIMARY KEY (url, profile_id)
         );
 
@@ -103,6 +104,7 @@ pub fn init_database_inner(app_data_dir: &PathBuf) -> AppResult<Connection> {
     let _ = conn.execute("ALTER TABLE downloads ADD COLUMN total_bytes INTEGER", []);
     let _ = conn.execute("ALTER TABLE watch_history ADD COLUMN profile_id TEXT NOT NULL DEFAULT 'default'", []);
     let _ = conn.execute("ALTER TABLE favorites ADD COLUMN profile_id TEXT NOT NULL DEFAULT 'default'", []);
+    let _ = conn.execute("ALTER TABLE favorites ADD COLUMN status TEXT NOT NULL DEFAULT 'favorite'", []);
     let _ = conn.execute("UPDATE watch_history SET id = anime_url || '-' || episode_number || '-' || profile_id WHERE id = anime_url || '-' || episode_number", []);
 
     // 3. Crear índices una vez asegurada la existencia de todas las columnas
@@ -111,6 +113,7 @@ pub fn init_database_inner(app_data_dir: &PathBuf) -> AppResult<Connection> {
         CREATE INDEX IF NOT EXISTS idx_history_watched_at ON watch_history(watched_at DESC);
         CREATE INDEX IF NOT EXISTS idx_history_profile ON watch_history(profile_id);
         CREATE INDEX IF NOT EXISTS idx_favorites_profile ON favorites(profile_id);
+        CREATE INDEX IF NOT EXISTS idx_favorites_status ON favorites(status);
         CREATE UNIQUE INDEX IF NOT EXISTS idx_favorites_url_profile ON favorites(url, profile_id);
         CREATE INDEX IF NOT EXISTS idx_tombstones_deleted_at ON tombstones(deleted_at);
         CREATE INDEX IF NOT EXISTS idx_image_cache_last_accessed ON image_cache(last_accessed_at DESC);
@@ -327,6 +330,13 @@ pub fn set_sync_config(key: &str, value: &str) -> AppResult<()> {
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             params![key, value],
         )?;
+        Ok(())
+    })
+}
+
+pub fn delete_sync_config(key: &str) -> AppResult<()> {
+    with_db(|conn| {
+        conn.execute("DELETE FROM sync_config WHERE key = ?1", params![key])?;
         Ok(())
     })
 }
@@ -566,7 +576,7 @@ pub fn remove_history_by_anime(anime_url: &str, profile_id: Option<&str>) -> App
         };
         let clean_url = anime_url.trim_end_matches('/').trim();
         conn.execute(
-            "DELETE FROM watch_history WHERE (anime_url = ?1 OR anime_url LIKE ?2) AND profile_id = ?3",
+            "DELETE FROM watch_history WHERE (anime_url = ?1 OR anime_url LIKE ?2 OR anime_title = ?1 OR anime_title LIKE ?2) AND profile_id = ?3",
             params![clean_url, format!("{}%", clean_url), target_profile],
         )?;
         Ok(())
@@ -589,13 +599,13 @@ pub fn get_profile_stats(profile_id: Option<&str>) -> AppResult<ProfileStats> {
         };
 
         let animes_count: u32 = conn.query_row(
-            "SELECT COUNT(DISTINCT anime_url) FROM watch_history WHERE profile_id = ?1 AND watch_progress >= 0.80",
+            "SELECT COUNT(DISTINCT LOWER(TRIM(anime_title))) FROM watch_history WHERE profile_id = ?1 AND watch_progress >= 0.80",
             params![target_profile],
             |row| row.get(0),
         ).unwrap_or(0);
 
         let episodes_count: u32 = conn.query_row(
-            "SELECT COUNT(DISTINCT id) FROM watch_history WHERE profile_id = ?1 AND watch_progress >= 0.80",
+            "SELECT COUNT(DISTINCT LOWER(TRIM(anime_title)) || '-' || episode_number) FROM watch_history WHERE profile_id = ?1 AND watch_progress >= 0.80",
             params![target_profile],
             |row| row.get(0),
         ).unwrap_or(0);
@@ -618,22 +628,40 @@ pub fn get_profile_stats(profile_id: Option<&str>) -> AppResult<ProfileStats> {
 // Favoritos (Por Perfil)
 // ──────────────────────────────────────────
 
-pub fn add_favorite(result: &AnimeResult, profile_id: Option<&str>) -> AppResult<()> {
+pub fn add_favorite(result: &AnimeResult, profile_id: Option<&str>, status: Option<&str>) -> AppResult<()> {
     with_db(|conn| {
         let target_profile = match profile_id {
             Some(pid) => pid.to_string(),
             None => get_active_profile_id_inner(conn),
         };
+        let status_val = status
+            .or(result.status.as_deref())
+            .unwrap_or("favorite");
         let now = chrono::Utc::now().to_rfc3339();
         conn.execute(
-            "INSERT INTO favorites (url, title, thumbnail_url, source, added_at, profile_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            "INSERT INTO favorites (url, title, thumbnail_url, source, added_at, profile_id, status)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
              ON CONFLICT(url, profile_id) DO UPDATE SET
                 title = excluded.title,
                 thumbnail_url = excluded.thumbnail_url,
                 source = excluded.source,
+                status = excluded.status,
                 added_at = excluded.added_at",
-            params![result.url, result.title, result.thumbnail_url, result.source, now, target_profile],
+            params![result.url, result.title, result.thumbnail_url, result.source, now, target_profile, status_val],
+        )?;
+        Ok(())
+    })
+}
+
+pub fn update_favorite_status(url: &str, status: &str, profile_id: Option<&str>) -> AppResult<()> {
+    with_db(|conn| {
+        let target_profile = match profile_id {
+            Some(pid) => pid.to_string(),
+            None => get_active_profile_id_inner(conn),
+        };
+        conn.execute(
+            "UPDATE favorites SET status = ?1 WHERE url = ?2 AND profile_id = ?3",
+            params![status, url, target_profile],
         )?;
         Ok(())
     })
@@ -681,7 +709,7 @@ pub fn get_favorites(profile_id: Option<&str>) -> AppResult<Vec<AnimeResult>> {
             None => get_active_profile_id_inner(conn),
         };
         let mut stmt = conn.prepare(
-            "SELECT url, title, thumbnail_url, source FROM favorites WHERE profile_id = ?1 ORDER BY added_at DESC"
+            "SELECT url, title, thumbnail_url, source, status FROM favorites WHERE profile_id = ?1 ORDER BY added_at DESC"
         )?;
         let results = stmt.query_map(params![target_profile], |row| {
             Ok(AnimeResult {
@@ -689,6 +717,7 @@ pub fn get_favorites(profile_id: Option<&str>) -> AppResult<Vec<AnimeResult>> {
                 title: row.get(1)?,
                 thumbnail_url: row.get(2)?,
                 source: row.get(3)?,
+                status: row.get(4).ok(),
                 ..Default::default()
             })
         })?
@@ -701,8 +730,8 @@ pub fn get_favorites(profile_id: Option<&str>) -> AppResult<Vec<AnimeResult>> {
 pub fn get_all_favorites_for_sync(profile_id: Option<&str>) -> AppResult<Vec<AnimeResult>> {
     with_db(|conn| {
         let (query, has_param) = match profile_id {
-            Some(_) => ("SELECT url, title, thumbnail_url, source, profile_id FROM favorites WHERE profile_id = ?1 ORDER BY added_at DESC", true),
-            None => ("SELECT url, title, thumbnail_url, source, profile_id FROM favorites ORDER BY added_at DESC", false),
+            Some(_) => ("SELECT url, title, thumbnail_url, source, profile_id, status FROM favorites WHERE profile_id = ?1 ORDER BY added_at DESC", true),
+            None => ("SELECT url, title, thumbnail_url, source, profile_id, status FROM favorites ORDER BY added_at DESC", false),
         };
 
         let mut stmt = conn.prepare(query)?;
@@ -713,6 +742,7 @@ pub fn get_all_favorites_for_sync(profile_id: Option<&str>) -> AppResult<Vec<Ani
                 thumbnail_url: row.get(2)?,
                 source: row.get(3)?,
                 profile_id: row.get(4).ok(),
+                status: row.get(5).ok(),
                 ..Default::default()
             })
         };
