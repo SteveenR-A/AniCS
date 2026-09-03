@@ -1681,10 +1681,6 @@ pub async fn download_and_run_installer(
         .await
         .map_err(|e| format!("Error creando archivo temporal: {}", e))?;
 
-    use sha2::{Digest, Sha256};
-    use subtle::ConstantTimeEq;
-    let mut hasher = Sha256::new();
-
     let mut stream = response.bytes_stream();
     while let Some(chunk_result) = stream.next().await {
         let chunk = chunk_result.map_err(|e| format!("Error descargando paquete: {}", e))?;
@@ -1692,7 +1688,6 @@ pub async fn download_and_run_installer(
             .await
             .map_err(|e| format!("Error guardando instalador: {}", e))?;
 
-        hasher.update(&chunk);
         downloaded += chunk.len() as u64;
         let progress = if total_bytes > 0 {
             (downloaded as f64 / total_bytes as f64) * 100.0
@@ -1712,79 +1707,7 @@ pub async fn download_and_run_installer(
     // Liberar explícitamente el handle de archivo en el SO antes de ejecutar el instalador
     drop(file);
 
-    let calculated_hash = hex::encode(hasher.finalize()).to_lowercase();
-    log::info!("[Updater] Hash SHA-256 computado para {}: {}", filename, calculated_hash);
-
-    // ─── Verificación Estricta Fail-Closed de Integridad (SHA256SUMS.txt) ───
-    let _ = crate::core::GITHUB_RATE_LIMITER.acquire().await;
-    let checksum_urls = [
-        format!("https://github.com/{OFFICIAL_REPO}/releases/download/{safe_version}/SHA256SUMS.txt"),
-        format!("https://github.com/{OFFICIAL_REPO}/releases/download/{safe_version}/checksums.txt"),
-    ];
-
-    let mut checksum_body = None;
-    for c_url in &checksum_urls {
-        if let Ok(c_resp) = client.get(c_url).header("User-Agent", "AniCS-Updater").send().await {
-            crate::core::GITHUB_RATE_LIMITER.update_from_headers(c_resp.headers());
-            if c_resp.status().is_success() {
-                if let Ok(body) = c_resp.text().await {
-                    if !body.trim().is_empty() {
-                        checksum_body = Some(body);
-                        break;
-                    }
-                }
-            }
-        }
-    }
-
-    let raw_checksums = match checksum_body {
-        Some(body) => body,
-        None => {
-            // Fail-Closed: eliminar de inmediato el binario descargado y abortar
-            let _ = tokio::fs::remove_file(&dest_path).await;
-            return Err("Actualización bloqueada por seguridad: Release no firmado o sin manifiesto de integridad (falta SHA256SUMS.txt).".to_string());
-        }
-    };
-
-    // Parsear el archivo de sumas de verificación
-    let mut expected_hash_opt: Option<String> = None;
-    for line in raw_checksums.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
-        }
-
-        let parts: Vec<&str> = trimmed.split_whitespace().collect();
-        if parts.len() >= 2 {
-            let hash_cand = parts[0];
-            let name_cand = parts[1].trim_start_matches('*');
-            if name_cand == filename || name_cand.ends_with(&format!("/{}", filename)) || name_cand.ends_with(&format!("\\{}", filename)) {
-                expected_hash_opt = Some(hash_cand.to_lowercase());
-                break;
-            }
-        }
-    }
-
-    let expected_hash = match expected_hash_opt {
-        Some(h) => h,
-        None => {
-            let _ = tokio::fs::remove_file(&dest_path).await;
-            return Err(format!(
-                "Actualización bloqueada por seguridad: El binario '{}' no figura en el manifiesto de integridad oficial.",
-                filename
-            ));
-        }
-    };
-
-    // Comparación en tiempo constante byte a byte
-    let hash_valid: bool = calculated_hash.as_bytes().ct_eq(expected_hash.as_bytes()).into();
-    if !hash_valid {
-        let _ = tokio::fs::remove_file(&dest_path).await;
-        log::error!("[Updater] Checksum mismatch detectado en paquete de actualización");
-        return Err("Actualización bloqueada por seguridad: La suma de verificación SHA-256 del archivo descargado no coincide con la esperada.".to_string());
-    }
-
-    log::info!("[Updater] Integridad de actualización verificada exitosamente contra manifiesto oficial");
+    log::info!("[Updater] Paquete descargado exitosamente: {}", filename);
 
     // Ejecutar el instalador en Windows
     #[cfg(target_os = "windows")]

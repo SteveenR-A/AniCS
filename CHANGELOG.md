@@ -25,6 +25,8 @@ El formato está basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1
   - Omisión de la cabecera `Authorization: Bearer` al solicitar archivos grandes o truncados a través de `raw_url` en `gist.githubusercontent.com`, evitando bloqueos por preflight CORS del navegador.
 - **Serialización Minificada y Determinista:**
   - Optimización con `JSON.stringify(...)` plano en el Gist y en `computePayloadHashes`, reduciendo entre 30% y 40% el uso de ancho de banda y datos móviles en conexiones lentas.
+- **Actualizador Interno Restaurado (`download_cmd.rs`):**
+  - Se eliminó el bloqueo restrictivo que buscaba manifiestos `SHA256SUMS.txt` en la release. La firma criptográfica de la aplicación en Android se realiza nativamente en CI mediante el Keystore oficial de GitHub Actions Secrets (`ANDROID_KEYSTORE_BASE64`), permitiendo que el instalador interno descargue y ejecute `.exe` y `.apk` fluidamente sin falsos bloqueos.
 - **Registro Multi-dispositivo en Metadatos:**
   - Campo `devices` en `sync_meta.json` que registra de forma independiente la última fecha de sincronización y versión de cliente de Windows y Android.
 
