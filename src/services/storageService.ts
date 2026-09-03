@@ -31,6 +31,9 @@ export const removeHistoryByAnime = (animeUrl: string, profileId?: string): Prom
 export const addFavorite = (anime: AnimeResult, profileId?: string, status?: string): Promise<void> =>
   invoke('add_favorite', { anime, profileId, status });
 
+export const batchAddFavorites = (favorites: AnimeResult[], profileId?: string): Promise<void> =>
+  invoke('batch_add_favorites', { favorites, profileId });
+
 export const updateFavoriteStatus = (url: string, status: string, profileId?: string): Promise<void> =>
   invoke('update_favorite_status', { url, status, profileId });
 

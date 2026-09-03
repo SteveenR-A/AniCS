@@ -1,5 +1,19 @@
 [
   {
+    "version": "0.2.1",
+    "date": "2026-09-03",
+    "title": "Blindaje Anti-SSRF, Verificación Estricta SHA-256, Rate Limiting y Transacciones en Lote",
+    "type": "patch",
+    "highlights": [
+      "Blindaje Anti-SSRF y DNS Rebinding: Validación con caché DNS en segmentos HLS y descargas bloqueando rangos privados",
+      "Verificación Estricta Fail-Closed: Cálculo SHA-256 del instalador y validación contra SHA256SUMS.txt oficial",
+      "Limitador de Velocidad Token Bucket: Control de cuotas de GitHub API con lectura de cabeceras x-ratelimit",
+      "Defensa Anti-CSRF y Validación en Tiempo Constante: Protección de token de sesión y bloqueo de orígenes no autorizados en MediaServer",
+      "Transacciones SQLite en Lote: Nuevo comando batch_add_favorites e inserción masiva optimizada durante la sincronización Gist",
+      "Sincronización Gist Interactiva y Resiliente: Desbloqueo por PIN de datos cifrados remotos y soporte de archivos grandes vía raw_url"
+    ]
+  },
+  {
     "version": "0.2.0",
     "date": "2026-09-02",
     "title": "Sincronización Bidireccional, Deduplicación y Blindaje de Seguridad",

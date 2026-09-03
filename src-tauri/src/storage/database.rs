@@ -456,8 +456,13 @@ pub fn batch_upsert_history(entries: &[HistoryEntry]) -> AppResult<()> {
                 } else {
                     &entry.profile_id
                 };
+                let id = if entry.id.trim().is_empty() {
+                    format!("{}-{}-{}", entry.anime_url, entry.episode_number, profile_id)
+                } else {
+                    entry.id.clone()
+                };
                 stmt.execute(params![
-                    entry.id, entry.anime_title, entry.anime_url, entry.thumbnail_url,
+                    id, entry.anime_title, entry.anime_url, entry.thumbnail_url,
                     entry.episode_number, entry.episode_url, entry.watch_progress,
                     entry.watched_at, entry.source, profile_id
                 ])?;
@@ -769,6 +774,40 @@ pub fn add_favorite(result: &AnimeResult, profile_id: Option<&str>, status: Opti
                 added_at = excluded.added_at",
             params![result.url, result.title, result.thumbnail_url, result.source, now, target_profile, status_val],
         )?;
+        Ok(())
+    })
+}
+
+pub fn batch_add_favorites(favorites: &[AnimeResult], profile_id: Option<&str>) -> AppResult<()> {
+    if favorites.is_empty() {
+        return Ok(());
+    }
+    with_db(|conn| {
+        let active_pid = get_active_profile_id_inner(conn);
+        let default_target = profile_id.unwrap_or(&active_pid);
+        let now = chrono::Utc::now().to_rfc3339();
+        let tx = conn.unchecked_transaction()?;
+        {
+            let mut stmt = tx.prepare_cached(
+                "INSERT INTO favorites (url, title, thumbnail_url, source, added_at, profile_id, status)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                 ON CONFLICT(url, profile_id) DO UPDATE SET
+                    title = excluded.title,
+                    thumbnail_url = excluded.thumbnail_url,
+                    source = excluded.source,
+                    status = excluded.status,
+                    added_at = excluded.added_at"
+            )?;
+
+            for fav in favorites {
+                let pid = fav.profile_id.as_deref().unwrap_or(default_target);
+                let status_val = fav.status.as_deref().unwrap_or("favorite");
+                stmt.execute(params![
+                    fav.url, fav.title, fav.thumbnail_url, fav.source, now, pid, status_val
+                ])?;
+            }
+        }
+        tx.commit()?;
         Ok(())
     })
 }

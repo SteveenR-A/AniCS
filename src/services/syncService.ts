@@ -375,6 +375,15 @@ export function mergeSyncData(local: GistFilesPayload, remote: GistFilesPayload)
   };
 }
 
+export class NeedPinForDecryptionError extends Error {
+  public salt: string;
+  constructor(salt: string) {
+    super('NEED_PIN_FOR_DECRYPTION');
+    this.name = 'NeedPinForDecryptionError';
+    this.salt = salt;
+  }
+}
+
 // ─── Cliente REST de GitHub Gist ───
 
 export async function fetchGistData(
@@ -419,11 +428,33 @@ export async function fetchGistData(
   const gistJson = await response.json();
   const files = gistJson.files || {};
 
-  const getRawContent = (filename: string): string => {
-    return files[filename]?.content || '';
+  // Descarga segura del contenido del archivo: si GitHub lo truncó o no incluyó el contenido
+  // directamente en el JSON (por tamaño o líneas), se consulta el raw_url
+  const getRawContent = async (filename: string): Promise<string> => {
+    const fileObj = files[filename];
+    if (!fileObj) return '';
+    if (!fileObj.truncated && typeof fileObj.content === 'string' && fileObj.content.length > 0) {
+      return fileObj.content;
+    }
+    if (fileObj.raw_url) {
+      try {
+        const rawRes = await fetch(fileObj.raw_url, {
+          headers: {
+            Authorization: `Bearer ${config.githubToken}`,
+            'Cache-Control': 'no-cache',
+          },
+        });
+        if (rawRes.ok) {
+          return await rawRes.text();
+        }
+      } catch (err) {
+        console.warn(`[AniCS Sync] Falló descarga directa de raw_url para ${filename}:`, err);
+      }
+    }
+    return fileObj.content || '';
   };
 
-  const syncMetaContent = getRawContent('sync_meta.json');
+  const syncMetaContent = await getRawContent('sync_meta.json');
   if (!syncMetaContent) {
     throw new Error('El Gist no contiene el archivo sync_meta.json requerido');
   }
@@ -432,14 +463,14 @@ export async function fetchGistData(
 
   // Helper para procesar texto plano o descifrar si aplica
   const parseFileContent = async <T>(filename: string, fallback: T): Promise<T> => {
-    const raw = getRawContent(filename);
+    const raw = await getRawContent(filename);
     if (!raw) return fallback;
 
     const isEncrypted = !!syncMeta.pbkdf2Salt || config.encryptionEnabled;
 
     if (isEncrypted) {
       if (!sessionDerivedKey) {
-        throw new Error('NEED_PIN_FOR_DECRYPTION');
+        throw new NeedPinForDecryptionError(syncMeta.pbkdf2Salt || '');
       }
       try {
         const decrypted = await decryptText(raw, sessionDerivedKey);

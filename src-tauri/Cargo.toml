@@ -1,6 +1,6 @@
 [package]
 name = "anics"
-version = "0.2.0"
+version = "0.2.1"
 description = "AniCS - Anime & Donghua Desktop Application"
 authors = ["AniCS"]
 edition = "2021"
@@ -49,6 +49,10 @@ urlencoding = "2"
 url = "2"
 base64 = "0.22"
 keyring = { version = "3", features = ["windows-native", "apple-native", "sync-secret-service"] }
+sha2 = "0.10"
+subtle = "2.6"
+hex = "0.4"
+zeroize = { version = "1.8", features = ["derive"] }
 
 [profile.release]
 panic = "abort"

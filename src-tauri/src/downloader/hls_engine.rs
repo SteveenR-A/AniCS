@@ -12,6 +12,7 @@ use crate::core::{AppError, AppResult, DownloadProgress, DownloadStatus};
 use crate::scrapers::DOWNLOAD_CLIENT;
 
 const WINDOW_SIZE: usize = 6; // Fragmentos HLS concurrentes en vuelo (optimizado para background/mobile)
+const MAX_PLAYLIST_SEGMENTS: usize = 5000; // Límite de seguridad contra DoS y bombas de fragmentos
 
 /// Resultado del análisis de un manifiesto HLS
 #[derive(Debug, Clone)]
@@ -61,6 +62,7 @@ impl HlsEngine {
 
     /// Analiza el manifiesto HLS y obtiene la mejor playlist de calidad
     pub async fn parse_playlist(&self) -> AppResult<ParsedPlaylist> {
+        crate::core::validate_url_cached(&self.stream_url).await?;
         let content = self.fetch_url(&self.stream_url).await?;
 
         // Si es un master manifest (contiene #EXT-X-STREAM-INF), seleccionar la mejor calidad
@@ -131,6 +133,14 @@ impl HlsEngine {
 
         if segments.is_empty() {
             return Err(AppError::Download("No segments found in HLS playlist".to_string()));
+        }
+
+        if segments.len() > MAX_PLAYLIST_SEGMENTS {
+            return Err(AppError::Security(format!(
+                "La playlist HLS contiene {} fragmentos, excediendo el límite de seguridad de {}",
+                segments.len(),
+                MAX_PLAYLIST_SEGMENTS
+            )));
         }
 
         Ok(ParsedPlaylist {
@@ -341,6 +351,7 @@ impl HlsEngine {
     }
 
     async fn fetch_url(&self, url: &str) -> AppResult<String> {
+        crate::core::validate_url_cached(url).await?;
         let mut req = DOWNLOAD_CLIENT.get(url);
         if let Some(ref ref_url) = self.referer {
             req = req.header(header::REFERER, ref_url.as_str());
@@ -355,6 +366,7 @@ impl HlsEngine {
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 async fn download_segment(url: &str, referer: Option<&str>) -> AppResult<Bytes> {
+    crate::core::validate_url_cached(url).await?;
     let mut req = DOWNLOAD_CLIENT.get(url);
     if let Some(ref_url) = referer {
         req = req.header(header::REFERER, ref_url);

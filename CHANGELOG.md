@@ -5,6 +5,39 @@ El formato está basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1
 
 ---
 
+## [0.2.1] - 2026-09-02
+
+### 🛡️ Seguridad Avanzada, Anti-SSRF y Mitigación de Timing Attacks
+- **Blindaje Anti-SSRF y DNS Rebinding (`url_security.rs`):**
+  - Implementación de validación estricta de URLs (`validate_url_cached`) aplicada a segmentos HLS (`hls_engine.rs`) y descargas de red.
+  - Bloqueo exhaustivo de rangos IPv4/IPv6 privados (RFC 1918), loopback (127.0.0.0/8, ::1), link-local (169.254.0.0/16, fe80::/10), CGNAT (100.64.0.0/10), ULA (fc00::/7), multicast y rangos reservados.
+  - `DnsCache` global thread-safe con TTL de 60 segundos para evitar sobrecarga de resolución DNS y proteger la latencia en fragmentos de video.
+- **Protección del Servidor de Medios Local (`media_server.rs`):**
+  - Verificación de token de sesión en tiempo constante (`verify_token_constant_time`) mediante digest SHA-256 para prevenir fugas de canal lateral (timing attacks).
+  - Defensa Anti-CSRF estricta: Detección y rechazo de peticiones con cabeceras `Origin` o `Referer` ajenas al WebView de la app (`tauri://localhost`, `http://tauri.localhost`, `http://localhost:1420`).
+  - Reintento con backoff en el enlace del puerto preferido `41725`.
+
+### ⚡ Verificación de Integridad en Actualizaciones y Rate Limiting
+- **Verificación Estricta Fail-Closed de Integridad (`download_cmd.rs`):**
+  - Cálculo SHA-256 en streaming durante la descarga del nuevo instalador mediante `sha2`.
+  - Validación obligatoria contra el manifiesto oficial `SHA256SUMS.txt` / `checksums.txt` de la release en GitHub, comparado en tiempo constante (`subtle::ConstantTimeEq`).
+  - Política Fail-Closed: Eliminación inmediata del binario descargado y cancelación del proceso si no existe manifiesto oficial o si el checksum difiere.
+- **Limitador de Velocidad Token Bucket (`rate_limiter.rs`):**
+  - Algoritmo Token Bucket adaptativo (`GitHubRateLimiter`) para regular el tráfico hacia la API de GitHub.
+  - Detección e interpretación dinámica de cabeceras `x-ratelimit-remaining` y `x-ratelimit-reset` con enfriamiento preventivo y jitter para evitar errores `429 Too Many Requests`.
+
+### 🚀 Optimización de Persistencia y Sincronización Gist
+- **Transacciones SQLite en Lote (`batch_add_favorites`):**
+  - Nuevo comando nativo Tauri y función de almacenamiento que inserta y actualiza listas de favoritos dentro de una sola transacción atómica, acelerando significativamente la sincronización.
+  - Generación determinista de ID en `batch_upsert_history` ante entradas con identificador vacío.
+  - Deserialización segura con valores por defecto en `AnimeResult` e `HistoryEntry` frente a esquemas legacy.
+- **Sincronización Gist Resiliente e Interactiva (`syncService.ts`, `useSyncStore.ts`):**
+  - Manejo interactivo de PIN (`NeedPinForDecryptionError`): Solicitud dinámica del PIN de desbloqueo con la sal PBKDF2 remota cuando el Gist está cifrado y la clave no reside en memoria.
+  - Soporte de archivos Gist truncados o de gran tamaño: Descarga directa desde `raw_url` autenticado cuando GitHub trunca el payload JSON.
+  - Sincronización automática inmediata al vincular o actualizar el token de GitHub.
+
+---
+
 ## [0.2.0] - 2026-09-02
 
 ### 🔄 Sincronización Bidireccional y Deduplicación

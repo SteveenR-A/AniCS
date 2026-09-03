@@ -2,6 +2,8 @@ use std::io::SeekFrom;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use once_cell::sync::OnceCell;
+use sha2::{Digest, Sha256};
+use subtle::ConstantTimeEq;
 use tauri::{AppHandle, Manager};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -9,6 +11,16 @@ use tokio::net::{TcpListener, TcpStream};
 static SERVER_PORT: OnceCell<u16> = OnceCell::new();
 static MEDIA_TOKEN: OnceCell<String> = OnceCell::new();
 static APP_HANDLE: OnceCell<AppHandle> = OnceCell::new();
+
+/// Compara dos tokens en tiempo constante mediante hashing SHA-256 para evitar fugas de longitud y timing attacks
+pub fn verify_token_constant_time(expected: &[u8], provided: &[u8]) -> bool {
+    if expected.is_empty() || provided.is_empty() {
+        return false;
+    }
+    let h_exp = Sha256::digest(expected);
+    let h_prov = Sha256::digest(provided);
+    h_exp.ct_eq(&h_prov).into()
+}
 
 /// Obtiene el puerto asignado al servidor local de streaming
 pub fn get_server_port() -> u16 {
@@ -40,13 +52,27 @@ pub const PREFERRED_PORT: u16 = 41725;
 pub async fn start_media_server(app_handle: AppHandle) -> Result<u16, Box<dyn std::error::Error + Send + Sync>> {
     let _ = APP_HANDLE.set(app_handle);
 
-    // Intentar enlazar el puerto fijo dedicado para CSP exacto sin comodines
-    let listener = match TcpListener::bind(format!("127.0.0.1:{}", PREFERRED_PORT)).await {
-        Ok(l) => l,
-        Err(e) => {
-            log::warn!("No se pudo enlazar el puerto preferido {}: {}. Usando puerto dinámico.", PREFERRED_PORT, e);
-            TcpListener::bind("127.0.0.1:0").await?
+    // Intentar enlazar el puerto fijo dedicado para CSP exacto sin comodines (con reintento)
+    let mut listener_opt = None;
+    for attempt in 0..3 {
+        match TcpListener::bind(format!("127.0.0.1:{}", PREFERRED_PORT)).await {
+            Ok(l) => {
+                listener_opt = Some(l);
+                break;
+            }
+            Err(e) => {
+                if attempt < 2 {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                } else {
+                    log::warn!("[MediaServer] No se pudo enlazar el puerto preferido {}: {}. Usando puerto dinámico.", PREFERRED_PORT, e);
+                }
+            }
         }
+    }
+
+    let listener = match listener_opt {
+        Some(l) => l,
+        None => TcpListener::bind("127.0.0.1:0").await?,
     };
     let local_addr = listener.local_addr()?;
     let port = local_addr.port();
@@ -163,16 +189,43 @@ async fn handle_connection(mut stream: TcpStream, _addr: SocketAddr) {
     let method = parts[0];
     let uri = parts[1];
 
-    // Extraer origen para política CORS restringida
+    // Extraer origen y referer para política CORS restringida y defensa anti-CSRF
     let mut origin_header: Option<&str> = None;
+    let mut referer_header: Option<&str> = None;
     let mut range_header: Option<&str> = None;
 
     for line in lines {
         let lower = line.to_lowercase();
         if lower.starts_with("origin:") {
             origin_header = Some(line["origin:".len()..].trim());
+        } else if lower.starts_with("referer:") {
+            referer_header = Some(line["referer:".len()..].trim());
         } else if lower.starts_with("range:") {
             range_header = Some(line["range:".len()..].trim());
+        }
+    }
+
+    // 1. Bloqueo temprano si se envía un Origin no autorizado desde un navegador externo (Anti-CSRF)
+    if let Some(o) = origin_header {
+        if o != "tauri://localhost" && o != "http://tauri.localhost" && o != "http://localhost:1420" {
+            log::warn!("[MediaServer] Solicitud bloqueada por Origin no autorizado");
+            let response = "HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\n\r\nUnauthorized Origin";
+            let _ = stream.write_all(response.as_bytes()).await;
+            return;
+        }
+    }
+
+    // 2. Bloqueo si el Referer proviene de un dominio web externo ajeno a Tauri
+    if let Some(ref_str) = referer_header {
+        if !ref_str.starts_with("tauri://localhost")
+            && !ref_str.starts_with("http://tauri.localhost")
+            && !ref_str.starts_with("http://localhost:1420")
+            && !ref_str.starts_with("http://127.0.0.1:")
+        {
+            log::warn!("[MediaServer] Solicitud bloqueada por Referer no autorizado");
+            let response = "HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\n\r\nUnauthorized Referer";
+            let _ = stream.write_all(response.as_bytes()).await;
+            return;
         }
     }
 
@@ -182,7 +235,7 @@ async fn handle_connection(mut stream: TcpStream, _addr: SocketAddr) {
             format!("Access-Control-Allow-Origin: {}\r\n", o)
         }
         None => "Access-Control-Allow-Origin: tauri://localhost\r\n".to_string(),
-        _ => String::new(), // NO emitir CORS ante orígenes externos no autorizados
+        _ => String::new(),
     };
 
     if method == "OPTIONS" {
@@ -204,17 +257,17 @@ Access-Control-Max-Age: 86400\r\n\
         return;
     }
 
-    // 1. Validar presencia y coincidencia del token de sesión
+    // 3. Validar presencia y coincidencia del token de sesión en tiempo constante
     let expected_token = get_media_token();
-    let provided_token = extract_query_param(uri, "token");
-    if !expected_token.is_empty() && provided_token.as_deref() != Some(expected_token) {
-        log::warn!("Unauthorized access attempt to media server: missing or invalid token");
+    let provided_token = extract_query_param(uri, "token").unwrap_or_default();
+    if expected_token.is_empty() || !verify_token_constant_time(expected_token.as_bytes(), provided_token.as_bytes()) {
+        log::warn!("[MediaServer] Intento de acceso no autorizado: token inválido o ausente");
         let response = "HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\n\r\nMissing or invalid token";
         let _ = stream.write_all(response.as_bytes()).await;
         return;
     }
 
-    // 2. Extraer parámetro `path` de la URL /video?path=...
+    // 4. Extraer parámetro `path` de la URL /video?path=...
     let file_path_str = match extract_query_param(uri, "path") {
         Some(p) => match urlencoding::decode(&p) {
             Ok(decoded) => decoded.into_owned(),
@@ -229,7 +282,7 @@ Access-Control-Max-Age: 86400\r\n\
 
     let file_path = PathBuf::from(&file_path_str);
 
-    // 3. Inspeccionar metadatos de symlink SIN resolver: Bloquear cualquier enlace simbólico
+    // 5. Inspeccionar metadatos de symlink SIN resolver: Bloquear cualquier enlace simbólico
     let symlink_meta = match tokio::fs::symlink_metadata(&file_path).await {
         Ok(m) => m,
         Err(e) => {
@@ -244,16 +297,16 @@ Access-Control-Max-Age: 86400\r\n\
     };
 
     if symlink_meta.file_type().is_symlink() {
-        log::warn!("Access denied: symlinks are strictly prohibited: {}", file_path.display());
+        log::warn!("[MediaServer] Acceso denegado: se detectó enlace simbólico no permitido");
         let response = "HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\n\r\nSymlinks are not allowed";
         let _ = stream.write_all(response.as_bytes()).await;
         return;
     }
 
-    // 4. Validar que la ruta canónica esté dentro de las carpetas autorizadas de la app
+    // 6. Validar que la ruta canónica esté dentro de las carpetas autorizadas de la app
     if let Some(app) = APP_HANDLE.get() {
         if !is_path_allowed(&file_path, app) {
-            log::warn!("Access denied: path outside allowed directories: {}", file_path.display());
+            log::warn!("[MediaServer] Acceso denegado: ruta fuera de los directorios permitidos de la app");
             let response = "HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\n\r\nAccess denied: path outside allowed directory";
             let _ = stream.write_all(response.as_bytes()).await;
             return;
@@ -442,6 +495,19 @@ mod tests {
         assert_eq!(get_mime_type(&PathBuf::from("video.mkv")), "video/x-matroska");
         assert_eq!(get_mime_type(&PathBuf::from("image.webp")), "image/webp");
         assert_eq!(get_mime_type(&PathBuf::from("data.db")), "application/octet-stream");
+    }
+
+    #[test]
+    fn test_verify_token_constant_time() {
+        let secret = b"my-secret-token-12345";
+        let valid = b"my-secret-token-12345";
+        let invalid = b"my-secret-token-wrong";
+        let empty = b"";
+
+        assert!(verify_token_constant_time(secret, valid));
+        assert!(!verify_token_constant_time(secret, invalid));
+        assert!(!verify_token_constant_time(secret, empty));
+        assert!(!verify_token_constant_time(empty, valid));
     }
 }
 

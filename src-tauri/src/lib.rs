@@ -139,6 +139,7 @@ pub fn run() {
             commands::remove_history_batch,
             commands::remove_history_by_anime,
             commands::add_favorite,
+            commands::batch_add_favorites,
             commands::update_favorite_status,
             commands::remove_favorite,
             commands::is_favorite,

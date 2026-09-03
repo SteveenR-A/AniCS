@@ -102,6 +102,16 @@ pub async fn add_favorite(
     storage::add_favorite(&anime, profile_id.as_deref(), status.as_deref()).map_err(|e| e.to_string())
 }
 
+/// Agregar múltiples animes a favoritos en lote dentro de una única transacción SQLite
+#[tauri::command]
+pub async fn batch_add_favorites(
+    favorites: Vec<AnimeResult>,
+    profile_id: Option<String>,
+    _state: State<'_, AppState>,
+) -> Result<(), String> {
+    storage::batch_add_favorites(&favorites, profile_id.as_deref()).map_err(|e| e.to_string())
+}
+
 /// Actualizar el estado de seguimiento de un favorito
 #[tauri::command]
 pub async fn update_favorite_status(

@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 pub struct AnimeResult {
     pub title: String,
     pub url: String,
+    #[serde(default)]
     pub thumbnail_url: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -25,9 +26,14 @@ pub struct AnimeResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rating: Option<f32>,
     /// ID del extractor que generó este resultado
+    #[serde(default = "default_source")]
     pub source: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub profile_id: Option<String>,
+}
+
+fn default_source() -> String {
+    "jkanime".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -157,11 +163,14 @@ pub struct HistoryEntry {
     pub id: String,
     pub anime_title: String,
     pub anime_url: String,
+    #[serde(default)]
     pub thumbnail_url: String,
     pub episode_number: u32,
     pub episode_url: String,
+    #[serde(default)]
     pub watch_progress: f64,
     pub watched_at: String,
+    #[serde(default = "default_source")]
     pub source: String,
     #[serde(default = "default_profile_id")]
     pub profile_id: String,

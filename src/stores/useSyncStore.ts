@@ -29,6 +29,7 @@ import {
   batchUpsertHistory,
   removeHistoryBatch,
   addFavorite,
+  batchAddFavorites,
   removeFavorite,
 } from '@/services/storageService';
 import {
@@ -39,6 +40,7 @@ import {
   exportPayloadToJsonString,
   importPayloadFromJsonString,
   GistNotFoundError,
+  NeedPinForDecryptionError,
   computePayloadHashes,
   areHashesEqual,
   isLocalDataEmpty,
@@ -223,10 +225,15 @@ export const useSyncStore = create<SyncState>((set, get) => ({
               gistUrl: `https://gist.github.com/${found.gistId}`,
             });
             console.log(`[AniCS Sync] Gist existente detectado y vinculado: ${found.gistId}`);
+            // Descargar y sincronizar datos inmediatamente tras vincular el Gist
+            get().syncNow().catch(e => console.warn('[AniCS Sync] Error en sincronización inicial:', e));
           }
         } catch (e) {
           console.warn('[AniCS Sync] Fallo al buscar Gist existente:', e);
         }
+      } else {
+        // Si ya teníamos gistId configurado, sincronizar con el token actualizado
+        get().syncNow().catch(e => console.warn('[AniCS Sync] Error sincronizando con nuevo token:', e));
       }
     } else {
       await deleteSecureSecret('github_token');
@@ -425,7 +432,27 @@ export const useSyncStore = create<SyncState>((set, get) => ({
         try {
           fetchResult = await fetchGistData(config, currentKey);
         } catch (e: any) {
-          if (e instanceof GistNotFoundError) {
+          if (e instanceof NeedPinForDecryptionError || e?.message === 'NEED_PIN_FOR_DECRYPTION') {
+            const salt = (e instanceof NeedPinForDecryptionError && e.salt) || saltB64;
+            const pin = await get().requestPin('unlock');
+            if (!pin) {
+              set({ isSyncing: false, syncStatus: 'error', lastError: 'Se requiere el PIN para sincronizar y descifrar los datos remotos' });
+              return;
+            }
+            if (!salt) {
+              set({ isSyncing: false, syncStatus: 'error', lastError: 'Salt PBKDF2 ausente en la nube' });
+              return;
+            }
+            const saltBytes = base64ToUint8Array(salt);
+            currentKey = await deriveKeyFromPin(pin, saltBytes);
+            set({ sessionDerivedKey: currentKey });
+            saltB64 = salt;
+            await saveSecureSecret('pbkdf2_salt', salt);
+            await get().updateConfig({ encryptionEnabled: true });
+
+            // Reintentar la descarga con la clave recién desbloqueada
+            fetchResult = await fetchGistData(get().config, currentKey);
+          } else if (e instanceof GistNotFoundError) {
             console.warn('Gist no encontrado (404), recreando...');
             await get().updateConfig({ gistId: '', lastEtag: '' });
             fetchResult = null;
@@ -483,8 +510,8 @@ export const useSyncStore = create<SyncState>((set, get) => ({
               if (remotePayload.history.length > 0) {
                 await batchUpsertHistory(remotePayload.history);
               }
-              for (const f of remotePayload.favorites) {
-                await addFavorite(f, f.profileId);
+              if (remotePayload.favorites.length > 0) {
+                await batchAddFavorites(remotePayload.favorites);
               }
               for (const del of remotePayload.syncMeta.deletedFavorites) {
                 await removeFavorite(del.url, del.profileId);
@@ -520,8 +547,8 @@ export const useSyncStore = create<SyncState>((set, get) => ({
             if (mergedPayload.history.length > 0) {
               await batchUpsertHistory(mergedPayload.history);
             }
-            for (const f of mergedPayload.favorites) {
-              await addFavorite(f, f.profileId);
+            if (mergedPayload.favorites.length > 0) {
+              await batchAddFavorites(mergedPayload.favorites);
             }
             for (const del of mergedPayload.syncMeta.deletedFavorites) {
               await removeFavorite(del.url, del.profileId);

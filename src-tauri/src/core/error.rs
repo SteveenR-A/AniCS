@@ -32,6 +32,12 @@ pub enum AppError {
     #[error("Cancelled")]
     Cancelled,
 
+    #[error("Security error: {0}")]
+    Security(String),
+
+    #[error("Rate limit exceeded: {0}")]
+    RateLimit(String),
+
     #[error("{0}")]
     Generic(String),
 }

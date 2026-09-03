@@ -55,7 +55,7 @@ dependencies = [
 
 [[package]]
 name = "anics"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -64,6 +64,7 @@ dependencies = [
  "chrono",
  "env_logger",
  "futures",
+ "hex",
  "keyring",
  "log",
  "m3u8-rs",
@@ -75,6 +76,8 @@ dependencies = [
  "scraper",
  "serde",
  "serde_json",
+ "sha2",
+ "subtle",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
@@ -89,6 +92,7 @@ dependencies = [
  "url",
  "urlencoding",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]
