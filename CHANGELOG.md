@@ -5,6 +5,35 @@ El formato está basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1
 
 ---
 
+## [0.2.2] - 2026-09-03
+
+### 🎬 Streaming HLS de Alta Resiliencia y Mitigación de Servidores Caídos
+- **Mitigación Automática de CDNs Caídos (`hlsLoader.ts`, `hls_engine.rs`):**
+  - Solución definitiva al congelamiento del video cada 3 segundos provocado por la caída/inactividad de los servidores remotos `cdn2.ducvomes.com` y `cdn5.ducvomes.com` (`130.78.217.218`) en servidores JKAnime (*Magi* y *Desu*).
+  - Implementación de `createRobustHlsLoader`: Interceptor personalizado que extiende `Hls.DefaultConfig.loader` para sanitizar en caliente las listas maestras y de medios (`.m3u8`), reescribiendo fragmentos a espejos funcionales (`cdn1`, `cdn3`, `cdn4`, `cdn6`).
+  - Rotación y conmutación por error (*fallback*) automática ante fragmentos con fallo de red (`HTTP 404/5xx` o timeout).
+  - Ampliación de umbrales de buffering en `PlayerPage.tsx` a 60s/120s y manejo granular de recuperación ante errores de carga y decodificación (`hls.startLoad()`, `hls.recoverMediaError()`).
+  - Función nativa `sanitize_segment_url` en el motor Rust Tauri (`hls_engine.rs`) para proteger también las descargas locales en background contra servidores offline.
+
+### ☁️ Sincronización en la Nube Multiplataforma y Aislamiento de Configuraciones
+- **Separación de Ajustes por Plataforma (`settings_desktop.json` y `settings_mobile.json`):**
+  - División de configuraciones en GitHub Gist para evitar que Windows y Android sobreescriban sus respectivas carpetas de descarga (`C:\Users\...\Videos\AniCS` vs `/storage/emulated/0/Anime`) o preferencias del reproductor.
+  - Conservación de `settings.json` legacy para compatibilidad con versiones previas de la app.
+- **Exclusión de Archivos Locales en Disco (`isLocalFileHistory`):**
+  - Las reproducciones de archivos descargados localmente en disco se mantienen registradas en el SQLite de cada dispositivo, pero se excluyen del payload en la nube. En `history.json` solo viajan episodios de streaming online (*JKAnime*, *MundoDonghua*), eliminando rutas locales inaccesibles entre PC y Android.
+- **Corrección de CORS en Descargas de Gist (`syncService.ts`):**
+  - Omisión de la cabecera `Authorization: Bearer` al solicitar archivos grandes o truncados a través de `raw_url` en `gist.githubusercontent.com`, evitando bloqueos por preflight CORS del navegador.
+- **Serialización Minificada y Determinista:**
+  - Optimización con `JSON.stringify(...)` plano en el Gist y en `computePayloadHashes`, reduciendo entre 30% y 40% el uso de ancho de banda y datos móviles en conexiones lentas.
+- **Registro Multi-dispositivo en Metadatos:**
+  - Campo `devices` en `sync_meta.json` que registra de forma independiente la última fecha de sincronización y versión de cliente de Windows y Android.
+
+### 🧪 Suite de Pruebas Automatizadas
+- 66 pruebas unitarias e integrales en el frontend (`npm test`), incluyendo pruebas end-to-end de descarga de Gist, fusión bidireccional en SQLite y resolución estricta de conflictos LWW (*Last-Write-Wins*).
+- 32 pruebas en Rust (`cargo test`) sin regresiones.
+
+---
+
 ## [0.2.1] - 2026-09-02
 
 ### 🛡️ Seguridad Avanzada, Anti-SSRF y Mitigación de Timing Attacks

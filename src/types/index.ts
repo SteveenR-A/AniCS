@@ -150,6 +150,10 @@ export interface SyncMeta {
     deletedAt: string;
   }>;
   deletedHistory?: HistoryTombstone[];
+  devices?: {
+    windows?: { lastSyncAt: string; appVersion: string };
+    android?: { lastSyncAt: string; appVersion: string };
+  };
 }
 
 export interface HistoryTombstone {
@@ -175,6 +179,8 @@ export interface GistFilesPayload {
   history: HistoryEntry[];
   favorites: AnimeResult[];
   settings: Record<string, string>;
+  settingsDesktop?: Record<string, string>;
+  settingsMobile?: Record<string, string>;
 }
 
 export type DownloadStatus = 'queued' | 'downloading' | 'paused' | 'completed' | 'failed' | 'canceled';

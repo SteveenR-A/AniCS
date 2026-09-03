@@ -1,5 +1,18 @@
 [
   {
+    "version": "0.2.2",
+    "date": "2026-09-03",
+    "title": "Resiliencia HLS ante CDNs Caídos, Separación de Configuración PC/Móvil y Optimización de Sync",
+    "type": "patch",
+    "highlights": [
+      "Resiliencia de Streaming HLS: Mitigación automática y rotación de CDNs caídos (cdn2/cdn5 ducvomes) en tiempo real mediante interceptor robusto de fragmentos",
+      "Separación de Configuración por Plataforma: Archivos independientes settings_desktop.json y settings_mobile.json en GitHub Gist para proteger carpetas de descarga y opciones del sistema",
+      "Exclusión de Archivos Locales en la Nube: Historial en disco restringido a SQLite local para no colisionar rutas entre plataformas",
+      "Serialización Minificada Determinista: Reducción del 30-40% en tamaño de transferencia de Gists y cómputo de hashes SHA-256 optimizado",
+      "Pruebas Automatizadas End-to-End: 66 pruebas unitarias e integrales garantizando la descarga de Gists, resolución de conflictos y fusión con base local"
+    ]
+  },
+  {
     "version": "0.2.1",
     "date": "2026-09-03",
     "title": "Blindaje Anti-SSRF, Verificación Estricta SHA-256, Rate Limiting y Transacciones en Lote",

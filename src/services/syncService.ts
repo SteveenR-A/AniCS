@@ -318,6 +318,32 @@ export function mergeProfiles(local: UserProfile[], remote: UserProfile[]): User
   return Array.from(map.values());
 }
 
+/**
+ * Detecta si una entrada de historial corresponde a un archivo reproducido localmente en disco
+ * (ej. rutas de Windows C:\... o rutas de Android /storage/...), las cuales no deben sincronizarse
+ * en la nube para no mezclar ni romper rutas de archivos entre distintas plataformas.
+ */
+export function isLocalFileHistory(entry: HistoryEntry): boolean {
+  if (!entry) return false;
+  if (entry.source === 'local') return true;
+  const url = entry.animeUrl || '';
+  const epUrl = entry.episodeUrl || '';
+  const id = entry.id || '';
+  return (
+    url.startsWith('local://') ||
+    epUrl.startsWith('local://') ||
+    /^[a-zA-Z]:[\\/]/.test(url) ||
+    /^[a-zA-Z]:[\\/]/.test(epUrl) ||
+    /^[a-zA-Z]:[\\/]/.test(id) ||
+    url.startsWith('/storage/') ||
+    url.startsWith('/data/') ||
+    epUrl.startsWith('/storage/') ||
+    epUrl.startsWith('/data/') ||
+    id.startsWith('/storage/') ||
+    id.startsWith('/data/')
+  );
+}
+
 export function mergeSyncData(local: GistFilesPayload, remote: GistFilesPayload): GistFilesPayload {
   // Validar versión y migrar si procede
   const migratedRemote = migratePayload(remote);
@@ -354,24 +380,46 @@ export function mergeSyncData(local: GistFilesPayload, remote: GistFilesPayload)
 
   const mergedFavorites = mergeFavoritesWithTombstones(local.favorites, migratedRemote.favorites, mergedFavTombstones);
   const mergedProfiles = mergeProfiles(local.profiles, migratedRemote.profiles);
-  const mergedSettings = { ...migratedRemote.settings, ...local.settings };
+
+  // Separación de configuraciones por plataforma
+  const mergedSettingsDesktop = {
+    ...(migratedRemote.settingsDesktop || {}),
+    ...(local.settingsDesktop || {}),
+    ...(local.syncMeta.lastModifiedDevice !== 'android' ? local.settings : {})
+  };
+  const mergedSettingsMobile = {
+    ...(migratedRemote.settingsMobile || {}),
+    ...(local.settingsMobile || {}),
+    ...(local.syncMeta.lastModifiedDevice === 'android' ? local.settings : {})
+  };
+
+  const currentPlatform = getCurrentDevicePlatform();
+  const activeSettings = currentPlatform === 'android'
+    ? (Object.keys(mergedSettingsMobile).length > 0 ? mergedSettingsMobile : local.settings)
+    : (Object.keys(mergedSettingsDesktop).length > 0 ? mergedSettingsDesktop : local.settings);
 
   return {
     syncMeta: {
       schemaVersion: CURRENT_SCHEMA_VERSION,
-      appVersion: local.syncMeta.appVersion || '0.2.0',
+      appVersion: local.syncMeta.appVersion || '0.2.1',
       lastModifiedAt: getCalibratedTimestamp(),
-      lastModifiedDevice: local.syncMeta.lastModifiedDevice || 'windows',
+      lastModifiedDevice: local.syncMeta.lastModifiedDevice || currentPlatform,
       pbkdf2Salt: local.syncMeta.pbkdf2Salt || migratedRemote.syncMeta.pbkdf2Salt,
       fileHashes: { profiles: '', history: '', favorites: '', settings: '' },
       deletedFavorites: mergedFavTombstones,
       deletedProfiles: [],
       deletedHistory: mergedHistoryTombstones,
+      devices: {
+        ...(migratedRemote.syncMeta.devices || {}),
+        ...(local.syncMeta.devices || {}),
+      },
     },
     profiles: mergedProfiles,
     history: cloudHistory,
     favorites: mergedFavorites,
-    settings: mergedSettings,
+    settings: activeSettings,
+    settingsDesktop: mergedSettingsDesktop,
+    settingsMobile: mergedSettingsMobile,
   };
 }
 
@@ -438,11 +486,18 @@ export async function fetchGistData(
     }
     if (fileObj.raw_url) {
       try {
+        // gist.githubusercontent.com es un CDN público de contenido plano.
+        // Enviar cabecera `Authorization: Bearer` en peticiones CORS desde el WebView provoca que
+        // el servidor rechace el preflight con error de red/CORS.
+        const isGistRawContentUrl = fileObj.raw_url.includes('gist.githubusercontent.com') || fileObj.raw_url.includes('raw.githubusercontent.com');
+        const fetchHeaders: Record<string, string> = {
+          'Cache-Control': 'no-cache',
+        };
+        if (!isGistRawContentUrl && config.githubToken) {
+          fetchHeaders['Authorization'] = `Bearer ${config.githubToken}`;
+        }
         const rawRes = await fetch(fileObj.raw_url, {
-          headers: {
-            Authorization: `Bearer ${config.githubToken}`,
-            'Cache-Control': 'no-cache',
-          },
+          headers: fetchHeaders,
         });
         if (rawRes.ok) {
           return await rawRes.text();
@@ -464,7 +519,7 @@ export async function fetchGistData(
   // Helper para procesar texto plano o descifrar si aplica
   const parseFileContent = async <T>(filename: string, fallback: T): Promise<T> => {
     const raw = await getRawContent(filename);
-    if (!raw) return fallback;
+    if (!raw || !raw.trim()) return fallback;
 
     const isEncrypted = !!syncMeta.pbkdf2Salt || config.encryptionEnabled;
 
@@ -486,7 +541,7 @@ export async function fetchGistData(
     } else {
       try {
         return JSON.parse(raw);
-      } catch {
+      } catch (parseErr) {
         if (sessionDerivedKey) {
           try {
             const decrypted = await decryptText(raw, sessionDerivedKey);
@@ -495,7 +550,11 @@ export async function fetchGistData(
             // Ignorar
           }
         }
-        throw new Error('Los datos remotos están cifrados. Activa el cifrado por PIN con la clave correcta para sincronizar.');
+        if (syncMeta.pbkdf2Salt) {
+          throw new Error('Los datos remotos están cifrados. Activa el cifrado por PIN con la clave correcta para sincronizar.');
+        }
+        console.warn(`[AniCS Sync] Error procesando JSON de ${filename}:`, parseErr);
+        return fallback;
       }
     }
   };
@@ -503,14 +562,23 @@ export async function fetchGistData(
   const profiles = await parseFileContent<UserProfile[]>('profiles.json', []);
   const history = await parseFileContent<HistoryEntry[]>('history.json', []);
   const favorites = await parseFileContent<AnimeResult[]>('favorites.json', []);
-  const settings = await parseFileContent<Record<string, string>>('settings.json', {});
+  const settingsDesktop = await parseFileContent<Record<string, string>>('settings_desktop.json', {});
+  const settingsMobile = await parseFileContent<Record<string, string>>('settings_mobile.json', {});
+  const legacySettings = await parseFileContent<Record<string, string>>('settings.json', {});
+
+  const currentPlatform = getCurrentDevicePlatform();
+  const activeSettings = currentPlatform === 'android'
+    ? (Object.keys(settingsMobile).length > 0 ? settingsMobile : legacySettings)
+    : (Object.keys(settingsDesktop).length > 0 ? settingsDesktop : legacySettings);
 
   const payload: GistFilesPayload = {
     syncMeta,
     profiles,
     history,
     favorites,
-    settings,
+    settings: activeSettings,
+    settingsDesktop,
+    settingsMobile,
   };
 
   return { payload, notModified: false, etag: newEtag };
@@ -529,10 +597,10 @@ export async function computePayloadHashes(data: {
   favorites: AnimeResult[];
   settings: Record<string, string>;
 }): Promise<{ profiles: string; history: string; favorites: string; settings: string }> {
-  const profilesJson = JSON.stringify(data.profiles, null, 2);
-  const historyJson = JSON.stringify(data.history, null, 2);
-  const favoritesJson = JSON.stringify(data.favorites, null, 2);
-  const settingsJson = JSON.stringify(data.settings, null, 2);
+  const profilesJson = JSON.stringify(data.profiles);
+  const historyJson = JSON.stringify(data.history);
+  const favoritesJson = JSON.stringify(data.favorites);
+  const settingsJson = JSON.stringify(data.settings);
 
   return {
     profiles: await computeSha256(profilesJson),
@@ -576,11 +644,26 @@ export async function createOrUpdateGist(
     throw new Error('Falta el Token de GitHub para sincronizar');
   }
 
-  // 1. Serializar JSON minificado y calcular hashes deterministas
+  const currentPlatform = getCurrentDevicePlatform();
+  const isAndroid = currentPlatform === 'android';
+
+  // Mantener las configuraciones del otro dispositivo si ya existían en el Gist
+  let finalSettingsDesktop = { ...(payload.settingsDesktop || {}) };
+  let finalSettingsMobile = { ...(payload.settingsMobile || {}) };
+
+  if (isAndroid) {
+    finalSettingsMobile = { ...finalSettingsMobile, ...payload.settings };
+  } else {
+    finalSettingsDesktop = { ...finalSettingsDesktop, ...payload.settings };
+  }
+
+  // 1. Serializar JSON minificado para máxima eficiencia y calcular hashes deterministas
   const profilesJson = JSON.stringify(payload.profiles);
   const historyJson = JSON.stringify(payload.history);
   const favoritesJson = JSON.stringify(payload.favorites);
   const settingsJson = JSON.stringify(payload.settings);
+  const settingsDesktopJson = JSON.stringify(finalSettingsDesktop);
+  const settingsMobileJson = JSON.stringify(finalSettingsMobile);
 
   const fileHashes = {
     profiles: payload.syncMeta.fileHashes?.profiles || (await computeSha256(profilesJson)),
@@ -589,6 +672,13 @@ export async function createOrUpdateGist(
     settings: payload.syncMeta.fileHashes?.settings || (await computeSha256(settingsJson)),
   };
 
+  const devices = payload.syncMeta.devices || {};
+  devices[isAndroid ? 'android' : 'windows'] = {
+    lastSyncAt: getCalibratedTimestamp(),
+    appVersion: payload.syncMeta.appVersion || '0.2.1',
+  };
+  payload.syncMeta.devices = devices;
+  payload.syncMeta.lastModifiedDevice = currentPlatform;
   payload.syncMeta.fileHashes = fileHashes;
   payload.syncMeta.lastModifiedAt = getCalibratedTimestamp();
 
@@ -597,6 +687,8 @@ export async function createOrUpdateGist(
   let finalHistoryContent = historyJson;
   let finalFavoritesContent = favoritesJson;
   let finalSettingsContent = settingsJson;
+  let finalSettingsDesktopContent = settingsDesktopJson;
+  let finalSettingsMobileContent = settingsMobileJson;
 
   if (config.encryptionEnabled && sessionDerivedKey) {
     payload.syncMeta.pbkdf2Salt = pbkdf2Salt || payload.syncMeta.pbkdf2Salt;
@@ -604,6 +696,8 @@ export async function createOrUpdateGist(
     finalHistoryContent = await encryptText(historyJson, sessionDerivedKey);
     finalFavoritesContent = await encryptText(favoritesJson, sessionDerivedKey);
     finalSettingsContent = await encryptText(settingsJson, sessionDerivedKey);
+    finalSettingsDesktopContent = await encryptText(settingsDesktopJson, sessionDerivedKey);
+    finalSettingsMobileContent = await encryptText(settingsMobileJson, sessionDerivedKey);
   } else {
     // Si no hay cifrado, asegurar que pbkdf2Salt sea undefined
     payload.syncMeta.pbkdf2Salt = undefined;
@@ -617,6 +711,8 @@ export async function createOrUpdateGist(
     'history.json': { content: finalHistoryContent },
     'favorites.json': { content: finalFavoritesContent },
     'settings.json': { content: finalSettingsContent },
+    'settings_desktop.json': { content: finalSettingsDesktopContent },
+    'settings_mobile.json': { content: finalSettingsMobileContent },
   };
 
   const headers: Record<string, string> = {

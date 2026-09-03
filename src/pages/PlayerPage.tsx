@@ -18,6 +18,7 @@ import { resolveStream, getServers, getDetails } from '@/services/animeService';
 import { upsertHistory, getEpisodeProgress } from '@/services/storageService';
 import { getLocalMediaUrl, setKeepScreenOn, setNativeFullscreen, setNativeScreenOrientation } from '@/services/downloadService';
 import { useResponsive } from '@/hooks/useResponsive';
+import { rewriteDeadCdnUrl, createRobustHlsLoader } from '@/utils/hlsLoader';
 import type { VideoServer } from '@/types';
 
 function formatTime(s: number) {
@@ -506,7 +507,7 @@ export function PlayerPage() {
     video.removeAttribute('src');
     video.load();
 
-    let sourceUrl = resolvedMedia.directUrl;
+    let sourceUrl = rewriteDeadCdnUrl(resolvedMedia.directUrl);
     let isHls = resolvedMedia.mediaType === 'hls' || sourceUrl.includes('.m3u8');
     let blobUrlToRevoke: string | null = null;
 
@@ -518,10 +519,19 @@ export function PlayerPage() {
     }
 
     if (isHls && Hls.isSupported()) {
+      const RobustLoader = createRobustHlsLoader(Hls);
       const hls = new Hls({
         enableWorker: true,
-        maxBufferLength: 30,
-        maxMaxBufferLength: 60,
+        loader: RobustLoader as any,
+        maxBufferLength: 60,
+        maxMaxBufferLength: 120,
+        maxBufferSize: 60 * 1000 * 1000,
+        fragLoadingTimeOut: 10000,
+        manifestLoadingTimeOut: 10000,
+        fragLoadingMaxRetry: 4,
+        fragLoadingRetryDelay: 500,
+        fragLoadingMaxRetryTimeout: 4000,
+        lowLatencyMode: false,
       });
       hlsRef.current = hls;
       hls.loadSource(sourceUrl);
@@ -531,8 +541,20 @@ export function PlayerPage() {
       });
       hls.on(Hls.Events.ERROR, (_, data) => {
         if (data.fatal) {
-          console.warn('Fatal HLS error, switching fallback server...', data);
-          tryFallbackServerRef.current();
+          switch (data.type) {
+            case Hls.ErrorTypes.NETWORK_ERROR:
+              console.warn('[AniCS Stream] Error de red fatal en HLS, intentando recuperar...', data);
+              hls.startLoad();
+              break;
+            case Hls.ErrorTypes.MEDIA_ERROR:
+              console.warn('[AniCS Stream] Error de decodificación en HLS, intentando recuperar...', data);
+              hls.recoverMediaError();
+              break;
+            default:
+              console.warn('[AniCS Stream] Error irrecuperable en HLS, cambiando a servidor alternativo...', data);
+              tryFallbackServerRef.current();
+              break;
+          }
         }
       });
     } else if (isHls && video.canPlayType('application/vnd.apple.mpegurl')) {

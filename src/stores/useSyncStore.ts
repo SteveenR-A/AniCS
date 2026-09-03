@@ -49,6 +49,7 @@ import {
   getCalibratedTimestamp,
   makeHistoryCanonicalKey,
   makeHistoryAnimeKey,
+  isLocalFileHistory,
 } from '@/services/syncService';
 import {
   deriveKeyFromPin,
@@ -376,10 +377,14 @@ export const useSyncStore = create<SyncState>((set, get) => ({
         getAllSettings(),
       ]);
 
+      // Filtrar historial local para que solo los animes de streaming online se sincronicen en la nube
+      // (los archivos reproducidos localmente en disco como C:\... o /storage/... no deben subirse a la nube)
+      const onlineHistory = history.filter(h => !isLocalFileHistory(h));
+
       // Calcular hashes deterministas del estado local ANTES de la llamada de red
       const localHashes = await computePayloadHashes({
         profiles,
-        history,
+        history: onlineHistory,
         favorites,
         settings,
       });
@@ -411,7 +416,7 @@ export const useSyncStore = create<SyncState>((set, get) => ({
             })),
         },
         profiles,
-        history,
+        history: onlineHistory,
         favorites,
         settings,
       };
@@ -424,7 +429,7 @@ export const useSyncStore = create<SyncState>((set, get) => ({
         } catch {}
       }
       const hasLocalPendingChanges = !lastSyncedHashes || !areHashesEqual(localHashes, lastSyncedHashes);
-      const isLocalEmpty = isLocalDataEmpty({ profiles, history, favorites });
+      const isLocalEmpty = isLocalDataEmpty({ profiles, history: onlineHistory, favorites });
 
       // 4. Si ya existe un Gist remoto configurado
       if (config.gistId) {
@@ -513,7 +518,7 @@ export const useSyncStore = create<SyncState>((set, get) => ({
               if (remotePayload.favorites.length > 0) {
                 await batchAddFavorites(remotePayload.favorites);
               }
-              for (const del of remotePayload.syncMeta.deletedFavorites) {
+              for (const del of remotePayload.syncMeta?.deletedFavorites || []) {
                 await removeFavorite(del.url, del.profileId);
               }
               await cleanupOldTombstones(30);
@@ -550,7 +555,7 @@ export const useSyncStore = create<SyncState>((set, get) => ({
             if (mergedPayload.favorites.length > 0) {
               await batchAddFavorites(mergedPayload.favorites);
             }
-            for (const del of mergedPayload.syncMeta.deletedFavorites) {
+            for (const del of mergedPayload.syncMeta?.deletedFavorites || []) {
               await removeFavorite(del.url, del.profileId);
             }
             await cleanupOldTombstones(30);

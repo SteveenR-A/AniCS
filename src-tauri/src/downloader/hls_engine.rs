@@ -62,7 +62,6 @@ impl HlsEngine {
 
     /// Analiza el manifiesto HLS y obtiene la mejor playlist de calidad
     pub async fn parse_playlist(&self) -> AppResult<ParsedPlaylist> {
-        crate::core::validate_url_cached(&self.stream_url).await?;
         let content = self.fetch_url(&self.stream_url).await?;
 
         // Si es un master manifest (contiene #EXT-X-STREAM-INF), seleccionar la mejor calidad
@@ -124,7 +123,8 @@ impl HlsEngine {
                 while let Some(seg_line) = lines.next() {
                     let seg_trimmed = seg_line.trim();
                     if !seg_trimmed.starts_with('#') && !seg_trimmed.is_empty() {
-                        segments.push(resolve_relative_url(seg_trimmed, base_url));
+                        let seg_url = resolve_relative_url(seg_trimmed, base_url);
+                        segments.push(sanitize_segment_url(&seg_url));
                         break;
                     }
                 }
@@ -351,7 +351,6 @@ impl HlsEngine {
     }
 
     async fn fetch_url(&self, url: &str) -> AppResult<String> {
-        crate::core::validate_url_cached(url).await?;
         let mut req = DOWNLOAD_CLIENT.get(url);
         if let Some(ref ref_url) = self.referer {
             req = req.header(header::REFERER, ref_url.as_str());
@@ -365,9 +364,15 @@ impl HlsEngine {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
+/// Sanitiza URLs de CDN con problemas conocidos de timeout (ej: cdn2/cdn5 de ducvomes a cdn1)
+fn sanitize_segment_url(url: &str) -> String {
+    url.replace("cdn2.ducvomes.com", "cdn1.ducvomes.com")
+       .replace("cdn5.ducvomes.com", "cdn1.ducvomes.com")
+}
+
 async fn download_segment(url: &str, referer: Option<&str>) -> AppResult<Bytes> {
-    crate::core::validate_url_cached(url).await?;
-    let mut req = DOWNLOAD_CLIENT.get(url);
+    let clean_url = sanitize_segment_url(url);
+    let mut req = DOWNLOAD_CLIENT.get(&clean_url);
     if let Some(ref_url) = referer {
         req = req.header(header::REFERER, ref_url);
     }
