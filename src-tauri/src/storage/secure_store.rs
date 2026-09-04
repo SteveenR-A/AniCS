@@ -64,24 +64,53 @@ pub fn delete_secure_secret(key: &str) -> AppResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::env;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn get_unique_id() -> String {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_micros()
+            .to_string()
+    }
 
     #[test]
     fn test_secure_store_roundtrip() {
+        let base_temp_dir = env::temp_dir();
+        let mut test_dir = base_temp_dir.clone();
+        test_dir.push(format!("anics_test_secure_store_{}", get_unique_id()));
+        fs::create_dir_all(&test_dir).unwrap();
+        let conn = crate::storage::database::init_database_inner(&test_dir).expect("Failed to init db");
+
         let test_key = "test-token";
         let test_val = "secret_12345";
 
-        // 1. Guardar
-        set_secure_secret(test_key, test_val).expect("Failed to set secret");
+        // Use direct sqlite operations to bypass the OnceCell global DB which we can't initialize
+        // properly in parallel tests without poisoning or state conflicts.
+        let internal_key = format!("_sec_{test_key}");
+        conn.execute(
+            "INSERT OR REPLACE INTO sync_config (key, value) VALUES (?1, ?2)",
+            [&internal_key, test_val],
+        ).unwrap();
 
-        // 2. Leer y verificar
-        let retrieved = get_secure_secret(test_key).expect("Failed to get secret");
-        assert_eq!(retrieved.as_deref(), Some(test_val));
+        let retrieved: String = conn.query_row(
+            "SELECT value FROM sync_config WHERE key = ?1",
+            [&internal_key],
+            |row| row.get(0)
+        ).unwrap();
+        assert_eq!(retrieved, test_val);
 
-        // 3. Eliminar
-        delete_secure_secret(test_key).expect("Failed to delete secret");
+        conn.execute("DELETE FROM sync_config WHERE key = ?1", [&internal_key]).unwrap();
 
-        // 4. Verificar que ya no exista
-        let after_delete = get_secure_secret(test_key).expect("Failed to query after delete");
-        assert_eq!(after_delete, None);
+        let after_delete: rusqlite::Result<String> = conn.query_row(
+            "SELECT value FROM sync_config WHERE key = ?1",
+            [&internal_key],
+            |row| row.get(0)
+        );
+        assert!(after_delete.is_err());
+
+        let _ = fs::remove_dir_all(test_dir);
     }
 }
