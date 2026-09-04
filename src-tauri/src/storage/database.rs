@@ -1,9 +1,9 @@
-use rusqlite::{Connection, params, OptionalExtension};
+use once_cell::sync::OnceCell;
+use rusqlite::{params, Connection, OptionalExtension};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
-use once_cell::sync::OnceCell;
-use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
 
 use crate::core::*;
 
@@ -14,15 +14,19 @@ pub fn init_database_inner(app_data_dir: &PathBuf) -> AppResult<Connection> {
     let conn = Connection::open(db_path).map_err(AppError::Database)?;
 
     // Pragmas de rendimiento
-    conn.execute_batch("
+    conn.execute_batch(
+        "
         PRAGMA journal_mode=WAL;
         PRAGMA synchronous=NORMAL;
         PRAGMA foreign_keys=ON;
         PRAGMA temp_store=memory;
-    ").map_err(AppError::Database)?;
+    ",
+    )
+    .map_err(AppError::Database)?;
 
     // 1. Crear tablas si no existen
-    conn.execute_batch("
+    conn.execute_batch(
+        "
         CREATE TABLE IF NOT EXISTS watch_history (
             id TEXT PRIMARY KEY,
             anime_title TEXT NOT NULL,
@@ -98,13 +102,24 @@ pub fn init_database_inner(app_data_dir: &PathBuf) -> AppResult<Connection> {
             last_accessed_at TEXT NOT NULL,
             created_at TEXT NOT NULL
         );
-    ").map_err(AppError::Database)?;
+    ",
+    )
+    .map_err(AppError::Database)?;
 
     // 2. Migraciones no destructivas para bases de datos existentes de versiones anteriores
     let _ = conn.execute("ALTER TABLE downloads ADD COLUMN total_bytes INTEGER", []);
-    let _ = conn.execute("ALTER TABLE watch_history ADD COLUMN profile_id TEXT NOT NULL DEFAULT 'default'", []);
-    let _ = conn.execute("ALTER TABLE favorites ADD COLUMN profile_id TEXT NOT NULL DEFAULT 'default'", []);
-    let _ = conn.execute("ALTER TABLE favorites ADD COLUMN status TEXT NOT NULL DEFAULT 'favorite'", []);
+    let _ = conn.execute(
+        "ALTER TABLE watch_history ADD COLUMN profile_id TEXT NOT NULL DEFAULT 'default'",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE favorites ADD COLUMN profile_id TEXT NOT NULL DEFAULT 'default'",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE favorites ADD COLUMN status TEXT NOT NULL DEFAULT 'favorite'",
+        [],
+    );
     let _ = conn.execute("UPDATE watch_history SET id = anime_url || '-' || episode_number || '-' || profile_id WHERE id = anime_url || '-' || episode_number", []);
 
     // 3. Crear índices una vez asegurada la existencia de todas las columnas
@@ -125,7 +140,8 @@ pub fn init_database_inner(app_data_dir: &PathBuf) -> AppResult<Connection> {
         "INSERT OR IGNORE INTO profiles (id, name, avatar, color, is_active, created_at)
          VALUES ('default', 'Principal', 'sparkles', '#3b82f6', 1, datetime('now'))",
         [],
-    ).map_err(AppError::Database)?;
+    )
+    .map_err(AppError::Database)?;
 
     Ok(conn)
 }
@@ -142,8 +158,12 @@ fn with_db<F, T>(f: F) -> AppResult<T>
 where
     F: FnOnce(&Connection) -> rusqlite::Result<T>,
 {
-    let db = DB.get().ok_or_else(|| AppError::Generic("DB not initialized".to_string()))?;
-    let conn = db.lock().map_err(|_| AppError::Generic("DB lock poisoned".to_string()))?;
+    let db = DB
+        .get()
+        .ok_or_else(|| AppError::Generic("DB not initialized".to_string()))?;
+    let conn = db
+        .lock()
+        .map_err(|_| AppError::Generic("DB lock poisoned".to_string()))?;
     f(&conn).map_err(AppError::Database)
 }
 
@@ -165,19 +185,20 @@ pub fn get_all_profiles() -> AppResult<Vec<UserProfile>> {
         let mut stmt = conn.prepare(
             "SELECT id, name, avatar, color, is_active, created_at FROM profiles ORDER BY created_at ASC"
         )?;
-        let profiles = stmt.query_map([], |row| {
-            let is_active_int: i32 = row.get(4)?;
-            Ok(UserProfile {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                avatar: row.get(2)?,
-                color: row.get(3)?,
-                is_active: is_active_int == 1,
-                created_at: row.get(5)?,
-            })
-        })?
-        .filter_map(|r| r.ok())
-        .collect();
+        let profiles = stmt
+            .query_map([], |row| {
+                let is_active_int: i32 = row.get(4)?;
+                Ok(UserProfile {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    avatar: row.get(2)?,
+                    color: row.get(3)?,
+                    is_active: is_active_int == 1,
+                    created_at: row.get(5)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
         Ok(profiles)
     })
 }
@@ -187,17 +208,19 @@ pub fn get_active_profile() -> AppResult<UserProfile> {
         let mut stmt = conn.prepare(
             "SELECT id, name, avatar, color, is_active, created_at FROM profiles WHERE is_active = 1 LIMIT 1"
         )?;
-        let profile = stmt.query_row([], |row| {
-            let is_active_int: i32 = row.get(4)?;
-            Ok(UserProfile {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                avatar: row.get(2)?,
-                color: row.get(3)?,
-                is_active: is_active_int == 1,
-                created_at: row.get(5)?,
+        let profile = stmt
+            .query_row([], |row| {
+                let is_active_int: i32 = row.get(4)?;
+                Ok(UserProfile {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    avatar: row.get(2)?,
+                    color: row.get(3)?,
+                    is_active: is_active_int == 1,
+                    created_at: row.get(5)?,
+                })
             })
-        }).optional()?;
+            .optional()?;
 
         match profile {
             Some(p) => Ok(p),
@@ -236,7 +259,14 @@ pub fn upsert_profile(profile: &UserProfile) -> AppResult<()> {
                 avatar = excluded.avatar,
                 color = excluded.color,
                 is_active = excluded.is_active",
-            params![profile.id, profile.name, profile.avatar, profile.color, is_active_int, profile.created_at],
+            params![
+                profile.id,
+                profile.name,
+                profile.avatar,
+                profile.color,
+                is_active_int,
+                profile.created_at
+            ],
         )?;
         Ok(())
     })
@@ -245,14 +275,19 @@ pub fn upsert_profile(profile: &UserProfile) -> AppResult<()> {
 pub fn set_active_profile(id: &str) -> AppResult<()> {
     with_db(|conn| {
         conn.execute("UPDATE profiles SET is_active = 0", [])?;
-        conn.execute("UPDATE profiles SET is_active = 1 WHERE id = ?1", params![id])?;
+        conn.execute(
+            "UPDATE profiles SET is_active = 1 WHERE id = ?1",
+            params![id],
+        )?;
         Ok(())
     })
 }
 
 pub fn delete_profile(id: &str) -> AppResult<()> {
     if id == "default" {
-        return Err(AppError::Generic("Cannot delete the default profile".to_string()));
+        return Err(AppError::Generic(
+            "Cannot delete the default profile".to_string(),
+        ));
     }
     with_db(|conn| {
         // Registrar tombstone del perfil
@@ -263,12 +298,19 @@ pub fn delete_profile(id: &str) -> AppResult<()> {
             params![tombstone_id, id, now],
         );
 
-        conn.execute("DELETE FROM watch_history WHERE profile_id = ?1", params![id])?;
+        conn.execute(
+            "DELETE FROM watch_history WHERE profile_id = ?1",
+            params![id],
+        )?;
         conn.execute("DELETE FROM favorites WHERE profile_id = ?1", params![id])?;
         conn.execute("DELETE FROM profiles WHERE id = ?1", params![id])?;
 
         // Si era el activo, activar el default
-        let active_count: i32 = conn.query_row("SELECT COUNT(*) FROM profiles WHERE is_active = 1", [], |r| r.get(0))?;
+        let active_count: i32 = conn.query_row(
+            "SELECT COUNT(*) FROM profiles WHERE is_active = 1",
+            [],
+            |r| r.get(0),
+        )?;
         if active_count == 0 {
             conn.execute("UPDATE profiles SET is_active = 1 WHERE id = 'default'", [])?;
         }
@@ -343,7 +385,9 @@ pub fn delete_sync_config(key: &str) -> AppResult<()> {
 
 pub fn get_all_sync_config() -> AppResult<HashMap<String, String>> {
     with_db(|conn| {
-        let mut stmt = conn.prepare("SELECT key, value FROM sync_config WHERE key NOT LIKE '\\_sec\\_%' ESCAPE '\\'")?;
+        let mut stmt = conn.prepare(
+            "SELECT key, value FROM sync_config WHERE key NOT LIKE '\\_sec\\_%' ESCAPE '\\'",
+        )?;
         let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
         let mut map = HashMap::new();
         for r in rows.flatten() {
@@ -374,17 +418,18 @@ pub fn get_tombstones() -> AppResult<Vec<TombstoneItem>> {
         let mut stmt = conn.prepare(
             "SELECT id, entity_type, entity_id, profile_id, deleted_at FROM tombstones ORDER BY deleted_at DESC"
         )?;
-        let items = stmt.query_map([], |row| {
-            Ok(TombstoneItem {
-                id: row.get(0)?,
-                entity_type: row.get(1)?,
-                entity_id: row.get(2)?,
-                profile_id: row.get(3)?,
-                deleted_at: row.get(4)?,
-            })
-        })?
-        .filter_map(|r| r.ok())
-        .collect();
+        let items = stmt
+            .query_map([], |row| {
+                Ok(TombstoneItem {
+                    id: row.get(0)?,
+                    entity_type: row.get(1)?,
+                    entity_id: row.get(2)?,
+                    profile_id: row.get(3)?,
+                    deleted_at: row.get(4)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
         Ok(items)
     })
 }
@@ -392,7 +437,10 @@ pub fn get_tombstones() -> AppResult<Vec<TombstoneItem>> {
 pub fn cleanup_old_tombstones(days: i64) -> AppResult<()> {
     with_db(|conn| {
         let cutoff = (chrono::Utc::now() - chrono::Duration::days(days)).to_rfc3339();
-        conn.execute("DELETE FROM tombstones WHERE deleted_at < ?1", params![cutoff])?;
+        conn.execute(
+            "DELETE FROM tombstones WHERE deleted_at < ?1",
+            params![cutoff],
+        )?;
         Ok(())
     })
 }
@@ -457,14 +505,24 @@ pub fn batch_upsert_history(entries: &[HistoryEntry]) -> AppResult<()> {
                     &entry.profile_id
                 };
                 let id = if entry.id.trim().is_empty() {
-                    format!("{}-{}-{}", entry.anime_url, entry.episode_number, profile_id)
+                    format!(
+                        "{}-{}-{}",
+                        entry.anime_url, entry.episode_number, profile_id
+                    )
                 } else {
                     entry.id.clone()
                 };
                 stmt.execute(params![
-                    id, entry.anime_title, entry.anime_url, entry.thumbnail_url,
-                    entry.episode_number, entry.episode_url, entry.watch_progress,
-                    entry.watched_at, entry.source, profile_id
+                    id,
+                    entry.anime_title,
+                    entry.anime_url,
+                    entry.thumbnail_url,
+                    entry.episode_number,
+                    entry.episode_url,
+                    entry.watch_progress,
+                    entry.watched_at,
+                    entry.source,
+                    profile_id
                 ])?;
             }
         }
@@ -473,7 +531,11 @@ pub fn batch_upsert_history(entries: &[HistoryEntry]) -> AppResult<()> {
     })
 }
 
-pub fn get_history(limit: u32, offset: u32, profile_id: Option<&str>) -> AppResult<Vec<HistoryEntry>> {
+pub fn get_history(
+    limit: u32,
+    offset: u32,
+    profile_id: Option<&str>,
+) -> AppResult<Vec<HistoryEntry>> {
     with_db(|conn| {
         let target_profile = match profile_id {
             Some(pid) => pid.to_string(),
@@ -486,25 +548,26 @@ pub fn get_history(limit: u32, offset: u32, profile_id: Option<&str>) -> AppResu
              FROM watch_history
              WHERE profile_id = ?1
              ORDER BY watched_at DESC
-             LIMIT ?2 OFFSET ?3"
+             LIMIT ?2 OFFSET ?3",
         )?;
 
-        let entries = stmt.query_map(params![target_profile, limit, offset], |row| {
-            Ok(HistoryEntry {
-                id: row.get(0)?,
-                anime_title: row.get(1)?,
-                anime_url: row.get(2)?,
-                thumbnail_url: row.get(3)?,
-                episode_number: row.get(4)?,
-                episode_url: row.get(5)?,
-                watch_progress: row.get(6)?,
-                watched_at: row.get(7)?,
-                source: row.get(8)?,
-                profile_id: row.get(9)?,
-            })
-        })?
-        .filter_map(|r| r.ok())
-        .collect();
+        let entries = stmt
+            .query_map(params![target_profile, limit, offset], |row| {
+                Ok(HistoryEntry {
+                    id: row.get(0)?,
+                    anime_title: row.get(1)?,
+                    anime_url: row.get(2)?,
+                    thumbnail_url: row.get(3)?,
+                    episode_number: row.get(4)?,
+                    episode_url: row.get(5)?,
+                    watch_progress: row.get(6)?,
+                    watched_at: row.get(7)?,
+                    source: row.get(8)?,
+                    profile_id: row.get(9)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
 
         Ok(entries)
     })
@@ -570,12 +633,22 @@ pub fn get_episode_progress(episode_url: &str, profile_id: Option<&str>) -> AppR
                  OR episode_url = ?6)
                AND profile_id = ?7
              ORDER BY watched_at DESC
-             LIMIT 1"
+             LIMIT 1",
         )?;
-        let progress = stmt.query_row(
-            params![episode_url, fwd, bwd, fwd_lower, bwd_lower, original_lower, target_profile],
-            |row| row.get(0)
-        ).optional()?;
+        let progress = stmt
+            .query_row(
+                params![
+                    episode_url,
+                    fwd,
+                    bwd,
+                    fwd_lower,
+                    bwd_lower,
+                    original_lower,
+                    target_profile
+                ],
+                |row| row.get(0),
+            )
+            .optional()?;
         Ok(progress)
     })
 }
@@ -608,7 +681,10 @@ pub fn clear_history(profile_id: Option<&str>) -> AppResult<()> {
             "INSERT INTO tombstones (id, entity_type, entity_id, profile_id, deleted_at) VALUES (?1, 'history_clear', ?2, ?2, ?3)",
             params![tombstone_id, target_profile, now],
         );
-        conn.execute("DELETE FROM watch_history WHERE profile_id = ?1", params![target_profile])?;
+        conn.execute(
+            "DELETE FROM watch_history WHERE profile_id = ?1",
+            params![target_profile],
+        )?;
         Ok(())
     })
 }
@@ -644,29 +720,47 @@ pub fn remove_history_batch(ids: &[String]) -> AppResult<()> {
     }
     with_db(|conn| {
         let now = chrono::Utc::now().to_rfc3339();
-        for id in ids {
-            let row_opt: Option<(String, String, i32, String)> = conn.query_row(
-                "SELECT anime_title, anime_url, episode_number, profile_id FROM watch_history WHERE id = ?1",
-                params![id],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
-            ).optional()?;
 
-            if let Some((anime_title, anime_url, ep_num, profile_id)) = row_opt {
-                let norm = normalize_anime_title_key(&anime_title);
-                let canon = if norm.is_empty() { anime_url } else { norm };
-                let key = format!("{canon}::ep{ep_num}::{profile_id}");
-                let tombstone_id = uuid::Uuid::new_v4().to_string();
-                let _ = conn.execute(
-                    "INSERT INTO tombstones (id, entity_type, entity_id, profile_id, deleted_at) VALUES (?1, 'history_episode', ?2, ?3, ?4)",
-                    params![tombstone_id, key, profile_id, now],
-                );
+        for chunk in ids.chunks(900) {
+            let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+            let select_query = format!("SELECT anime_title, anime_url, episode_number, profile_id FROM watch_history WHERE id IN ({})", placeholders);
+            let params_vec: Vec<&dyn rusqlite::ToSql> =
+                chunk.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
+
+            let mut stmt = conn.prepare(&select_query)?;
+
+            // Collect rows
+            let rows = stmt.query_map(params_vec.as_slice(), |r| {
+                let anime_title: String = r.get(0)?;
+                let anime_url: String = r.get(1)?;
+                let ep_num: i32 = r.get(2)?;
+                let profile_id: String = r.get(3)?;
+                Ok((anime_title, anime_url, ep_num, profile_id))
+            })?;
+
+            let mut tombstone_inserts = Vec::new();
+            for row_res in rows {
+                if let Ok((anime_title, anime_url, ep_num, profile_id)) = row_res {
+                    let norm = normalize_anime_title_key(&anime_title);
+                    let canon = if norm.is_empty() { anime_url } else { norm };
+                    let key = format!("{canon}::ep{ep_num}::{profile_id}");
+                    let tombstone_id = uuid::Uuid::new_v4().to_string();
+                    tombstone_inserts.push((tombstone_id, key, profile_id));
+                }
             }
+
+            // Batch insert tombstones using prepared statement
+            if !tombstone_inserts.is_empty() {
+                let mut tombstone_stmt = conn.prepare("INSERT INTO tombstones (id, entity_type, entity_id, profile_id, deleted_at) VALUES (?1, 'history_episode', ?2, ?3, ?4)")?;
+                for (t_id, key, pid) in tombstone_inserts {
+                    let _ = tombstone_stmt.execute(params![t_id, key, pid, now]);
+                }
+            }
+
+            let delete_query = format!("DELETE FROM watch_history WHERE id IN ({})", placeholders);
+            conn.execute(&delete_query, params_vec.as_slice())?;
         }
 
-        let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-        let query = format!("DELETE FROM watch_history WHERE id IN ({})", placeholders);
-        let params_vec: Vec<&dyn rusqlite::ToSql> = ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
-        conn.execute(&query, params_vec.as_slice())?;
         Ok(())
     })
 }
@@ -690,7 +784,11 @@ pub fn remove_history_by_anime(anime_url: &str, profile_id: Option<&str>) -> App
         } else {
             normalize_anime_title_key(clean_url)
         };
-        let canon = if norm.is_empty() { clean_url.to_string() } else { norm };
+        let canon = if norm.is_empty() {
+            clean_url.to_string()
+        } else {
+            norm
+        };
         let key = format!("{canon}::{target_profile}");
         let now = chrono::Utc::now().to_rfc3339();
         let tombstone_id = uuid::Uuid::new_v4().to_string();
@@ -753,15 +851,17 @@ pub fn get_profile_stats(profile_id: Option<&str>) -> AppResult<ProfileStats> {
 // Favoritos (Por Perfil)
 // ──────────────────────────────────────────
 
-pub fn add_favorite(result: &AnimeResult, profile_id: Option<&str>, status: Option<&str>) -> AppResult<()> {
+pub fn add_favorite(
+    result: &AnimeResult,
+    profile_id: Option<&str>,
+    status: Option<&str>,
+) -> AppResult<()> {
     with_db(|conn| {
         let target_profile = match profile_id {
             Some(pid) => pid.to_string(),
             None => get_active_profile_id_inner(conn),
         };
-        let status_val = status
-            .or(result.status.as_deref())
-            .unwrap_or("favorite");
+        let status_val = status.or(result.status.as_deref()).unwrap_or("favorite");
         let now = chrono::Utc::now().to_rfc3339();
         conn.execute(
             "INSERT INTO favorites (url, title, thumbnail_url, source, added_at, profile_id, status)
@@ -803,7 +903,13 @@ pub fn batch_add_favorites(favorites: &[AnimeResult], profile_id: Option<&str>) 
                 let pid = fav.profile_id.as_deref().unwrap_or(default_target);
                 let status_val = fav.status.as_deref().unwrap_or("favorite");
                 stmt.execute(params![
-                    fav.url, fav.title, fav.thumbnail_url, fav.source, now, pid, status_val
+                    fav.url,
+                    fav.title,
+                    fav.thumbnail_url,
+                    fav.source,
+                    now,
+                    pid,
+                    status_val
                 ])?;
             }
         }
@@ -832,7 +938,10 @@ pub fn remove_favorite(url: &str, profile_id: Option<&str>) -> AppResult<()> {
             Some(pid) => pid.to_string(),
             None => get_active_profile_id_inner(conn),
         };
-        conn.execute("DELETE FROM favorites WHERE url = ?1 AND profile_id = ?2", params![url, target_profile])?;
+        conn.execute(
+            "DELETE FROM favorites WHERE url = ?1 AND profile_id = ?2",
+            params![url, target_profile],
+        )?;
 
         // Registrar tombstone
         let tombstone_id = uuid::Uuid::new_v4().to_string();
@@ -870,18 +979,19 @@ pub fn get_favorites(profile_id: Option<&str>) -> AppResult<Vec<AnimeResult>> {
         let mut stmt = conn.prepare(
             "SELECT url, title, thumbnail_url, source, status FROM favorites WHERE profile_id = ?1 ORDER BY added_at DESC"
         )?;
-        let results = stmt.query_map(params![target_profile], |row| {
-            Ok(AnimeResult {
-                url: row.get(0)?,
-                title: row.get(1)?,
-                thumbnail_url: row.get(2)?,
-                source: row.get(3)?,
-                status: row.get(4).ok(),
-                ..Default::default()
-            })
-        })?
-        .filter_map(|r| r.ok())
-        .collect();
+        let results = stmt
+            .query_map(params![target_profile], |row| {
+                Ok(AnimeResult {
+                    url: row.get(0)?,
+                    title: row.get(1)?,
+                    thumbnail_url: row.get(2)?,
+                    source: row.get(3)?,
+                    status: row.get(4).ok(),
+                    ..Default::default()
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
         Ok(results)
     })
 }
@@ -978,17 +1088,19 @@ pub fn get_image_cache_entry(url: &str) -> AppResult<Option<ImageCacheEntry>> {
             "SELECT url, file_path, file_size, mime_type, access_count, last_accessed_at, created_at
              FROM image_cache WHERE url = ?1"
         )?;
-        let entry = stmt.query_row(params![url], |row| {
-            Ok(ImageCacheEntry {
-                url: row.get(0)?,
-                file_path: row.get(1)?,
-                file_size: row.get::<_, i64>(2)? as u64,
-                mime_type: row.get(3)?,
-                access_count: row.get::<_, i64>(4)? as u64,
-                last_accessed_at: row.get(5)?,
-                created_at: row.get(6)?,
+        let entry = stmt
+            .query_row(params![url], |row| {
+                Ok(ImageCacheEntry {
+                    url: row.get(0)?,
+                    file_path: row.get(1)?,
+                    file_size: row.get::<_, i64>(2)? as u64,
+                    mime_type: row.get(3)?,
+                    access_count: row.get::<_, i64>(4)? as u64,
+                    last_accessed_at: row.get(5)?,
+                    created_at: row.get(6)?,
+                })
             })
-        }).optional()?;
+            .optional()?;
         Ok(entry)
     })
 }
@@ -1002,19 +1114,20 @@ pub fn get_top_frequent_cached_images(limit: u32) -> AppResult<Vec<ImageCacheEnt
              ORDER BY access_count DESC, last_accessed_at DESC
              LIMIT ?1"
         )?;
-        let entries = stmt.query_map(params![limit], |row| {
-            Ok(ImageCacheEntry {
-                url: row.get(0)?,
-                file_path: row.get(1)?,
-                file_size: row.get::<_, i64>(2)? as u64,
-                mime_type: row.get(3)?,
-                access_count: row.get::<_, i64>(4)? as u64,
-                last_accessed_at: row.get(5)?,
-                created_at: row.get(6)?,
-            })
-        })?
-        .filter_map(|r| r.ok())
-        .collect();
+        let entries = stmt
+            .query_map(params![limit], |row| {
+                Ok(ImageCacheEntry {
+                    url: row.get(0)?,
+                    file_path: row.get(1)?,
+                    file_size: row.get::<_, i64>(2)? as u64,
+                    mime_type: row.get(3)?,
+                    access_count: row.get::<_, i64>(4)? as u64,
+                    last_accessed_at: row.get(5)?,
+                    created_at: row.get(6)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
         Ok(entries)
     })
 }
@@ -1048,7 +1161,7 @@ pub fn prune_image_cache_lru(target_max_bytes: u64) -> AppResult<Vec<String>> {
         // Obtener candidatos LRU a eliminar (menos accedidos y más viejos primero)
         let mut stmt = conn.prepare(
             "SELECT url, file_path, file_size FROM image_cache
-             ORDER BY last_accessed_at ASC, access_count ASC"
+             ORDER BY last_accessed_at ASC, access_count ASC",
         )?;
         let rows: Vec<(String, String, i64)> = stmt
             .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
@@ -1127,10 +1240,18 @@ pub fn get_database_stats(app_data_dir: &std::path::Path) -> AppResult<DatabaseS
     let database_size_bytes = std::fs::metadata(&db_path).map(|m| m.len()).unwrap_or(0);
 
     with_db(|conn| {
-        let history_count: u32 = conn.query_row("SELECT COUNT(*) FROM watch_history", [], |r| r.get(0)).unwrap_or(0);
-        let favorites_count: u32 = conn.query_row("SELECT COUNT(*) FROM favorites", [], |r| r.get(0)).unwrap_or(0);
-        let downloads_count: u32 = conn.query_row("SELECT COUNT(*) FROM downloads", [], |r| r.get(0)).unwrap_or(0);
-        let cached_images_count: u32 = conn.query_row("SELECT COUNT(*) FROM image_cache", [], |r| r.get(0)).unwrap_or(0);
+        let history_count: u32 = conn
+            .query_row("SELECT COUNT(*) FROM watch_history", [], |r| r.get(0))
+            .unwrap_or(0);
+        let favorites_count: u32 = conn
+            .query_row("SELECT COUNT(*) FROM favorites", [], |r| r.get(0))
+            .unwrap_or(0);
+        let downloads_count: u32 = conn
+            .query_row("SELECT COUNT(*) FROM downloads", [], |r| r.get(0))
+            .unwrap_or(0);
+        let cached_images_count: u32 = conn
+            .query_row("SELECT COUNT(*) FROM image_cache", [], |r| r.get(0))
+            .unwrap_or(0);
 
         Ok(DatabaseStats {
             history_count,
@@ -1146,10 +1267,12 @@ pub fn get_database_stats(app_data_dir: &std::path::Path) -> AppResult<DatabaseS
 /// Optimiza y compacta SQLite (VACUUM + PRAGMA optimize) recuperando espacio sin perder datos
 pub fn optimize_database() -> AppResult<()> {
     with_db(|conn| {
-        conn.execute_batch("
+        conn.execute_batch(
+            "
             PRAGMA optimize;
             VACUUM;
-        ")?;
+        ",
+        )?;
         Ok(())
     })
 }
@@ -1157,13 +1280,15 @@ pub fn optimize_database() -> AppResult<()> {
 /// Restablece de forma segura las tablas de SQLite sin romper el archivo ni la integridad
 pub fn reset_database() -> AppResult<()> {
     with_db(|conn| {
-        conn.execute_batch("
+        conn.execute_batch(
+            "
             DELETE FROM watch_history;
             DELETE FROM favorites;
             DELETE FROM downloads;
             DELETE FROM image_cache;
             VACUUM;
-        ")?;
+        ",
+        )?;
         Ok(())
     })
 }
@@ -1295,7 +1420,6 @@ pub fn mark_active_downloads_as_paused_db() -> AppResult<()> {
     })
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1321,7 +1445,10 @@ mod tests {
 
         // Use init_database_inner to avoid setting global DB OnceCell
         let result_err = init_database_inner(&file_path);
-        assert!(result_err.is_err(), "init_database_inner should fail with invalid path (file as directory)");
+        assert!(
+            result_err.is_err(),
+            "init_database_inner should fail with invalid path (file as directory)"
+        );
         let _ = fs::remove_file(&file_path);
 
         // 2. Success Case: Initial creation in a valid temporary directory
@@ -1334,11 +1461,13 @@ mod tests {
             let db_path = valid_dir.join("anics.db");
             assert!(db_path.exists(), "Database file should be created");
 
-            let tables_count: u32 = conn.query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type='table'",
-                [],
-                |row| row.get(0)
-            ).unwrap();
+            let tables_count: u32 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
             assert!(tables_count >= 4, "Should create required tables");
 
             // Connection is closed when conn is dropped at the end of this block, releasing the file lock on Windows
@@ -1359,7 +1488,9 @@ mod tests {
         let db_path = test_dir.join("anics.db");
         {
             let legacy_conn = Connection::open(&db_path).unwrap();
-            legacy_conn.execute_batch("
+            legacy_conn
+                .execute_batch(
+                    "
                 CREATE TABLE watch_history (
                     id TEXT PRIMARY KEY,
                     anime_title TEXT NOT NULL,
@@ -1379,19 +1510,21 @@ mod tests {
                     source TEXT NOT NULL,
                     added_at TEXT NOT NULL
                 );
-            ").unwrap();
+            ",
+                )
+                .unwrap();
         }
 
         // 2. Ejecutar init_database_inner sobre la base existente
         {
-            let conn = init_database_inner(&test_dir).expect("init_database_inner should migrate legacy schema without error");
+            let conn = init_database_inner(&test_dir)
+                .expect("init_database_inner should migrate legacy schema without error");
 
             // 3. Verificar que la columna profile_id fue añadida y el índice creado
-            let result: Result<String, _> = conn.query_row(
-                "SELECT profile_id FROM watch_history LIMIT 1",
-                [],
-                |row| row.get(0)
-            );
+            let result: Result<String, _> =
+                conn.query_row("SELECT profile_id FROM watch_history LIMIT 1", [], |row| {
+                    row.get(0)
+                });
             assert!(result.is_err() || result.is_ok());
 
             // 4. Probar inserción ON CONFLICT en favoritos sobre la base migrada
@@ -1452,14 +1585,20 @@ mod tests {
                 [],
                 |row| row.get(0),
             ).unwrap();
-            assert_eq!(animes_count, 2, "Debe haber 2 animes únicos con >= 80% completado");
+            assert_eq!(
+                animes_count, 2,
+                "Debe haber 2 animes únicos con >= 80% completado"
+            );
 
             let episodes_count: u32 = conn.query_row(
                 "SELECT COUNT(DISTINCT id) FROM watch_history WHERE profile_id = 'default' AND watch_progress >= 0.80",
                 [],
                 |row| row.get(0),
             ).unwrap();
-            assert_eq!(episodes_count, 2, "Debe haber 2 episodios con >= 80% completado");
+            assert_eq!(
+                episodes_count, 2,
+                "Debe haber 2 episodios con >= 80% completado"
+            );
 
             let hours_watched: f64 = conn.query_row(
                 "SELECT COALESCE(SUM(watch_progress * 24.0 / 60.0), 0.0) FROM watch_history WHERE profile_id = 'default' AND watch_progress >= 0.80",
@@ -1467,7 +1606,10 @@ mod tests {
                 |row| row.get(0),
             ).unwrap();
             // (0.90 + 0.80) * 24 / 60 = 1.70 * 0.4 = 0.68 horas
-            assert!((hours_watched - 0.68).abs() < 0.01, "Horas calculadas deben ser ~0.68");
+            assert!(
+                (hours_watched - 0.68).abs() < 0.01,
+                "Horas calculadas deben ser ~0.68"
+            );
         }
 
         let _ = fs::remove_dir_all(test_dir);
@@ -1484,14 +1626,26 @@ mod tests {
             let conn = init_database_inner(&test_dir).unwrap();
 
             // Insertar configuración pública y secretos internos
-            conn.execute("INSERT INTO sync_config (key, value) VALUES ('gist_id', 'abc123gist')", []).unwrap();
-            conn.execute("INSERT INTO sync_config (key, value) VALUES ('auto_sync', 'true')", []).unwrap();
+            conn.execute(
+                "INSERT INTO sync_config (key, value) VALUES ('gist_id', 'abc123gist')",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO sync_config (key, value) VALUES ('auto_sync', 'true')",
+                [],
+            )
+            .unwrap();
             conn.execute("INSERT INTO sync_config (key, value) VALUES ('_sec_github_token', 'ghp_secret_token')", []).unwrap();
             conn.execute("INSERT INTO sync_config (key, value) VALUES ('_sec_pbkdf2_salt', 'salt_base64_secret')", []).unwrap();
 
             // Consultar con la cláusula filtrada
             let mut stmt = conn.prepare("SELECT key, value FROM sync_config WHERE key NOT LIKE '\\_sec\\_%' ESCAPE '\\'").unwrap();
-            let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))).unwrap();
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })
+                .unwrap();
             let mut map = std::collections::HashMap::new();
             for r in rows.flatten() {
                 map.insert(r.0, r.1);
@@ -1500,10 +1654,52 @@ mod tests {
             assert_eq!(map.len(), 2);
             assert_eq!(map.get("gist_id"), Some(&"abc123gist".to_string()));
             assert_eq!(map.get("auto_sync"), Some(&"true".to_string()));
-            assert!(!map.contains_key("_sec_github_token"), "Los secretos _sec_ no deben ser expuestos");
-            assert!(!map.contains_key("_sec_pbkdf2_salt"), "Los secretos _sec_ no deben ser expuestos");
+            assert!(
+                !map.contains_key("_sec_github_token"),
+                "Los secretos _sec_ no deben ser expuestos"
+            );
+            assert!(
+                !map.contains_key("_sec_pbkdf2_salt"),
+                "Los secretos _sec_ no deben ser expuestos"
+            );
         }
 
         let _ = fs::remove_dir_all(test_dir);
+    }
+}
+
+#[cfg(test)]
+mod bench_tests {
+    use super::*;
+    use std::time::Instant;
+
+    #[test]
+    fn bench_remove_history_batch() {
+        let temp_dir = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        init_database(temp_dir.clone()).unwrap();
+
+        let profile_id = get_active_profile().unwrap().id;
+        let now_str = chrono::Utc::now().to_rfc3339();
+
+        // Insert 1000 items
+        let mut ids = Vec::new();
+        with_db(|conn| {
+            for i in 0..1000 {
+                let id = uuid::Uuid::new_v4().to_string();
+                ids.push(id.clone());
+                conn.execute(
+                    "INSERT INTO watch_history (id, anime_title, anime_url, episode_number, episode_url, watch_progress, watched_at, profile_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                    rusqlite::params![id, format!("Anime {}", i), format!("http://anime.com/{}", i), 1, "http://eps.com", 100.0, now_str, profile_id],
+                ).unwrap();
+            }
+            Ok(())
+        }).unwrap();
+
+        let start = Instant::now();
+        remove_history_batch(&ids).unwrap();
+        let duration = start.elapsed();
+
+        println!("remove_history_batch with 1000 items took: {:?}", duration);
     }
 }
