@@ -35,18 +35,19 @@ pub fn get_media_stream_url(file_path: &str) -> String {
 }
 
 /// Inicia el servidor HTTP de streaming local en segundo plano
-pub async fn start_media_server(_app_handle: AppHandle) -> Result<u16, Box<dyn std::error::Error + Send + Sync>> {
+pub async fn start_media_server(app_handle: AppHandle) -> Result<u16, Box<dyn std::error::Error + Send + Sync>> {
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let local_addr = listener.local_addr()?;
     let port = local_addr.port();
     SERVER_PORT.store(port, Ordering::Relaxed);
     log::info!("Local media streaming server started on port {}", port);
 
+    let app_handle_clone = app_handle.clone();
     tokio::spawn(async move {
         loop {
             match listener.accept().await {
                 Ok((stream, addr)) => {
-                    tokio::spawn(handle_connection(stream, addr));
+                    tokio::spawn(handle_connection(stream, addr, app_handle_clone.clone()));
                 }
                 Err(e) => {
                     log::warn!("Media server accept error: {}", e);
@@ -59,7 +60,7 @@ pub async fn start_media_server(_app_handle: AppHandle) -> Result<u16, Box<dyn s
     Ok(port)
 }
 
-async fn handle_connection(mut stream: TcpStream, _addr: SocketAddr) {
+async fn handle_connection(mut stream: TcpStream, _addr: SocketAddr, app_handle: AppHandle) {
     let mut buffer = [0u8; 4096];
     let n = match stream.read(&mut buffer).await {
         Ok(n) if n > 0 => n,
@@ -112,7 +113,42 @@ Access-Control-Max-Age: 86400\r\n\
     };
 
     let file_path = PathBuf::from(&file_path_str);
-    let metadata = match tokio::fs::metadata(&file_path).await {
+
+    // Prevent Path Traversal by checking against allowed download directory
+    let allowed_dir = match crate::commands::download_cmd::get_default_download_dir(app_handle) {
+        Ok(dir) => PathBuf::from(dir),
+        Err(_) => {
+            let response = "HTTP/1.1 500 Internal Server Error\r\n\r\nCould not determine allowed directory";
+            let _ = stream.write_all(response.as_bytes()).await;
+            return;
+        }
+    };
+
+    let canonicalized_allowed = match tokio::fs::canonicalize(&allowed_dir).await {
+        Ok(path) => path,
+        Err(_) => {
+            let response = "HTTP/1.1 500 Internal Server Error\r\n\r\nCould not canonicalize allowed directory";
+            let _ = stream.write_all(response.as_bytes()).await;
+            return;
+        }
+    };
+
+    let canonicalized_requested = match tokio::fs::canonicalize(&file_path).await {
+        Ok(path) => path,
+        Err(_) => {
+            let response = "HTTP/1.1 404 Not Found\r\n\r\nFile not found or invalid path";
+            let _ = stream.write_all(response.as_bytes()).await;
+            return;
+        }
+    };
+
+    if !canonicalized_requested.starts_with(&canonicalized_allowed) {
+        let response = "HTTP/1.1 403 Forbidden\r\n\r\nPath traversal detected";
+        let _ = stream.write_all(response.as_bytes()).await;
+        return;
+    }
+
+    let metadata = match tokio::fs::metadata(&canonicalized_requested).await {
         Ok(m) => m,
         Err(e) => {
             let response = if e.kind() == std::io::ErrorKind::NotFound {
@@ -126,7 +162,7 @@ Access-Control-Max-Age: 86400\r\n\
     };
 
     let total_size = metadata.len();
-    let mime_type = get_mime_type(&file_path);
+    let mime_type = get_mime_type(&canonicalized_requested);
 
     // Buscar cabecera Range: bytes=start-end
     let mut range_header: Option<&str> = None;
@@ -160,7 +196,7 @@ Content-Type: {}\r\n\
             }
 
             // Stream de los bytes solicitados
-            if let Ok(mut file) = tokio::fs::File::open(&file_path).await {
+            if let Ok(mut file) = tokio::fs::File::open(&canonicalized_requested).await {
                 if file.seek(SeekFrom::Start(start)).await.is_ok() {
                     let mut remaining = content_length;
                     let mut chunk_buf = [0u8; 64 * 1024];
@@ -202,7 +238,7 @@ Content-Type: {}\r\n\
         return;
     }
 
-    if let Ok(mut file) = tokio::fs::File::open(&file_path).await {
+    if let Ok(mut file) = tokio::fs::File::open(&canonicalized_requested).await {
         let mut chunk_buf = [0u8; 64 * 1024];
         loop {
             match file.read(&mut chunk_buf).await {
