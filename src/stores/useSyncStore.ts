@@ -126,22 +126,46 @@ async function applyDeletedHistoryTombstonesLocally(
   const graceMarginMs = 5000;
   const idsToDelete: string[] = [];
 
+  const maxClearTimeByProfile = new Map<string, number>();
+  const maxAnimeTimeByKey = new Map<string, number>();
+  const maxEpisodeTimeByKey = new Map<string, number>();
+
+  for (const dt of deletedHistory) {
+    const dTime = new Date(dt.deletedAt).getTime() + graceMarginMs;
+    if (dt.type === 'clear' && dt.profileId) {
+      const existing = maxClearTimeByProfile.get(dt.profileId) || 0;
+      if (dTime > existing) maxClearTimeByProfile.set(dt.profileId, dTime);
+    } else if (dt.type === 'anime' && dt.key) {
+      const existing = maxAnimeTimeByKey.get(dt.key) || 0;
+      if (dTime > existing) maxAnimeTimeByKey.set(dt.key, dTime);
+    } else if (dt.type === 'episode' && dt.key) {
+      const existing = maxEpisodeTimeByKey.get(dt.key) || 0;
+      if (dTime > existing) maxEpisodeTimeByKey.set(dt.key, dTime);
+    }
+  }
+
   for (const h of currentHistory) {
     const wTime = new Date(h.watchedAt).getTime();
-    for (const dt of deletedHistory) {
-      const dTime = new Date(dt.deletedAt).getTime();
-      if (dt.type === 'clear' && dt.profileId === (h.profileId || 'default') && wTime <= dTime + graceMarginMs) {
-        idsToDelete.push(h.id);
-        break;
-      }
-      if (dt.type === 'anime' && dt.key === makeHistoryAnimeKey(h) && wTime <= dTime + graceMarginMs) {
-        idsToDelete.push(h.id);
-        break;
-      }
-      if (dt.type === 'episode' && dt.key === makeHistoryCanonicalKey(h) && wTime <= dTime + graceMarginMs) {
-        idsToDelete.push(h.id);
-        break;
-      }
+    const profileId = h.profileId || 'default';
+
+    const maxClearTime = maxClearTimeByProfile.get(profileId);
+    if (maxClearTime !== undefined && wTime <= maxClearTime) {
+      idsToDelete.push(h.id);
+      continue;
+    }
+
+    const animeKey = makeHistoryAnimeKey(h);
+    const maxAnimeTime = maxAnimeTimeByKey.get(animeKey);
+    if (maxAnimeTime !== undefined && wTime <= maxAnimeTime) {
+      idsToDelete.push(h.id);
+      continue;
+    }
+
+    const episodeKey = makeHistoryCanonicalKey(h);
+    const maxEpisodeTime = maxEpisodeTimeByKey.get(episodeKey);
+    if (maxEpisodeTime !== undefined && wTime <= maxEpisodeTime) {
+      idsToDelete.push(h.id);
+      continue;
     }
   }
 
