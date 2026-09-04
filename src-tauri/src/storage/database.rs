@@ -1,4 +1,4 @@
-use rusqlite::{Connection, params, OptionalExtension};
+use rusqlite::{Connection, params, params_from_iter, OptionalExtension};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use once_cell::sync::OnceCell;
@@ -1070,8 +1070,13 @@ pub fn prune_image_cache_lru(target_max_bytes: u64) -> AppResult<Vec<String>> {
         }
 
         // Eliminar de SQLite
-        for url in &urls_to_delete {
-            conn.execute("DELETE FROM image_cache WHERE url = ?1", params![url])?;
+        if !urls_to_delete.is_empty() {
+            let chunk_size = 900; // SQLite limit is 999 parameters
+            for chunk in urls_to_delete.chunks(chunk_size) {
+                let placeholders = vec!["?"; chunk.len()].join(", ");
+                let query = format!("DELETE FROM image_cache WHERE url IN ({})", placeholders);
+                conn.execute(&query, params_from_iter(chunk))?;
+            }
         }
 
         Ok(paths_to_delete)
