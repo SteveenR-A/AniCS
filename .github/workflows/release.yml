@@ -252,18 +252,29 @@ jobs:
 
           echo "Publicando release con tag: $TAG"
 
+          # Determinar archivo de notas de la versión (preferir RELEASE_NOTES.md para no saturar con el changelog acumulado)
+          NOTES_FILE=""
+          if [ -f RELEASE_NOTES.md ]; then
+            NOTES_FILE="RELEASE_NOTES.md"
+            echo "Utilizando notas de versión específicas: RELEASE_NOTES.md"
+          elif [ -f CHANGELOG.md ]; then
+            NOTES_FILE="CHANGELOG.md"
+            echo "Utilizando historial completo: CHANGELOG.md"
+          fi
+
           # Verificar si el release ya existe en GitHub
           if gh release view "$TAG" > /dev/null 2>&1; then
             echo "El release $TAG ya existe. Actualizando notas y reemplazando archivos..."
-            if [ -f CHANGELOG.md ]; then
-              gh release edit "$TAG" --title "$TITLE" --notes-file CHANGELOG.md || true
+            if [ -n "$NOTES_FILE" ]; then
+              gh release edit "$TAG" --title "$TITLE" --notes-file "$NOTES_FILE" || true
             fi
             gh release upload "$TAG" final-assets/* --clobber
           else
             echo "Creando nuevo release $TAG..."
-            if [ -f CHANGELOG.md ]; then
-              gh release create "$TAG" final-assets/* --title "$TITLE" --notes-file CHANGELOG.md
+            if [ -n "$NOTES_FILE" ]; then
+              gh release create "$TAG" final-assets/* --title "$TITLE" --notes-file "$NOTES_FILE"
             else
               gh release create "$TAG" final-assets/* --title "$TITLE" --generate-notes
             fi
           fi
+

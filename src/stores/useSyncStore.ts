@@ -25,6 +25,7 @@ import {
   getAllHistory,
   getAllFavoritesForSync,
   getAllSettings,
+  setSetting,
   upsertHistory,
   batchUpsertHistory,
   removeHistoryBatch,
@@ -93,6 +94,9 @@ interface SyncState {
 
 let autoSyncTimeout: any = null;
 let periodicSyncInterval: any = null;
+let cachedRemoteSettingsDesktop: Record<string, string> = {};
+let cachedRemoteSettingsMobile: Record<string, string> = {};
+let cachedRemoteDevices: Record<string, { lastSyncAt: string; appVersion: string }> = {};
 
 function setupPeriodicSync(get: () => SyncState) {
   if (periodicSyncInterval) {
@@ -389,14 +393,24 @@ export const useSyncStore = create<SyncState>((set, get) => ({
         settings,
       });
 
+      const currentPlatform = getCurrentDevicePlatform();
+      const isAndroid = currentPlatform === 'android';
+
       const localPayload: GistFilesPayload = {
         syncMeta: {
           schemaVersion: CURRENT_SCHEMA_VERSION,
           appVersion: CURRENT_VERSION,
           lastModifiedAt: getCalibratedTimestamp(),
-          lastModifiedDevice: getCurrentDevicePlatform(),
+          lastModifiedDevice: currentPlatform,
           pbkdf2Salt: config.encryptionEnabled ? saltB64 : undefined,
           fileHashes: localHashes,
+          devices: {
+            ...cachedRemoteDevices,
+            [isAndroid ? 'android' : 'windows']: {
+              lastSyncAt: getCalibratedTimestamp(),
+              appVersion: CURRENT_VERSION,
+            },
+          },
           deletedFavorites: tombstones.filter((t: TombstoneItem) => t.entityType === 'favorite').map((t: TombstoneItem) => ({
             url: t.entityId,
             profileId: t.profileId,
@@ -419,6 +433,8 @@ export const useSyncStore = create<SyncState>((set, get) => ({
         history: onlineHistory,
         favorites,
         settings,
+        settingsDesktop: isAndroid ? cachedRemoteSettingsDesktop : settings,
+        settingsMobile: isAndroid ? settings : cachedRemoteSettingsMobile,
       };
 
       const lastHashesJson = await getSyncConfig('last_synced_hashes').catch(() => '');
@@ -494,6 +510,11 @@ export const useSyncStore = create<SyncState>((set, get) => ({
             const remotePayload = fetchResult.payload;
             const remoteHashes = remotePayload.syncMeta.fileHashes;
 
+            // Almacenar en caché las configuraciones y dispositivos del Gist
+            cachedRemoteSettingsDesktop = remotePayload.settingsDesktop || {};
+            cachedRemoteSettingsMobile = remotePayload.settingsMobile || {};
+            cachedRemoteDevices = remotePayload.syncMeta?.devices || {};
+
             // Si local es exactamente idéntico al remoto -> Cero escrituras
             if (areHashesEqual(localHashes, remoteHashes)) {
               await setSyncConfig('last_synced_hashes', JSON.stringify(localHashes));
@@ -522,6 +543,29 @@ export const useSyncStore = create<SyncState>((set, get) => ({
                 await removeFavorite(del.url, del.profileId);
               }
               await cleanupOldTombstones(30);
+
+              // Aplicar configuraciones de plataforma a SQLite
+              const platformSettings = isAndroid
+                ? remotePayload.settingsMobile
+                : remotePayload.settingsDesktop;
+              const settingsToApply = (platformSettings && Object.keys(platformSettings).length > 0)
+                ? platformSettings
+                : remotePayload.settings;
+
+              if (settingsToApply && Object.keys(settingsToApply).length > 0) {
+                for (const [k, v] of Object.entries(settingsToApply)) {
+                  try {
+                    // Evitar transferir rutas de disco incompatibles entre Windows y Android
+                    if (k === 'download_dir') {
+                      if (isAndroid && /^[a-zA-Z]:[\\/]/.test(v)) continue;
+                      if (!isAndroid && (v.startsWith('/storage') || v.startsWith('/data'))) continue;
+                    }
+                    await setSetting(k, v);
+                  } catch (e) {
+                    console.warn(`[AniCS Sync] No se pudo guardar configuración ${k}:`, e);
+                  }
+                }
+              }
 
               await setSyncConfig('last_synced_hashes', JSON.stringify(remoteHashes));
               await get().updateConfig({
@@ -559,6 +603,28 @@ export const useSyncStore = create<SyncState>((set, get) => ({
               await removeFavorite(del.url, del.profileId);
             }
             await cleanupOldTombstones(30);
+
+            // Aplicar configuraciones de plataforma en SQLite
+            const platformSettings = isAndroid
+              ? mergedPayload.settingsMobile
+              : mergedPayload.settingsDesktop;
+            const settingsToApply = (platformSettings && Object.keys(platformSettings).length > 0)
+              ? platformSettings
+              : mergedPayload.settings;
+
+            if (settingsToApply && Object.keys(settingsToApply).length > 0) {
+              for (const [k, v] of Object.entries(settingsToApply)) {
+                try {
+                  if (k === 'download_dir') {
+                    if (isAndroid && /^[a-zA-Z]:[\\/]/.test(v)) continue;
+                    if (!isAndroid && (v.startsWith('/storage') || v.startsWith('/data'))) continue;
+                  }
+                  await setSetting(k, v);
+                } catch (e) {
+                  console.warn(`[AniCS Sync] No se pudo guardar configuración ${k}:`, e);
+                }
+              }
+            }
 
             const uploadResult = await createOrUpdateGist(get().config, mergedPayload, currentKey, saltB64);
             const nowIso = getCalibratedTimestamp();

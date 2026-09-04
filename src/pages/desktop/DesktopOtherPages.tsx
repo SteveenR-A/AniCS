@@ -5,7 +5,7 @@ import {
   Clock, Trash2, Film, Bookmark, BookmarkX, Download, Inbox, History,
   ArrowDownCircle, HardDrive, Play, FolderOpen, RefreshCw, Search, Folder, FileVideo,
   ChevronDown, ChevronUp, Check, Eye, EyeOff, Pause, RotateCcw, Loader2, AlertCircle,
-  CheckSquare, Square, X, Layers, PlayCircle, Heart, AlertTriangle
+  CheckSquare, Square, X, Layers, PlayCircle, Heart, AlertTriangle, CheckCircle2
 } from 'lucide-react';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { convertFileSrc } from '@tauri-apps/api/core';
@@ -1046,7 +1046,7 @@ export function DesktopFavoritesPage() {
 export function DesktopDownloadsPage() {
   const navigate = useNavigate();
   const {
-    tasks, pauseTask, resumeTask, retryTask, cancelTask, removeTask,
+    tasks, pauseTask, resumeTask, retryTask, cancelTask, removeTask, clearCompletedTasks,
     expandedFolders, toggleFolder
   } = useDownloadStore();
   const {
@@ -1179,6 +1179,7 @@ export function DesktopDownloadsPage() {
 
   const taskList = Array.from(tasks.values());
   const activeTasks = taskList.filter(t => t.status === 'downloading' || t.status === 'queued');
+  const completedOrCanceledTasks = taskList.filter(t => t.status === 'completed' || t.status === 'canceled');
 
   return (
     <div style={{ padding: '28px 36px', maxWidth: 1440, margin: '0 auto' }}>
@@ -1510,6 +1511,39 @@ export function DesktopDownloadsPage() {
       {/* TAB 2: Cola de Descarga Activa (Sin Emojis) */}
       {activeTab === 'active' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {completedOrCanceledTasks.length > 0 && (
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 2 }}>
+              <button
+                onClick={() => clearCompletedTasks()}
+                style={{
+                  background: 'var(--bg-surface)',
+                  color: 'var(--text-secondary)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '7px 14px',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  transition: 'all 0.15s ease',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.color = 'var(--accent-error)';
+                  e.currentTarget.style.borderColor = 'var(--accent-error)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.color = 'var(--text-secondary)';
+                  e.currentTarget.style.borderColor = 'var(--border-subtle)';
+                }}
+                title="Quitar las descargas completadas y canceladas de la cola"
+              >
+                <CheckCircle2 size={14} />
+                <span>Limpiar completadas ({completedOrCanceledTasks.length})</span>
+              </button>
+            </div>
+          )}
           {taskList.length === 0 ? (
             <div style={{
               textAlign: 'center', padding: '80px 20px',

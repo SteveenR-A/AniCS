@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { AppShell } from '@/components/layout/AppShell';
 import { HomePage } from '@/pages/HomePage';
@@ -10,13 +10,14 @@ import { TopAnimePage } from '@/pages/TopAnimePage';
 import { HistoryPage, FavoritesPage, DownloadsPage } from '@/pages/OtherPages';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { ChangelogModal } from '@/components/ChangelogModal';
+import { UpdateAnnouncementModal } from '@/components/UpdateAnnouncementModal';
 import { PinDialogModal } from '@/components/PinDialogModal';
 import { useAnimeStore } from '@/stores/useAnimeStore';
 import { useDownloadStore } from '@/stores/useDownloadStore';
 import { useThemeStore } from '@/stores/useThemeStore';
 import { useProfileStore } from '@/stores/useProfileStore';
 import { useSyncStore } from '@/stores/useSyncStore';
-import { checkForAppUpdates, CURRENT_VERSION } from '@/services/updateService';
+import { checkForAppUpdates, CURRENT_VERSION, type GitHubRelease } from '@/services/updateService';
 
 function AppRoutes() {
   return (
@@ -39,13 +40,15 @@ function AppRoutes() {
   );
 }
 
-export default function App() {
+function AppContent() {
+  const navigate = useNavigate();
   const { loadSources } = useAnimeStore();
   const { init: initDownloads, cleanup: cleanupDownloads } = useDownloadStore();
   const { loadTheme } = useThemeStore();
   const { loadProfiles } = useProfileStore();
   const { initSync } = useSyncStore();
   const [showPatchNotes, setShowPatchNotes] = useState(false);
+  const [availableUpdate, setAvailableUpdate] = useState<GitHubRelease | null>(null);
 
   useEffect(() => {
     // Cargar tema visual guardado
@@ -83,9 +86,17 @@ export default function App() {
     })();
 
     // Comprobación de nuevas versiones en segundo plano tras inicializar la UI
-    const timer = setTimeout(() => {
-      checkForAppUpdates(true);
-    }, 3000);
+    const timer = setTimeout(async () => {
+      try {
+        const release = await checkForAppUpdates(true);
+        if (release) {
+          const postponed = sessionStorage.getItem('anics_update_postponed');
+          if (postponed !== release.tag_name) {
+            setAvailableUpdate(release);
+          }
+        }
+      } catch {}
+    }, 2500);
 
     return () => {
       clearTimeout(timer);
@@ -100,11 +111,40 @@ export default function App() {
     setShowPatchNotes(false);
   };
 
+  const handleCloseUpdateModal = () => {
+    if (availableUpdate) {
+      try {
+        sessionStorage.setItem('anics_update_postponed', availableUpdate.tag_name);
+      } catch {}
+    }
+    setAvailableUpdate(null);
+  };
+
+  const handleGoToUpdate = () => {
+    setAvailableUpdate(null);
+    navigate('/settings');
+  };
+
   return (
-    <BrowserRouter>
+    <>
       <AppRoutes />
       <ChangelogModal isOpen={showPatchNotes} onClose={handleClosePatchNotes} />
+      <UpdateAnnouncementModal
+        isOpen={Boolean(availableUpdate)}
+        release={availableUpdate}
+        onClose={handleCloseUpdateModal}
+        onUpdate={handleGoToUpdate}
+      />
       <PinDialogModal />
+    </>
+  );
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <AppContent />
     </BrowserRouter>
   );
 }
+

@@ -33,6 +33,7 @@ interface DownloadStore {
   retryTask: (id: string) => Promise<void>;
   cancelTask: (id: string) => Promise<void>;
   removeTask: (id: string, deleteFile?: boolean) => Promise<void>;
+  clearCompletedTasks: () => Promise<void>;
 
   toggleFolder: (folderPath: string) => void;
   setFolderExpanded: (folderPath: string, isExpanded: boolean) => void;
@@ -455,5 +456,27 @@ export const useDownloadStore = create<DownloadStore>((set, get) => ({
     } catch (e) {
       console.error('Error removing download task:', e);
     }
+  },
+
+  clearCompletedTasks: async () => {
+    const tasks = Array.from(get().tasks.values());
+    const completedOrCanceled = tasks.filter(
+      (t) => t.status === 'completed' || t.status === 'canceled'
+    );
+    for (const task of completedOrCanceled) {
+      try {
+        await deleteDownloadRecord(task.id, false);
+      } catch (e) {
+        console.warn('Error removing completed task record:', task.id, e);
+      }
+    }
+    set((state) => {
+      const next = new Map(state.tasks);
+      for (const task of completedOrCanceled) {
+        next.delete(task.id);
+      }
+      return { tasks: next };
+    });
+    triggerNotificationSync();
   },
 }));

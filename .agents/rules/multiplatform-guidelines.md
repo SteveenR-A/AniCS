@@ -66,3 +66,17 @@ Este documento establece las reglas arquitectónicas y directrices obligatorias 
 1. **Compilación Frontend**: Todo cambio en TypeScript/React debe validar con `npm run build` sin errores de tipo ni dependencias ausentes.
 2. **Compilación Backend**: Todo cambio en Rust debe validar con `cargo check` y `cargo test` en `src-tauri`.
 3. **Validación Cruzada**: Antes de dar por resuelto un problema de móvil, verificar que no rompa el flujo de PC, y viceversa.
+
+---
+
+## 6. Procedimiento de Creación de Nuevas Versiones y Releases
+
+1. **Sincronización de Versión**:
+   - Usar `npm run bump <version> "<titulo>" "<highlights>"` para sincronizar `package.json`, `Cargo.toml`, `tauri.conf.json`, `updateService.ts`, `changelog.json` y settings.
+2. **Separación de Notas de Versión**:
+   - `RELEASE_NOTES.md`: Exclusivo del release en curso; consumido por GitHub Actions y por el modal de actualización (`UpdateAnnouncementModal`) para no saturar con el changelog completo.
+   - `CHANGELOG.md`: Archivo acumulativo maestro de todo el historial.
+3. **Flujo de Git**:
+   - NUNCA hacer `git push` sin orden explícita del usuario.
+   - Con autorización: `git add .` -> `git commit -m "chore: release vX.Y.Z"` -> `git tag vX.Y.Z` -> `git push origin main --tags`.
+

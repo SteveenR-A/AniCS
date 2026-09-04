@@ -4,7 +4,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Clock, Trash2, Film, Bookmark, BookmarkX, Inbox, History,
   ArrowDownCircle, Play, Folder, Search, X, CheckSquare, Square, RefreshCw,
-  ChevronDown, ChevronUp, Check, Eye, EyeOff, Pause, RotateCcw, Loader2, AlertCircle, Heart, AlertTriangle
+  ChevronDown, ChevronUp, Check, Eye, EyeOff, Pause, RotateCcw, Loader2, AlertCircle, Heart, AlertTriangle,
+  CheckCircle2, Cloud, CloudOff
 } from 'lucide-react';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import {
@@ -47,6 +48,7 @@ export function MobileHistoryPage() {
   const [isSelecting, setIsSelecting] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [expandedAnimeKeys, setExpandedAnimeKeys] = useState<Set<string>>(new Set());
+  const [showClearModal, setShowClearModal] = useState(false);
 
   const loadHistory = useCallback(async () => {
     setIsLoading(true);
@@ -190,17 +192,12 @@ export function MobileHistoryPage() {
     }
   };
 
-  const handleClear = async () => {
-    if (!confirm('¿Estás seguro de que deseas borrar todo el historial?')) {
-      return;
-    }
+  const handleOpenClearModal = () => {
+    setShowClearModal(true);
+  };
 
-    const clearCloudToo = confirm(
-      '¿Deseas eliminar este historial también en tus otros dispositivos y en la nube?\n\n' +
-      '• Aceptar: Borrar en todos los dispositivos y nube.\n' +
-      '• Cancelar: Borrar SOLO en este móvil (pausará la sincronización para proteger la nube).'
-    );
-
+  const handleConfirmClear = async (clearCloudToo: boolean) => {
+    setShowClearModal(false);
     await clearHistory(activeProfile?.id);
     setEntries([]);
     setSelectedIds(new Set());
@@ -301,13 +298,15 @@ export function MobileHistoryPage() {
 
   return (
     <div style={{ padding: '12px 14px 24px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Clock size={20} color="var(--accent-primary)" />
-          <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0 }}>Historial ({groupedAnimes.length})</h2>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flexShrink: 1 }}>
+          <Clock size={18} color="var(--accent-primary)" style={{ flexShrink: 0 }} />
+          <h2 style={{ fontSize: 16, fontWeight: 800, margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            Historial ({groupedAnimes.length})
+          </h2>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
           <button
             onClick={handleRefresh}
             disabled={isManualRefreshing || isSyncing}
@@ -317,9 +316,11 @@ export function MobileHistoryPage() {
               border: '1px solid var(--border-subtle)',
               color: 'var(--text-secondary)',
               fontSize: 11, fontWeight: 700,
-              borderRadius: 'var(--radius-full)', padding: '5px 10px',
+              borderRadius: 'var(--radius-full)', padding: '5px 8px',
               cursor: (isManualRefreshing || isSyncing) ? 'not-allowed' : 'pointer',
               display: 'flex', alignItems: 'center', gap: 4,
+              whiteSpace: 'nowrap',
+              flexShrink: 0,
             }}
           >
             <RefreshCw
@@ -328,7 +329,6 @@ export function MobileHistoryPage() {
                 animation: (isManualRefreshing || isSyncing) ? 'spin 1s linear infinite' : 'none',
               }}
             />
-            <span>Actualizar</span>
           </button>
 
           {entries.length > 0 && (
@@ -343,8 +343,10 @@ export function MobileHistoryPage() {
                   border: '1px solid var(--border-subtle)',
                   color: isSelecting ? 'white' : 'var(--text-secondary)',
                   fontSize: 11, fontWeight: 700,
-                  borderRadius: 'var(--radius-full)', padding: '5px 10px',
+                  borderRadius: 'var(--radius-full)', padding: '5px 9px',
                   cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0,
                 }}
               >
                 {isSelecting ? 'Listo' : 'Seleccionar'}
@@ -352,17 +354,23 @@ export function MobileHistoryPage() {
 
               {!isSelecting && (
                 <button
-                  onClick={handleClear}
+                  onClick={handleOpenClearModal}
                   style={{
                     background: 'rgba(239, 68, 68, 0.1)',
                     border: '1px solid rgba(239, 68, 68, 0.2)',
                     color: '#ef4444',
                     fontSize: 11, fontWeight: 700,
-                    borderRadius: 'var(--radius-full)', padding: '5px 10px',
+                    borderRadius: 'var(--radius-full)', padding: '5px 9px',
                     cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                    flexShrink: 0,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
                   }}
                 >
-                  Borrar Todo
+                  <Trash2 size={11} />
+                  <span>Borrar Todo</span>
                 </button>
               )}
             </>
@@ -728,6 +736,215 @@ export function MobileHistoryPage() {
           })}
         </div>
       )}
+
+      {/* Modal de confirmación de seguridad para vaciar historial */}
+      <AnimatePresence>
+        {showClearModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            style={{
+              position: 'fixed',
+              inset: 0,
+              zIndex: 9999,
+              background: 'rgba(0, 0, 0, 0.75)',
+              backdropFilter: 'blur(6px)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: 16,
+            }}
+            onClick={() => setShowClearModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.92, opacity: 0, y: 16 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.92, opacity: 0, y: 16 }}
+              transition={{ duration: 0.2 }}
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                width: '100%',
+                maxWidth: 400,
+                background: 'var(--bg-surface)',
+                borderRadius: 'var(--radius-xl)',
+                border: '1px solid var(--border-moderate)',
+                boxShadow: '0 20px 40px rgba(0, 0, 0, 0.6)',
+                overflow: 'hidden',
+                display: 'flex',
+                flexDirection: 'column',
+              }}
+            >
+              {/* Header */}
+              <div
+                style={{
+                  padding: '16px 18px',
+                  borderBottom: '1px solid var(--border-subtle)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  background: 'rgba(239, 68, 68, 0.08)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div
+                    style={{
+                      width: 32,
+                      height: 32,
+                      borderRadius: '50%',
+                      background: 'rgba(239, 68, 68, 0.18)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: 'var(--accent-error)',
+                    }}
+                  >
+                    <AlertTriangle size={18} />
+                  </div>
+                  <div>
+                    <h3 style={{ fontSize: 15, fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>
+                      Vaciar Historial
+                    </h3>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Confirmación de seguridad</span>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => setShowClearModal(false)}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: 'var(--text-secondary)',
+                    padding: 4,
+                    cursor: 'pointer',
+                    borderRadius: '50%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* Body */}
+              <div style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: 0, lineHeight: 1.5 }}>
+                  Elige cómo deseas vaciar los episodios reproducidos:
+                </p>
+
+                {/* Opción 1: Solo en este móvil */}
+                <button
+                  onClick={() => handleConfirmClear(false)}
+                  style={{
+                    background: 'var(--bg-elevated)',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: 'var(--radius-lg)',
+                    padding: '12px 14px',
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: 12,
+                    transition: 'border-color 0.15s ease',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: 32,
+                      height: 32,
+                      borderRadius: 'var(--radius-md)',
+                      background: 'rgba(59, 130, 246, 0.15)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: 'var(--accent-primary)',
+                      flexShrink: 0,
+                    }}
+                  >
+                    <CloudOff size={16} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 2 }}>
+                      Borrar solo en este móvil
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.4 }}>
+                      Pausa la sincronización y protege tu historial en la nube y en la PC.
+                    </div>
+                  </div>
+                </button>
+
+                {/* Opción 2: En todos lados y la nube */}
+                <button
+                  onClick={() => handleConfirmClear(true)}
+                  style={{
+                    background: 'rgba(239, 68, 68, 0.06)',
+                    border: '1px solid rgba(239, 68, 68, 0.25)',
+                    borderRadius: 'var(--radius-lg)',
+                    padding: '12px 14px',
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: 12,
+                    transition: 'background 0.15s ease',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: 32,
+                      height: 32,
+                      borderRadius: 'var(--radius-md)',
+                      background: 'rgba(239, 68, 68, 0.15)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: 'var(--accent-error)',
+                      flexShrink: 0,
+                    }}
+                  >
+                    <Cloud size={16} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--accent-error)', marginBottom: 2 }}>
+                      Borrar en todos los dispositivos y nube
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.4 }}>
+                      Elimina el historial aquí y propaga la eliminación a GitHub Gist y PC.
+                    </div>
+                  </div>
+                </button>
+              </div>
+
+              {/* Footer */}
+              <div
+                style={{
+                  padding: '12px 18px 16px',
+                  borderTop: '1px solid var(--border-subtle)',
+                  display: 'flex',
+                  justifyContent: 'flex-end',
+                }}
+              >
+                <button
+                  onClick={() => setShowClearModal(false)}
+                  style={{
+                    background: 'var(--bg-elevated)',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '8px 16px',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: 'var(--text-secondary)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Cancelar
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -925,7 +1142,7 @@ export function MobileFavoritesPage() {
 export function MobileDownloadsPage() {
   const navigate = useNavigate();
   const {
-    tasks, pauseTask, resumeTask, retryTask, cancelTask, removeTask,
+    tasks, pauseTask, resumeTask, retryTask, cancelTask, removeTask, clearCompletedTasks,
     expandedFolders, toggleFolder
   } = useDownloadStore();
   const {
@@ -1028,6 +1245,7 @@ export function MobileDownloadsPage() {
 
   const taskList = Array.from(tasks.values());
   const activeTasks = taskList.filter(t => t.status === 'downloading' || t.status === 'queued');
+  const completedOrCanceledTasks = taskList.filter(t => t.status === 'completed' || t.status === 'canceled');
 
   return (
     <div style={{ padding: '12px 14px 24px' }}>
@@ -1244,6 +1462,29 @@ export function MobileDownloadsPage() {
       {/* TAB 2: Cola en Móvil (Sin Emojis) */}
       {activeTab === 'active' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {completedOrCanceledTasks.length > 0 && (
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 2 }}>
+              <button
+                onClick={() => clearCompletedTasks()}
+                style={{
+                  background: 'var(--bg-surface)',
+                  color: 'var(--text-secondary)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-full)',
+                  padding: '6px 12px',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 5,
+                }}
+              >
+                <CheckCircle2 size={13} />
+                <span>Limpiar completadas ({completedOrCanceledTasks.length})</span>
+              </button>
+            </div>
+          )}
           {taskList.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '50px 16px', background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)' }}>
               <ArrowDownCircle size={36} color="var(--text-muted)" style={{ margin: '0 auto 8px', opacity: 0.5 }} />

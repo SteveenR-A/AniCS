@@ -1338,19 +1338,21 @@ export function PlayerPage() {
                   </AnimatePresence>
                 </div>
 
-                {/* Botón Alternar / Cambiar Servidor Siguiente */}
-                <button
-                  onClick={tryFallbackServer}
-                  title="Cambiar al siguiente servidor"
-                  style={{
-                    background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.2)',
-                    borderRadius: 'var(--radius-full)', width: isPortrait ? 30 : 34, height: isPortrait ? 30 : 34,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    color: 'white', cursor: 'pointer', backdropFilter: 'blur(10px)',
-                  }}
-                >
-                  <RotateCw size={isPortrait ? 13 : 15} />
-                </button>
+                {/* Botón Alternar / Cambiar Servidor Siguiente (Solo Desktop) */}
+                {!isMobile && (
+                  <button
+                    onClick={tryFallbackServer}
+                    title="Cambiar al siguiente servidor"
+                    style={{
+                      background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.2)',
+                      borderRadius: 'var(--radius-full)', width: isPortrait ? 30 : 34, height: isPortrait ? 30 : 34,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      color: 'white', cursor: 'pointer', backdropFilter: 'blur(10px)',
+                    }}
+                  >
+                    <RotateCw size={isPortrait ? 13 : 15} />
+                  </button>
+                )}
 
                 {/* Botón Lista de Episodios */}
                 <button

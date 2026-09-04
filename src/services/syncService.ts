@@ -14,6 +14,7 @@ import {
   decryptText,
 } from '@/services/cryptoService';
 import { normalizeAnimeTitleKey } from '@/services/storageService';
+import { CURRENT_VERSION } from '@/services/updateService';
 
 export const CURRENT_SCHEMA_VERSION = 2;
 export const GIST_APP_NAME = 'AniCS Cloud Sync (Secret)';
@@ -401,7 +402,7 @@ export function mergeSyncData(local: GistFilesPayload, remote: GistFilesPayload)
   return {
     syncMeta: {
       schemaVersion: CURRENT_SCHEMA_VERSION,
-      appVersion: local.syncMeta.appVersion || '0.2.1',
+      appVersion: local.syncMeta.appVersion || CURRENT_VERSION,
       lastModifiedAt: getCalibratedTimestamp(),
       lastModifiedDevice: local.syncMeta.lastModifiedDevice || currentPlatform,
       pbkdf2Salt: local.syncMeta.pbkdf2Salt || migratedRemote.syncMeta.pbkdf2Salt,
@@ -588,8 +589,12 @@ export function getCurrentDevicePlatform(): 'windows' | 'android' | 'web' {
   if (typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)) {
     return 'android';
   }
+  if (typeof window !== 'undefined' && ((window as any).AndroidBridge || window.innerWidth < 768)) {
+    return 'android';
+  }
   return 'windows';
 }
+
 
 export async function computePayloadHashes(data: {
   profiles: UserProfile[];
@@ -672,10 +677,10 @@ export async function createOrUpdateGist(
     settings: payload.syncMeta.fileHashes?.settings || (await computeSha256(settingsJson)),
   };
 
-  const devices = payload.syncMeta.devices || {};
+  const devices = { ...(payload.syncMeta.devices || {}) };
   devices[isAndroid ? 'android' : 'windows'] = {
     lastSyncAt: getCalibratedTimestamp(),
-    appVersion: payload.syncMeta.appVersion || '0.2.1',
+    appVersion: payload.syncMeta.appVersion || CURRENT_VERSION,
   };
   payload.syncMeta.devices = devices;
   payload.syncMeta.lastModifiedDevice = currentPlatform;
@@ -711,9 +716,26 @@ export async function createOrUpdateGist(
     'history.json': { content: finalHistoryContent },
     'favorites.json': { content: finalFavoritesContent },
     'settings.json': { content: finalSettingsContent },
-    'settings_desktop.json': { content: finalSettingsDesktopContent },
-    'settings_mobile.json': { content: finalSettingsMobileContent },
   };
+
+  if (config.gistId) {
+    // PATCH: Preservar el archivo del otro sistema si el local no tiene configuraciones
+    if (isAndroid) {
+      gistFilesPayload['settings_mobile.json'] = { content: finalSettingsMobileContent };
+      if (Object.keys(finalSettingsDesktop).length > 0) {
+        gistFilesPayload['settings_desktop.json'] = { content: finalSettingsDesktopContent };
+      }
+    } else {
+      gistFilesPayload['settings_desktop.json'] = { content: finalSettingsDesktopContent };
+      if (Object.keys(finalSettingsMobile).length > 0) {
+        gistFilesPayload['settings_mobile.json'] = { content: finalSettingsMobileContent };
+      }
+    }
+  } else {
+    // POST inicial
+    gistFilesPayload['settings_desktop.json'] = { content: finalSettingsDesktopContent };
+    gistFilesPayload['settings_mobile.json'] = { content: finalSettingsMobileContent };
+  }
 
   const headers: Record<string, string> = {
     Authorization: `Bearer ${config.githubToken}`,

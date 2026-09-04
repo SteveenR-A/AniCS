@@ -101,10 +101,38 @@ if (existingIndex >= 0) {
 fs.writeFileSync(changelogPath, JSON.stringify(changelog, null, 2) + '\n', 'utf8');
 console.log('  ✓ src/data/changelog.json actualizado');
 
+// 6. RELEASE_NOTES.md (Para el release específico en GitHub Releases)
+const releaseNotesPath = path.join(ROOT, 'RELEASE_NOTES.md');
+const releaseNotesContent = `# AniCS v${targetVersion} — ${releaseTitle}\n\n` +
+  `**Fecha de lanzamiento:** ${today}\n\n` +
+  `### 🚀 Novedades y Correcciones\n\n` +
+  highlights.map((h) => `- ${h}`).join('\n') +
+  `\n\n---\n*Para ver el historial acumulativo completo de todas las versiones, consulta [CHANGELOG.md](./CHANGELOG.md).*\n`;
+
+fs.writeFileSync(releaseNotesPath, releaseNotesContent, 'utf8');
+console.log('  ✓ RELEASE_NOTES.md generado para GitHub Releases');
+
+// 7. CHANGELOG.md (Historial acumulativo global)
+const changelogMdPath = path.join(ROOT, 'CHANGELOG.md');
+if (fs.existsSync(changelogMdPath)) {
+  let changelogMd = fs.readFileSync(changelogMdPath, 'utf8');
+  if (!changelogMd.includes(`## [${targetVersion}]`)) {
+    const entryHeader = `## [${targetVersion}] - ${today}\n\n### ${releaseTitle}\n` +
+      highlights.map((h) => `- ${h}`).join('\n') + '\n\n---\n\n';
+    changelogMd = changelogMd.replace(
+      /(# Registro de Cambios[^\n]*\n\n[^\n]*\n[^\n]*\n\n---\n\n)/,
+      `$1${entryHeader}`
+    );
+    fs.writeFileSync(changelogMdPath, changelogMd, 'utf8');
+    console.log('  ✓ CHANGELOG.md actualizado');
+  }
+}
+
 console.log(`\n\x1b[32m%s\x1b[0m`, `✅ Versión sincronizada exitosamente a ${targetVersion}!`);
-console.log(`\x1b[33m%s\x1b[0m`, `Para publicar en GitHub y crear el instalador EXE y APK:`);
+console.log(`\x1b[33m%s\x1b[0m`, `Para publicar en GitHub y crear el instalador EXE y APK (solo cuando el usuario lo apruebe):`);
 console.log(`  git add .`);
 console.log(`  git commit -m "chore: release v${targetVersion}"`);
 console.log(`  git tag v${targetVersion}`);
 console.log(`  git push origin main --tags`);
+
 

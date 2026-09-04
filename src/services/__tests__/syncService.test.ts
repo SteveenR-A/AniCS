@@ -854,4 +854,64 @@ describe('syncService - GitHub Gist Cloud Client & Multi-device Download', () =>
     expect(syncMetaUploaded.devices).toBeDefined();
     expect(syncMetaUploaded.devices.windows).toBeDefined();
   });
+
+  it('en PATCH desde escritorio no sobreescribe settings_mobile.json si está vacío', async () => {
+    const mockConfig: GistSyncConfig = {
+      githubToken: 'ghp_test_token_123',
+      gistId: 'existing_gist_456',
+      encryptionEnabled: false,
+      autoSync: false,
+    };
+
+    let capturedPayload: any = null;
+    globalThis.fetch = vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
+      if (init?.body) {
+        capturedPayload = JSON.parse(init.body as string);
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: new Headers({ ETag: 'W/"etag-patch"' }),
+        json: async () => ({ id: 'existing_gist_456' }),
+      });
+    });
+
+    const testPayload: GistFilesPayload = {
+      syncMeta: {
+        schemaVersion: 2,
+        appVersion: '0.2.2',
+        lastModifiedAt: '2026-09-02T10:00:00Z',
+        lastModifiedDevice: 'windows',
+        devices: {
+          android: { lastSyncAt: '2026-09-01T10:00:00Z', appVersion: '0.2.2' },
+        },
+        fileHashes: { profiles: 'h1', history: 'h2', favorites: 'h3', settings: 'h4' },
+        deletedFavorites: [],
+        deletedProfiles: [],
+        deletedHistory: [],
+      },
+      profiles: [],
+      history: [],
+      favorites: [],
+      settings: {
+        player_type: 'internal',
+      },
+    };
+
+    await createOrUpdateGist(mockConfig, testPayload);
+
+    expect(capturedPayload).not.toBeNull();
+    const files = capturedPayload.files;
+
+    // Desktop settings deben enviarse
+    expect(files['settings_desktop.json']).toBeDefined();
+    // settings_mobile.json no debe incluirse en el PATCH para no sobreescribir el del Gist con {}
+    expect(files['settings_mobile.json']).toBeUndefined();
+
+    // sync_meta debe preservar el dispositivo Android preexistente
+    const syncMetaUploaded = JSON.parse(files['sync_meta.json'].content);
+    expect(syncMetaUploaded.devices.android).toBeDefined();
+    expect(syncMetaUploaded.devices.windows).toBeDefined();
+  });
 });
+

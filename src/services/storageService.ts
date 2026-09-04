@@ -55,6 +55,10 @@ export const getStorageSpaceInfo = (): Promise<import('@/types').StorageSpaceInf
 export const getAllSettings = (): Promise<Record<string, string>> =>
   invoke('get_all_settings');
 
+export const setSetting = (key: string, value: string): Promise<void> =>
+  invoke('set_setting', { key, value });
+
+
 export interface DatabaseStats {
   historyCount: number;
   favoritesCount: number;

@@ -91,6 +91,10 @@ export function MobileSearchPage() {
   const [showFilters, setShowFilters] = useState(Boolean(urlGenre || urlStatus || urlType));
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const isInputFocusedRef = useRef(false);
+  const isInitialMount = useRef(true);
+  const searchRequestIdRef = useRef(0);
+  const lastExecutedKey = useRef<string>('');
   const activeFilterCount = (selectedGenre ? 1 : 0) + (selectedStatus ? 1 : 0) + (selectedType ? 1 : 0) + (selectedOrder ? 1 : 0);
 
   useEffect(() => {
@@ -126,6 +130,7 @@ export function MobileSearchPage() {
     page: number = 1
   ) => {
     const currentSource = activeSource;
+    const currentRequestId = ++searchRequestIdRef.current;
     setIsSearching(true);
     try {
       const filters: SearchFilters = {
@@ -139,7 +144,8 @@ export function MobileSearchPage() {
 
       const res = await advancedSearch(filters, currentSource);
 
-      if (useAnimeStore.getState().activeSource !== currentSource) {
+      // Si la fuente cambió o una petición posterior ya finalizó, descartar respuesta
+      if (useAnimeStore.getState().activeSource !== currentSource || currentRequestId !== searchRequestIdRef.current) {
         return;
       }
 
@@ -167,21 +173,19 @@ export function MobileSearchPage() {
       }
     } catch (e) {
       console.error('Mobile search execution failed', e);
-      if (useAnimeStore.getState().activeSource === currentSource) {
+      if (useAnimeStore.getState().activeSource === currentSource && currentRequestId === searchRequestIdRef.current) {
         setSearchResults([], q, currentSource);
         setTotalPages(undefined);
         setHasNextPage(false);
       }
     } finally {
-      if (useAnimeStore.getState().activeSource === currentSource) {
+      if (useAnimeStore.getState().activeSource === currentSource && currentRequestId === searchRequestIdRef.current) {
         setIsSearching(false);
       }
     }
   }, [activeSource, setSearchResults, setIsSearching, saveSearchSession, addRecentSearch]);
 
-  const lastExecutedKey = useRef<string>('');
-
-  // Restaurar o ejecutar búsqueda inicial al cambiar fuente, filtros o URL
+  // Restaurar sesión o ejecutar búsqueda inicial
   useEffect(() => {
     const currentKey = `${activeSource}:${urlQ}:${urlGenre}:${urlStatus}:${urlType}:${urlOrder}:${urlPage}`;
     if (lastExecutedKey.current === currentKey) {
@@ -189,62 +193,132 @@ export function MobileSearchPage() {
     }
     lastExecutedKey.current = currentKey;
 
-    const session = getSearchSession(activeSource);
     const hasParams = Boolean(urlQ || urlGenre || urlStatus || urlType || urlOrder || urlPage > 1);
 
-    if (!hasParams && session && session.results.length > 0) {
-      setQuery(session.query);
-      setSelectedGenre(session.genre);
-      setSelectedStatus(session.status);
-      setSelectedType(session.animeType);
-      setSelectedOrder(session.orderBy);
-      setCurrentPage(session.currentPage);
-      setTotalPages(session.totalPages);
-      setHasNextPage(session.hasNextPage);
-      setSearchResults(session.results, session.query, activeSource);
-      syncUrlParams(session.query, session.genre, session.status, session.animeType, session.orderBy, session.currentPage);
-      return;
+    // Solo restaurar la sesión guardada en el primer montaje si no hay parámetros en la URL
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      const session = getSearchSession(activeSource);
+      if (!hasParams && session && session.results.length > 0) {
+        setQuery(session.query);
+        setSelectedGenre(session.genre);
+        setSelectedStatus(session.status);
+        setSelectedType(session.animeType);
+        setSelectedOrder(session.orderBy);
+        setCurrentPage(session.currentPage);
+        setTotalPages(session.totalPages);
+        setHasNextPage(session.hasNextPage);
+        setSearchResults(session.results, session.query, activeSource);
+        syncUrlParams(session.query, session.genre, session.status, session.animeType, session.orderBy, session.currentPage);
+        return;
+      }
     }
 
-    setQuery(urlQ);
+    // Mientras el usuario esté escribiendo activamente, no sobreescribir el input
+    if (!isInputFocusedRef.current && query !== urlQ) {
+      setQuery(urlQ);
+    }
     setSelectedGenre(urlGenre);
     setSelectedStatus(urlStatus);
     setSelectedType(urlType);
     setSelectedOrder(urlOrder);
     setCurrentPage(urlPage);
 
+    // Si no hay parámetros ni búsqueda, no disparar consultas pesadas innecesarias
+    if (!urlQ && !urlGenre && !urlStatus && !urlType && !urlOrder) {
+      setSearchResults([], '', activeSource);
+      setTotalPages(undefined);
+      setHasNextPage(false);
+      return;
+    }
+
     executeSearch(urlQ, urlGenre, urlStatus, urlType, urlOrder, urlPage);
-  }, [activeSource, urlQ, urlGenre, urlStatus, urlType, urlOrder, urlPage, getSearchSession, setSearchResults, syncUrlParams, executeSearch]);
+  }, [activeSource, urlQ, urlGenre, urlStatus, urlType, urlOrder, urlPage, getSearchSession, setSearchResults, syncUrlParams, executeSearch, query]);
 
   const handleInput = (val: string) => {
     setQuery(val);
     if (debounceRef.current) clearTimeout(debounceRef.current);
+
+    const trimmed = val.trim();
+    if (trimmed.length === 0) {
+      // Limpieza inmediata sin saturar la red ni rellenar la barra
+      const key = `${activeSource}::${selectedGenre}:${selectedStatus}:${selectedType}:${selectedOrder}:1`;
+      lastExecutedKey.current = key;
+      syncUrlParams('', selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
+      if (!selectedGenre && !selectedStatus && !selectedType && !selectedOrder) {
+        setSearchResults([], '', activeSource);
+        setTotalPages(undefined);
+        setHasNextPage(false);
+      } else {
+        executeSearch('', selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
+      }
+      return;
+    }
+
+    // No disparar consultas automáticas con 1 solo carácter para evitar saturación de scrapers
+    if (trimmed.length < 2) {
+      return;
+    }
+
     debounceRef.current = setTimeout(() => {
+      const key = `${activeSource}:${val}:${selectedGenre}:${selectedStatus}:${selectedType}:${selectedOrder}:1`;
+      lastExecutedKey.current = key;
       syncUrlParams(val, selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
       executeSearch(val, selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
-    }, 400);
+    }, 1000);
+  };
+
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    const key = `${activeSource}:${query}:${selectedGenre}:${selectedStatus}:${selectedType}:${selectedOrder}:1`;
+    lastExecutedKey.current = key;
+    syncUrlParams(query, selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
+    executeSearch(query, selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
+  };
+
+  const handleClearQuery = () => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    setQuery('');
+    const key = `${activeSource}::${selectedGenre}:${selectedStatus}:${selectedType}:${selectedOrder}:1`;
+    lastExecutedKey.current = key;
+    syncUrlParams('', selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
+    if (!selectedGenre && !selectedStatus && !selectedType && !selectedOrder) {
+      setSearchResults([], '', activeSource);
+      setTotalPages(undefined);
+      setHasNextPage(false);
+    } else {
+      executeSearch('', selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
+    }
   };
 
   const handleGenreToggle = (slug: string) => {
     const nextGenre = selectedGenre === slug ? '' : slug;
     setSelectedGenre(nextGenre);
+    const key = `${activeSource}:${query}:${nextGenre}:${selectedStatus}:${selectedType}:${selectedOrder}:1`;
+    lastExecutedKey.current = key;
     syncUrlParams(query, nextGenre, selectedStatus, selectedType, selectedOrder, 1);
     executeSearch(query, nextGenre, selectedStatus, selectedType, selectedOrder, 1);
   };
 
   const handleResetFilters = () => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
     setQuery('');
     setSelectedGenre('');
     setSelectedStatus('');
     setSelectedType('');
     setSelectedOrder('');
     setCurrentPage(1);
+    const key = `${activeSource}::::::1`;
+    lastExecutedKey.current = key;
     syncUrlParams('', '', '', '', '', 1);
     executeSearch('', '', '', '', '', 1);
   };
 
   const handlePageChange = (newPage: number) => {
     setCurrentPage(newPage);
+    const key = `${activeSource}:${query}:${selectedGenre}:${selectedStatus}:${selectedType}:${selectedOrder}:${newPage}`;
+    lastExecutedKey.current = key;
     syncUrlParams(query, selectedGenre, selectedStatus, selectedType, selectedOrder, newPage);
     executeSearch(query, selectedGenre, selectedStatus, selectedType, selectedOrder, newPage);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -256,17 +330,32 @@ export function MobileSearchPage() {
 
   return (
     <div style={{ padding: '12px 14px 24px' }}>
-      {/* Barra de Búsqueda Móvil */}
+      {/* Barra de Búsqueda Móvil con Formulario y Submit Inmediato */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-        <div style={{
-          flex: 1, display: 'flex', alignItems: 'center', gap: 8,
-          background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
-          borderRadius: 'var(--radius-full)', padding: '8px 14px',
-        }}>
-          <Search size={16} color="var(--text-muted)" />
+        <form
+          onSubmit={handleSearchSubmit}
+          style={{
+            flex: 1, display: 'flex', alignItems: 'center', gap: 8,
+            background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
+            borderRadius: 'var(--radius-full)', padding: '8px 14px',
+          }}
+        >
+          <button
+            type="submit"
+            style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+            title="Buscar"
+          >
+            <Search size={16} color="var(--text-muted)" />
+          </button>
           <input
             type="text"
+            enterKeyHint="search"
+            autoComplete="off"
+            autoCorrect="off"
+            spellCheck={false}
             value={query}
+            onFocus={() => { isInputFocusedRef.current = true; }}
+            onBlur={() => { isInputFocusedRef.current = false; }}
             onChange={(e) => handleInput(e.target.value)}
             placeholder="Buscar en catálogo..."
             style={{
@@ -276,17 +365,15 @@ export function MobileSearchPage() {
           />
           {query && (
             <button
-              onClick={() => {
-                setQuery('');
-                syncUrlParams('', selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
-                executeSearch('', selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
-              }}
-              style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 0 }}
+              type="button"
+              onClick={handleClearQuery}
+              style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center' }}
+              title="Borrar texto"
             >
               <X size={16} />
             </button>
           )}
-        </div>
+        </form>
 
         {/* Botón Filtros Móvil */}
         <button
