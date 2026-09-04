@@ -81,13 +81,34 @@ async fn handle_connection(mut stream: TcpStream, _addr: SocketAddr) {
     let method = parts[0];
     let uri = parts[1];
 
+    let mut origin = String::from("http://localhost:1420");
+    let mut range_header: Option<&str> = None;
+
+    for line in request.lines().skip(1) {
+        if line.is_empty() {
+            break;
+        }
+        let line_lower = line.to_lowercase();
+        if line_lower.starts_with("origin:") {
+            let o = line["origin:".len()..].trim();
+            if o == "tauri://localhost" ||
+               o == "https://tauri.localhost" ||
+               o == "http://tauri.localhost" ||
+               o.starts_with("http://localhost:") {
+                origin = o.to_string();
+            }
+        } else if line_lower.starts_with("range:") {
+            range_header = Some(line["range:".len()..].trim());
+        }
+    }
+
     if method == "OPTIONS" {
-        let response = "HTTP/1.1 204 No Content\r\n\
-Access-Control-Allow-Origin: *\r\n\
+        let response = format!("HTTP/1.1 204 No Content\r\n\
+Access-Control-Allow-Origin: {}\r\n\
 Access-Control-Allow-Methods: GET, HEAD, OPTIONS\r\n\
 Access-Control-Allow-Headers: Range, Content-Type, Accept\r\n\
 Access-Control-Max-Age: 86400\r\n\
-\r\n";
+\r\n", origin);
         let _ = stream.write_all(response.as_bytes()).await;
         return;
     }
@@ -128,27 +149,18 @@ Access-Control-Max-Age: 86400\r\n\
     let total_size = metadata.len();
     let mime_type = get_mime_type(&file_path);
 
-    // Buscar cabecera Range: bytes=start-end
-    let mut range_header: Option<&str> = None;
-    for line in lines {
-        if line.to_lowercase().starts_with("range:") {
-            range_header = Some(line["range:".len()..].trim());
-            break;
-        }
-    }
-
     if let Some(range_str) = range_header {
         if let Some((start, end)) = parse_range(range_str, total_size) {
             let content_length = end - start + 1;
             let header = format!(
                 "HTTP/1.1 206 Partial Content\r\n\
-Access-Control-Allow-Origin: *\r\n\
+Access-Control-Allow-Origin: {}\r\n\
 Accept-Ranges: bytes\r\n\
 Content-Range: bytes {}-{}/{}\r\n\
 Content-Length: {}\r\n\
 Content-Type: {}\r\n\
 \r\n",
-                start, end, total_size, content_length, mime_type
+                origin, start, end, total_size, content_length, mime_type
             );
 
             if stream.write_all(header.as_bytes()).await.is_err() {
@@ -186,12 +198,12 @@ Content-Type: {}\r\n\
     // Respuesta completa 200 OK
     let header = format!(
         "HTTP/1.1 200 OK\r\n\
-Access-Control-Allow-Origin: *\r\n\
+Access-Control-Allow-Origin: {}\r\n\
 Accept-Ranges: bytes\r\n\
 Content-Length: {}\r\n\
 Content-Type: {}\r\n\
 \r\n",
-        total_size, mime_type
+        origin, total_size, mime_type
     );
 
     if stream.write_all(header.as_bytes()).await.is_err() {
