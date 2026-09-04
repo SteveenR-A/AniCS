@@ -643,32 +643,58 @@ pub fn remove_history_batch(ids: &[String]) -> AppResult<()> {
         return Ok(());
     }
     with_db(|conn| {
-        let now = chrono::Utc::now().to_rfc3339();
-        for id in ids {
-            let row_opt: Option<(String, String, i32, String)> = conn.query_row(
-                "SELECT anime_title, anime_url, episode_number, profile_id FROM watch_history WHERE id = ?1",
-                params![id],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
-            ).optional()?;
+        remove_history_batch_inner(conn, ids)
+    })
+}
 
-            if let Some((anime_title, anime_url, ep_num, profile_id)) = row_opt {
+pub(crate) fn remove_history_batch_inner(conn: &Connection, ids: &[String]) -> rusqlite::Result<()> {
+    if ids.is_empty() {
+        return Ok(());
+    }
+    let now = chrono::Utc::now().to_rfc3339();
+
+    for chunk in ids.chunks(900) {
+        let placeholders = vec!["?"; chunk.len()].join(", ");
+        let select_query = format!(
+            "SELECT anime_title, anime_url, episode_number, profile_id FROM watch_history WHERE id IN ({})",
+            placeholders
+        );
+
+        let mut tombstone_inserts = Vec::new();
+        {
+            let mut stmt = conn.prepare(&select_query)?;
+            let rows = stmt.query_map(params_from_iter(chunk), |r| {
+                let anime_title: String = r.get(0)?;
+                let anime_url: String = r.get(1)?;
+                let ep_num: i32 = r.get(2)?;
+                let profile_id: String = r.get(3)?;
+                Ok((anime_title, anime_url, ep_num, profile_id))
+            })?;
+
+            for row_res in rows.flatten() {
+                let (anime_title, anime_url, ep_num, profile_id) = row_res;
                 let norm = normalize_anime_title_key(&anime_title);
                 let canon = if norm.is_empty() { anime_url } else { norm };
                 let key = format!("{canon}::ep{ep_num}::{profile_id}");
                 let tombstone_id = uuid::Uuid::new_v4().to_string();
-                let _ = conn.execute(
-                    "INSERT INTO tombstones (id, entity_type, entity_id, profile_id, deleted_at) VALUES (?1, 'history_episode', ?2, ?3, ?4)",
-                    params![tombstone_id, key, profile_id, now],
-                );
+                tombstone_inserts.push((tombstone_id, key, profile_id));
             }
         }
 
-        let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-        let query = format!("DELETE FROM watch_history WHERE id IN ({})", placeholders);
-        let params_vec: Vec<&dyn rusqlite::ToSql> = ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
-        conn.execute(&query, params_vec.as_slice())?;
-        Ok(())
-    })
+        if !tombstone_inserts.is_empty() {
+            let mut tombstone_stmt = conn.prepare(
+                "INSERT INTO tombstones (id, entity_type, entity_id, profile_id, deleted_at) VALUES (?1, 'history_episode', ?2, ?3, ?4)",
+            )?;
+            for (t_id, key, pid) in tombstone_inserts {
+                let _ = tombstone_stmt.execute(params![t_id, key, pid, now]);
+            }
+        }
+
+        let delete_query = format!("DELETE FROM watch_history WHERE id IN ({})", placeholders);
+        conn.execute(&delete_query, params_from_iter(chunk))?;
+    }
+
+    Ok(())
 }
 
 pub fn remove_history_by_anime(anime_url: &str, profile_id: Option<&str>) -> AppResult<()> {
@@ -1511,4 +1537,48 @@ mod tests {
 
         let _ = fs::remove_dir_all(test_dir);
     }
+
+    #[test]
+    fn test_remove_history_batch_inner() {
+        let base_temp_dir = env::temp_dir();
+        let mut test_dir = base_temp_dir.clone();
+        test_dir.push(format!("anics_test_remove_batch_{}", get_unique_id()));
+        fs::create_dir_all(&test_dir).unwrap();
+
+        {
+            let conn = init_database_inner(&test_dir).unwrap();
+            let now = chrono::Utc::now().to_rfc3339();
+
+            conn.execute(
+                "INSERT INTO watch_history (id, anime_title, anime_url, episode_number, episode_url, watch_progress, watched_at, source, profile_id)
+                 VALUES ('h1', 'Frieren', 'https://anime.com/frieren', 1, 'https://anime.com/frieren/1', 0.9, ?1, 'jkanime', 'default')",
+                params![now],
+            ).unwrap();
+            conn.execute(
+                "INSERT INTO watch_history (id, anime_title, anime_url, episode_number, episode_url, watch_progress, watched_at, source, profile_id)
+                 VALUES ('h2', 'Frieren', 'https://anime.com/frieren', 2, 'https://anime.com/frieren/2', 0.8, ?1, 'jkanime', 'default')",
+                params![now],
+            ).unwrap();
+
+            let ids = vec!["h1".to_string(), "h2".to_string()];
+            remove_history_batch_inner(&conn, &ids).unwrap();
+
+            let remaining: u32 = conn.query_row(
+                "SELECT COUNT(*) FROM watch_history WHERE id IN ('h1', 'h2')",
+                [],
+                |row| row.get(0),
+            ).unwrap();
+            assert_eq!(remaining, 0, "All items should be removed from watch_history");
+
+            let tombstones_count: u32 = conn.query_row(
+                "SELECT COUNT(*) FROM tombstones WHERE entity_type = 'history_episode'",
+                [],
+                |row| row.get(0),
+            ).unwrap();
+            assert_eq!(tombstones_count, 2, "Two tombstones should be created");
+        }
+
+        let _ = fs::remove_dir_all(test_dir);
+    }
 }
+
