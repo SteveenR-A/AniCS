@@ -787,26 +787,60 @@ pub fn batch_add_favorites(favorites: &[AnimeResult], profile_id: Option<&str>) 
         let default_target = profile_id.unwrap_or(&active_pid);
         let now = chrono::Utc::now().to_rfc3339();
         let tx = conn.unchecked_transaction()?;
-        {
-            let mut stmt = tx.prepare_cached(
-                "INSERT INTO favorites (url, title, thumbnail_url, source, added_at, profile_id, status)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-                 ON CONFLICT(url, profile_id) DO UPDATE SET
+
+        // SQLite has a limit on parameters per query (often 999 or 32766).
+        // Since we have 7 params per insert, chunks of 100 uses 700 parameters.
+        let chunk_size = 100;
+
+        for chunk in favorites.chunks(chunk_size) {
+            let mut sql = String::with_capacity(300 + chunk.len() * 45);
+            sql.push_str("INSERT INTO favorites (url, title, thumbnail_url, source, added_at, profile_id, status) VALUES ");
+
+            let mut target_pids = Vec::with_capacity(chunk.len());
+            let mut status_vals = Vec::with_capacity(chunk.len());
+
+            for fav in chunk {
+                target_pids.push(fav.profile_id.as_deref().unwrap_or(default_target));
+                status_vals.push(fav.status.as_deref().unwrap_or("favorite"));
+            }
+
+            let mut first = true;
+            for i in 0..chunk.len() {
+                if !first {
+                    sql.push_str(", ");
+                }
+                first = false;
+
+                let base = i * 7;
+                use std::fmt::Write;
+                write!(sql, "(?{}, ?{}, ?{}, ?{}, ?{}, ?{}, ?{})",
+                    base + 1, base + 2, base + 3, base + 4, base + 5, base + 6, base + 7).unwrap();
+            }
+
+            sql.push_str(
+                " ON CONFLICT(url, profile_id) DO UPDATE SET
                     title = excluded.title,
                     thumbnail_url = excluded.thumbnail_url,
                     source = excluded.source,
                     status = excluded.status,
                     added_at = excluded.added_at"
-            )?;
+            );
 
-            for fav in favorites {
-                let pid = fav.profile_id.as_deref().unwrap_or(default_target);
-                let status_val = fav.status.as_deref().unwrap_or("favorite");
-                stmt.execute(params![
-                    fav.url, fav.title, fav.thumbnail_url, fav.source, now, pid, status_val
-                ])?;
+            let mut final_params: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(chunk.len() * 7);
+            for (i, fav) in chunk.iter().enumerate() {
+                final_params.push(&fav.url);
+                final_params.push(&fav.title);
+                final_params.push(&fav.thumbnail_url);
+                final_params.push(&fav.source);
+                final_params.push(&now);
+                final_params.push(&target_pids[i]);
+                final_params.push(&status_vals[i]);
             }
+
+            let mut stmt = tx.prepare_cached(&sql)?;
+            stmt.execute(rusqlite::params_from_iter(final_params))?;
         }
+
         tx.commit()?;
         Ok(())
     })
