@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Clock, Trash2, Film, Bookmark, BookmarkX, Inbox, History,
+  Clock, Trash2, Film, HeartOff, Inbox, History,
   ArrowDownCircle, Play, Folder, Search, X, CheckSquare, Square, RefreshCw,
   ChevronDown, ChevronUp, Check, Eye, EyeOff, Pause, RotateCcw, Loader2, AlertCircle, Heart, AlertTriangle,
   CheckCircle2, Cloud, CloudOff
@@ -181,7 +181,7 @@ export function MobileHistoryPage() {
   const handleRefresh = async () => {
     setIsManualRefreshing(true);
     try {
-      if (useSyncStore.getState().config.githubToken && !useSyncStore.getState().isSyncPausedByLocalClear) {
+      if (useSyncStore.getState().config.userId && !useSyncStore.getState().isSyncPausedByLocalClear) {
         await syncNow();
       }
       await loadHistory();
@@ -1016,7 +1016,7 @@ export function MobileFavoritesPage() {
   return (
     <div style={{ padding: '12px 14px 24px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-        <Bookmark size={20} color="var(--accent-primary)" />
+        <Heart size={20} color="var(--accent-primary)" fill="var(--accent-primary)" />
         <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0 }}>Favoritos ({favorites.length})</h2>
       </div>
 
@@ -1063,7 +1063,7 @@ export function MobileFavoritesPage() {
 
       {!isLoading && displayedFavorites.length === 0 && (
         <div style={{ textAlign: 'center', padding: '60px 16px', background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)' }}>
-          <BookmarkX size={40} color="var(--text-muted)" style={{ margin: '0 auto 8px', opacity: 0.5 }} />
+          <HeartOff size={40} color="var(--text-muted)" style={{ margin: '0 auto 8px', opacity: 0.5 }} />
           <p style={{ color: 'var(--text-secondary)', fontSize: 14, fontWeight: 600, margin: 0 }}>
             {statusFilter === 'all' ? 'No tienes favoritos' : `Sin animes en "${FAVORITE_STATUSES.find(s => s.key === statusFilter)?.label || statusFilter}"`}
           </p>
@@ -1085,11 +1085,11 @@ export function MobileFavoritesPage() {
               onClick={() => navigate(`/details/${encodeURIComponent(anime.url)}?source=${anime.source}`)}
               style={{
                 background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)',
-                overflow: 'hidden', cursor: 'pointer', border: '1px solid var(--border-subtle)',
+                cursor: 'pointer', border: '1px solid var(--border-subtle)',
                 position: 'relative', display: 'flex', flexDirection: 'column',
               }}
             >
-              <div style={{ position: 'relative', paddingBottom: '140%', background: 'var(--bg-elevated)' }}>
+              <div style={{ position: 'relative', paddingBottom: '140%', background: 'var(--bg-elevated)', borderRadius: 'var(--radius-lg) var(--radius-lg) 0 0', overflow: 'hidden' }}>
                 <CachedImage
                   src={anime.thumbnailUrl}
                   alt={anime.title}
@@ -1122,9 +1122,10 @@ export function MobileFavoritesPage() {
                     currentStatus={currentStatus}
                     onSelectStatus={(newSt) => handleStatusChange(anime.url, newSt)}
                     size="sm"
+                    dropDirection="up"
                   />
                   <span style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                    {anime.source}
+                    {anime.source === 'mundodonghua' ? 'Donghua' : 'Anime'}
                   </span>
                 </div>
               </div>

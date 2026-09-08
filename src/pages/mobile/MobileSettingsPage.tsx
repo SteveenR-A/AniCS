@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Globe, Download, RefreshCw, Check, Undo2,
   Sparkles, ShieldCheck, Palette, HardDrive, Trash2, Database, Activity, Folder, Cloud, User,
-  Film, Clock, Tv
+  Film, Clock, Tv, Crown, Plus, Layers, Lock, ArrowRightLeft
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -11,9 +11,13 @@ import { openUrl, openPath } from '@tauri-apps/plugin-opener';
 import { ChangelogModal } from '@/components/ChangelogModal';
 import { ProfileSelectorModal, getProfileAvatarIcon } from '@/components/ProfileSelectorModal';
 import { GistSyncModal } from '@/components/GistSyncModal';
+import { SubscriptionModal } from '@/components/SubscriptionModal';
 import { useThemeStore, THEMES } from '@/stores/useThemeStore';
 import { useProfileStore } from '@/stores/useProfileStore';
 import { useSyncStore } from '@/stores/useSyncStore';
+import { useSubscriptionStore, SUBSCRIPTION_PLANS } from '@/stores/useSubscriptionStore';
+import { useAccountStore } from '@/stores/useAccountStore';
+import { FEATURE_FLAGS } from '@/config/features';
 import { getProfileStats } from '@/services/profileService';
 import { getCacheStats, clearImageCache } from '@/services/downloadService';
 import { getDatabaseStats, optimizeDatabase, resetDatabase, clearHistory, type DatabaseStats } from '@/services/storageService';
@@ -39,9 +43,16 @@ interface GitHubRelease {
 
 export function MobileSettingsPage() {
   const { currentTheme, setTheme } = useThemeStore();
+  const { isVip, openModal: openVipModal, activePlan } = useSubscriptionStore();
+  const { quickLoginVipDemo, quickLoginFreeDemo, isSwitching: isAccountSwitching } = useAccountStore();
 
   const [jkanimeUrl, setJkanimeUrl] = useState(DEFAULT_JKANIME);
   const [donghuaUrl, setDonghuaUrl] = useState(DEFAULT_MUNDODONGHUA);
+  const [showAddSourceModal, setShowAddSourceModal] = useState(false);
+  const [customSources, setCustomSources] = useState<Array<{ name: string; url: string; type: string }>>([]);
+  const [newSourceName, setNewSourceName] = useState('');
+  const [newSourceUrl, setNewSourceUrl] = useState('');
+  const [newSourceType, setNewSourceType] = useState('Anime');
   const [downloadDir, setDownloadDir] = useState(DEFAULT_ANDROID_DOWNLOAD_DIR);
 
   const [maxConcurrent, setMaxConcurrent] = useState('3');
@@ -348,7 +359,7 @@ export function MobileSettingsPage() {
               </button>
             </div>
 
-            {/* GitHub Gist Sync Status */}
+            {/* Cloud Sync Status */}
             <div style={{
               background: 'rgba(255, 255, 255, 0.03)',
               borderRadius: 'var(--radius-md)',
@@ -364,21 +375,35 @@ export function MobileSettingsPage() {
                     width: 36,
                     height: 36,
                     borderRadius: '10px',
-                    background: syncConfig.githubToken ? 'rgba(16, 185, 129, 0.15)' : 'rgba(245, 158, 11, 0.15)',
+                    background: syncConfig.userId ? 'rgba(16, 185, 129, 0.15)' : 'rgba(59, 130, 246, 0.15)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    color: syncConfig.githubToken ? '#10b981' : '#f59e0b',
+                    color: syncConfig.userId ? '#10b981' : 'var(--accent-primary)',
                   }}
                 >
                   <Cloud size={18} />
                 </div>
                 <div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: 'white' }}>
-                    GitHub Gist Sync
+                  <div style={{ fontSize: 13, fontWeight: 700, color: 'white', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span>Sincronización en la Nube</span>
+                    {FEATURE_FLAGS.SHOW_SUBSCRIPTION && (
+                      <span style={{
+                        fontSize: 9, fontWeight: 800,
+                        background: isVip ? 'rgba(245, 158, 11, 0.2)' : 'rgba(245, 158, 11, 0.15)',
+                        color: '#fbbf24', padding: '1px 5px', borderRadius: '4px',
+                        border: '1px solid rgba(245, 158, 11, 0.3)',
+                        display: 'inline-flex', alignItems: 'center', gap: 2,
+                      }}>
+                        <Crown size={9} />
+                        VIP
+                      </span>
+                    )}
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                    {syncConfig.githubToken ? 'Vinculado' : 'Sin vincular'}
+                    {syncConfig.userId
+                      ? (syncConfig.userEmail || (syncConfig.lastSyncAt ? `Sync: ${new Date(syncConfig.lastSyncAt).toLocaleDateString()}` : 'Conectado'))
+                      : 'Historial y favoritos multi-dispositivo'}
                   </div>
                 </div>
               </div>
@@ -397,9 +422,265 @@ export function MobileSettingsPage() {
                   cursor: 'pointer',
                 }}
               >
-                {syncConfig.githubToken ? 'Gestionar' : 'Vincular'}
+                {syncConfig.userId ? 'Gestionar' : 'Conectar'}
               </button>
             </div>
+
+            {/* Barra Móvil de Demostración Rápida Multicuentas */}
+            {FEATURE_FLAGS.SHOW_SUBSCRIPTION && (
+              <div
+                style={{
+                  background: 'rgba(255, 255, 255, 0.03)',
+                  borderRadius: 'var(--radius-md)',
+                  border: '1px dashed var(--border-color)',
+                  padding: '12px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 10,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div
+                    style={{
+                      width: 32,
+                      height: 32,
+                      borderRadius: 8,
+                      background: 'rgba(99, 102, 241, 0.15)',
+                      border: '1px solid rgba(99, 102, 241, 0.3)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: 'var(--accent-primary)',
+                      flexShrink: 0,
+                    }}
+                  >
+                    <ArrowRightLeft size={16} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: 'white', display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span>Multicuentas en Vivo</span>
+                      <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 4, background: 'rgba(255,255,255,0.08)', color: 'var(--text-secondary)' }}>
+                        QA / Demo
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                      Alterna al instante para comprobar el bloqueo/desbloqueo de funciones VIP.
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  <button
+                    type="button"
+                    disabled={isAccountSwitching || (syncConfig.userEmail === 'vip@anics.app' && isVip)}
+                    onClick={() => quickLoginVipDemo()}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 6,
+                      padding: '8px 10px',
+                      borderRadius: 'var(--radius-md)',
+                      fontSize: 11,
+                      fontWeight: 700,
+                      cursor: (isAccountSwitching || (syncConfig.userEmail === 'vip@anics.app' && isVip)) ? 'default' : 'pointer',
+                      background: (syncConfig.userEmail === 'vip@anics.app' && isVip)
+                        ? 'rgba(245, 158, 11, 0.25)'
+                        : 'linear-gradient(135deg, rgba(245, 158, 11, 0.15), rgba(217, 119, 6, 0.1))',
+                      border: (syncConfig.userEmail === 'vip@anics.app' && isVip)
+                        ? '1px solid #f59e0b'
+                        : '1px solid rgba(245, 158, 11, 0.3)',
+                      color: '#fbbf24',
+                      opacity: (syncConfig.userEmail === 'vip@anics.app' && isVip) ? 0.9 : 1,
+                    }}
+                  >
+                    <Crown size={13} />
+                    {syncConfig.userEmail === 'vip@anics.app' && isVip ? 'VIP (Activa)' : 'Probar VIP'}
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={isAccountSwitching || (syncConfig.userEmail === 'gratis@anics.app' && !isVip)}
+                    onClick={() => quickLoginFreeDemo()}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 6,
+                      padding: '8px 10px',
+                      borderRadius: 'var(--radius-md)',
+                      fontSize: 11,
+                      fontWeight: 700,
+                      cursor: (isAccountSwitching || (syncConfig.userEmail === 'gratis@anics.app' && !isVip)) ? 'default' : 'pointer',
+                      background: (syncConfig.userEmail === 'gratis@anics.app' && !isVip)
+                        ? 'rgba(100, 116, 139, 0.25)'
+                        : 'rgba(255, 255, 255, 0.05)',
+                      border: (syncConfig.userEmail === 'gratis@anics.app' && !isVip)
+                        ? '1px solid #94a3b8'
+                        : '1px solid var(--border-color)',
+                      color: 'var(--text-secondary)',
+                      opacity: (syncConfig.userEmail === 'gratis@anics.app' && !isVip) ? 0.9 : 1,
+                    }}
+                  >
+                    <User size={13} />
+                    {syncConfig.userEmail === 'gratis@anics.app' && !isVip ? 'Gratis (Activa)' : 'Probar Gratis'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Suscripción VIP Móvil (Tarjetas de Planes / Membresía) */}
+            {FEATURE_FLAGS.SHOW_SUBSCRIPTION && (
+              <div style={{ marginTop: 4 }}>
+                {isVip ? (
+                  /* Tarjeta VIP Activa Móvil */
+                  <div
+                    style={{
+                      background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.18), rgba(217, 119, 6, 0.08))',
+                      borderRadius: 'var(--radius-md)',
+                      border: '1px solid rgba(245, 158, 11, 0.35)',
+                      padding: '12px 14px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 10,
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <div
+                        style={{
+                          width: 36,
+                          height: 36,
+                          borderRadius: 10,
+                          background: 'linear-gradient(135deg, #f59e0b, #d97706)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: 'white',
+                          flexShrink: 0,
+                        }}
+                      >
+                        <Crown size={18} />
+                      </div>
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ fontSize: 13, fontWeight: 800, color: 'white' }}>
+                            Yumework VIP Pass
+                          </span>
+                          <span
+                            style={{
+                              fontSize: 9,
+                              fontWeight: 800,
+                              padding: '1px 6px',
+                              borderRadius: '9999px',
+                              background: '#f59e0b',
+                              color: '#000',
+                            }}
+                          >
+                            ACTIVO
+                          </span>
+                        </div>
+                        <div style={{ fontSize: 11, color: '#fbbf24' }}>
+                          Plan {activePlan === 'annual' ? 'Anual ($35/año)' : 'Mensual ($3.50/mes)'}
+                        </div>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={openVipModal}
+                      style={{
+                        background: 'rgba(245, 158, 11, 0.2)',
+                        border: '1px solid #f59e0b',
+                        borderRadius: 'var(--radius-md)',
+                        padding: '6px 12px',
+                        color: '#fbbf24',
+                        fontSize: 11,
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      Gestionar
+                    </button>
+                  </div>
+                ) : (
+                  /* Tarjetas de Planes de Pago Móvil */
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <Crown size={14} color="#f59e0b" />
+                      <span style={{ fontSize: 12, fontWeight: 800, color: 'white' }}>
+                        Planes de Suscripción Yumework VIP
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8 }}>
+                      {SUBSCRIPTION_PLANS.map((plan) => {
+                        const isPopular = plan.popular;
+                        return (
+                          <div
+                            key={plan.id}
+                            style={{
+                              background: isPopular
+                                ? 'linear-gradient(135deg, rgba(245, 158, 11, 0.12), rgba(17, 19, 24, 0.95))'
+                                : 'var(--bg-surface-2, rgba(255, 255, 255, 0.03))',
+                              border: isPopular ? '1.5px solid #f59e0b' : '1px solid var(--border-subtle)',
+                              borderRadius: 'var(--radius-md)',
+                              padding: '10px 12px',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              justifyContent: 'space-between',
+                              gap: 8,
+                              position: 'relative',
+                            }}
+                          >
+                            <div>
+                              <div style={{ fontSize: 12, fontWeight: 800, color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                <span>{plan.id === 'annual' ? 'Anual' : 'Mensual'}</span>
+                                {isPopular && (
+                                  <span style={{ fontSize: 8, fontWeight: 800, background: '#f59e0b', color: '#000', padding: '1px 4px', borderRadius: 4 }}>
+                                    -17%
+                                  </span>
+                                )}
+                              </div>
+                              <div style={{ display: 'flex', alignItems: 'baseline', gap: 2, margin: '4px 0 6px' }}>
+                                <span style={{ fontSize: 18, fontWeight: 900, color: isPopular ? '#fbbf24' : 'white' }}>
+                                  {plan.price}
+                                </span>
+                                <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                                  {plan.period}
+                                </span>
+                              </div>
+                              <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.25 }}>
+                                {plan.id === 'annual' ? '2 meses gratis + Insignia Fundador' : 'Acceso ilimitado a descargas y streaming'}
+                              </div>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={openVipModal}
+                              style={{
+                                width: '100%',
+                                padding: '6px 8px',
+                                borderRadius: 'var(--radius-sm)',
+                                border: 'none',
+                                background: isPopular ? 'linear-gradient(135deg, #f59e0b, #d97706)' : 'rgba(245, 158, 11, 0.15)',
+                                color: isPopular ? '#000' : '#fbbf24',
+                                fontSize: 11,
+                                fontWeight: 800,
+                                cursor: 'pointer',
+                              }}
+                            >
+                              Suscribirme
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
@@ -416,23 +697,40 @@ export function MobileSettingsPage() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
             {THEMES.map((theme) => {
               const isSelected = currentTheme === theme.id;
+              const isVipLocked = Boolean(theme.isVipOnly && FEATURE_FLAGS.SHOW_SUBSCRIPTION && !isVip);
               return (
                 <div
                   key={theme.id}
-                  onClick={() => setTheme(theme.id)}
+                  onClick={() => {
+                    if (isVipLocked) {
+                      openVipModal();
+                    } else {
+                      setTheme(theme.id);
+                    }
+                  }}
                   style={{
                     background: theme.surfaceColor,
-                    border: isSelected ? `2px solid ${theme.primaryColor}` : '1px solid var(--border-subtle)',
+                    border: isSelected
+                      ? `2px solid ${theme.primaryColor}`
+                      : isVipLocked
+                      ? '1px dashed rgba(245, 158, 11, 0.4)'
+                      : '1px solid var(--border-subtle)',
                     borderRadius: 'var(--radius-md)', padding: '10px 12px',
                     cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 6,
                     boxShadow: isSelected ? `0 0 12px ${theme.primaryColor}30` : 'none',
                   }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4 }}>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: theme.isDark ? '#f8fafc' : '#0f172a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {theme.name}
-                    </span>
-                    {isSelected && <Check size={12} color={theme.primaryColor} style={{ flexShrink: 0 }} />}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, overflow: 'hidden' }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: theme.isDark ? '#f8fafc' : '#0f172a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {theme.name}
+                      </span>
+                    </div>
+                    {isSelected ? (
+                      <Check size={12} color={theme.primaryColor} style={{ flexShrink: 0 }} />
+                    ) : isVipLocked ? (
+                      <Lock size={11} color="#fbbf24" style={{ flexShrink: 0 }} />
+                    ) : null}
                   </div>
                   <div style={{ display: 'flex', gap: 4 }}>
                     <div style={{ width: 14, height: 14, borderRadius: '50%', background: theme.baseColor, border: '1px solid rgba(255,255,255,0.15)' }} />
@@ -440,20 +738,38 @@ export function MobileSettingsPage() {
                     <div style={{ width: 14, height: 14, borderRadius: '50%', background: theme.primaryColor }} />
                     <div style={{ width: 14, height: 14, borderRadius: '50%', background: theme.secondaryColor }} />
                   </div>
-                  {theme.tag && (
-                    <span style={{
-                      fontSize: 9,
-                      fontWeight: 700,
-                      color: theme.primaryColor,
-                      background: `${theme.primaryColor}18`,
-                      borderRadius: '8px',
-                      padding: '1px 6px',
-                      alignSelf: 'flex-start',
-                      whiteSpace: 'nowrap',
-                    }}>
-                      {theme.tag}
-                    </span>
-                  )}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+                    {theme.tag && (
+                      <span style={{
+                        fontSize: 9,
+                        fontWeight: 700,
+                        color: theme.primaryColor,
+                        background: `${theme.primaryColor}18`,
+                        borderRadius: '8px',
+                        padding: '1px 6px',
+                        alignSelf: 'flex-start',
+                        whiteSpace: 'nowrap',
+                      }}>
+                        {theme.tag}
+                      </span>
+                    )}
+                    {theme.isVipOnly && FEATURE_FLAGS.SHOW_SUBSCRIPTION && (
+                      <span style={{
+                        fontSize: 8,
+                        fontWeight: 800,
+                        background: isVipLocked ? 'rgba(245, 158, 11, 0.18)' : 'linear-gradient(135deg, #f59e0b, #d97706)',
+                        color: isVipLocked ? '#fbbf24' : '#000',
+                        borderRadius: '6px',
+                        padding: '1px 5px',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 2,
+                      }}>
+                        <Crown size={8} />
+                        VIP
+                      </span>
+                    )}
+                  </div>
                 </div>
               );
             })}
@@ -523,64 +839,110 @@ export function MobileSettingsPage() {
           </div>
         </div>
 
-        {/* Fuentes Online */}
+        {/* Fuentes y Catálogos de Contenido */}
         <div style={{
           background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)',
           border: '1px solid var(--border-subtle)', padding: 14,
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-            <Globe size={16} color="var(--accent-primary)" />
-            <h3 style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>Fuentes Online</h3>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Globe size={16} color="var(--accent-primary)" />
+              <h3 style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>Fuentes y Catálogos</h3>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowAddSourceModal(true)}
+              style={{
+                background: 'rgba(99, 102, 241, 0.15)',
+                border: '1px solid rgba(99, 102, 241, 0.3)',
+                borderRadius: 'var(--radius-full)',
+                padding: '3px 10px',
+                color: 'var(--accent-primary)',
+                fontSize: 10,
+                fontWeight: 700,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+                cursor: 'pointer',
+              }}
+            >
+              <Plus size={12} /> Agregar Fuente
+            </button>
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)' }}>JKAnime URL</span>
-                {jkanimeUrl !== DEFAULT_JKANIME && (
-                  <button
-                    onClick={() => setJkanimeUrl(DEFAULT_JKANIME)}
-                    style={{ background: 'none', border: 'none', color: 'var(--accent-primary)', fontSize: 10, fontWeight: 600, cursor: 'pointer' }}
-                  >
-                    Restablecer
-                  </button>
-                )}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {/* Catálogo Anime */}
+            <div style={{
+              padding: '10px 12px',
+              borderRadius: 'var(--radius-md)',
+              background: 'var(--bg-elevated)',
+              border: '1px solid var(--border-moderate)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Layers size={16} color="var(--accent-primary)" />
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: 'white' }}>Catálogo Anime (Principal)</div>
+                  <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>Emisiones y temporadas completas</div>
+                </div>
               </div>
-              <input
-                type="text"
-                value={jkanimeUrl}
-                onChange={(e) => setJkanimeUrl(e.target.value)}
-                style={{
-                  width: '100%', padding: '7px 10px', borderRadius: 'var(--radius-sm)',
-                  background: 'var(--bg-elevated)', border: '1px solid var(--border-moderate)',
-                  color: 'var(--text-primary)', fontSize: 11, outline: 'none',
-                }}
-              />
+              <span style={{ fontSize: 9, fontWeight: 700, color: '#34d399', background: 'rgba(16, 185, 129, 0.15)', padding: '2px 6px', borderRadius: '4px' }}>
+                Conectado
+              </span>
             </div>
 
-            <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)' }}>MundoDonghua URL</span>
-                {donghuaUrl !== DEFAULT_MUNDODONGHUA && (
-                  <button
-                    onClick={() => setDonghuaUrl(DEFAULT_MUNDODONGHUA)}
-                    style={{ background: 'none', border: 'none', color: 'var(--accent-primary)', fontSize: 10, fontWeight: 600, cursor: 'pointer' }}
-                  >
-                    Restablecer
-                  </button>
-                )}
+            {/* Catálogo Donghua */}
+            <div style={{
+              padding: '10px 12px',
+              borderRadius: 'var(--radius-md)',
+              background: 'var(--bg-elevated)',
+              border: '1px solid var(--border-moderate)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Layers size={16} color="#ec4899" />
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: 'white' }}>Catálogo Donghua (Secundario)</div>
+                  <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>Animación y series asiáticas</div>
+                </div>
               </div>
-              <input
-                type="text"
-                value={donghuaUrl}
-                onChange={(e) => setDonghuaUrl(e.target.value)}
-                style={{
-                  width: '100%', padding: '7px 10px', borderRadius: 'var(--radius-sm)',
-                  background: 'var(--bg-elevated)', border: '1px solid var(--border-moderate)',
-                  color: 'var(--text-primary)', fontSize: 11, outline: 'none',
-                }}
-              />
+              <span style={{ fontSize: 9, fontWeight: 700, color: '#34d399', background: 'rgba(16, 185, 129, 0.15)', padding: '2px 6px', borderRadius: '4px' }}>
+                Conectado
+              </span>
             </div>
+
+            {/* Fuentes añadidas */}
+            {customSources.map((src, idx) => (
+              <div key={idx} style={{
+                padding: '10px 12px',
+                borderRadius: 'var(--radius-md)',
+                background: 'var(--bg-elevated)',
+                border: '1px solid var(--border-moderate)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Globe size={16} color="var(--accent-primary)" />
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: 'white' }}>{src.name} ({src.type})</div>
+                    <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>Fuente adicional activa</div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setCustomSources(customSources.filter((_, i) => i !== idx))}
+                  style={{ background: 'none', border: 'none', color: '#f87171', fontSize: 11, cursor: 'pointer' }}
+                >
+                  Eliminar
+                </button>
+              </div>
+            ))}
           </div>
         </div>
 
@@ -747,7 +1109,7 @@ export function MobileSettingsPage() {
                   setIsResettingDb(true);
                   try {
                     await resetDatabase();
-                    await useSyncStore.getState().clearToken();
+                    await useSyncStore.getState().logout();
                     clearMemoryCache();
                     await loadDb();
                     setSaveStatus('Base de datos restablecida');
@@ -995,6 +1357,166 @@ export function MobileSettingsPage() {
       <ChangelogModal isOpen={showChangelog} onClose={() => setShowChangelog(false)} />
       <ProfileSelectorModal isOpen={isProfileModalOpen} onClose={() => setIsProfileModalOpen(false)} />
       <GistSyncModal isOpen={isSyncModalOpen} onClose={() => setIsSyncModalOpen(false)} />
+      <SubscriptionModal />
+
+      {/* Modal para agregar fuente o catálogo personalizado en móvil */}
+      <AnimatePresence>
+        {showAddSourceModal && (
+          <div
+            style={{
+              position: 'fixed',
+              inset: 0,
+              zIndex: 9999,
+              background: 'rgba(0,0,0,0.85)',
+              backdropFilter: 'blur(8px)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: 16,
+            }}
+            onClick={() => setShowAddSourceModal(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                width: '100%',
+                maxWidth: '400px',
+                background: 'var(--bg-surface, #111318)',
+                border: '1px solid var(--border-moderate)',
+                borderRadius: '16px',
+                padding: '20px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '14px',
+              }}
+            >
+              <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#fff' }}>
+                Agregar Catálogo o Fuente
+              </h3>
+              <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-muted)' }}>
+                Configura un catálogo de contenido personalizado para explorar animes adicionales en AniCS Móvil.
+              </p>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '4px' }}>
+                  Nombre del Catálogo
+                </label>
+                <input
+                  type="text"
+                  placeholder="ej. Catálogo Alternativo"
+                  value={newSourceName}
+                  onChange={(e) => setNewSourceName(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    borderRadius: '8px',
+                    background: 'var(--bg-elevated)',
+                    border: '1px solid var(--border-moderate)',
+                    color: '#fff',
+                    fontSize: '12px',
+                    outline: 'none',
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '4px' }}>
+                  Tipo de Contenido
+                </label>
+                <select
+                  value={newSourceType}
+                  onChange={(e) => setNewSourceType(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    borderRadius: '8px',
+                    background: 'var(--bg-elevated)',
+                    border: '1px solid var(--border-moderate)',
+                    color: '#fff',
+                    fontSize: '12px',
+                    outline: 'none',
+                    boxSizing: 'border-box',
+                  }}
+                >
+                  <option value="Anime">Anime</option>
+                  <option value="Donghua">Donghua</option>
+                  <option value="Series">Series y Películas</option>
+                </select>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '4px' }}>
+                  URL o Endpoint del Catálogo
+                </label>
+                <input
+                  type="text"
+                  placeholder="https://catalogo.ejemplo.com"
+                  value={newSourceUrl}
+                  onChange={(e) => setNewSourceUrl(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    borderRadius: '8px',
+                    background: 'var(--bg-elevated)',
+                    border: '1px solid var(--border-moderate)',
+                    color: '#fff',
+                    fontSize: '12px',
+                    outline: 'none',
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '6px' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowAddSourceModal(false)}
+                  style={{
+                    padding: '6px 14px',
+                    borderRadius: '8px',
+                    background: 'transparent',
+                    border: '1px solid var(--border-moderate)',
+                    color: 'var(--text-secondary)',
+                    cursor: 'pointer',
+                    fontSize: '12px',
+                  }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (newSourceName.trim() && newSourceUrl.trim()) {
+                      setCustomSources([...customSources, { name: newSourceName.trim(), url: newSourceUrl.trim(), type: newSourceType }]);
+                      setNewSourceName('');
+                      setNewSourceUrl('');
+                      setShowAddSourceModal(false);
+                      setSaveStatus('Catálogo agregado');
+                      setTimeout(() => setSaveStatus(null), 3000);
+                    }
+                  }}
+                  style={{
+                    padding: '6px 14px',
+                    borderRadius: '8px',
+                    background: 'var(--accent-primary)',
+                    border: 'none',
+                    color: '#fff',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    fontSize: '12px',
+                  }}
+                >
+                  Guardar
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -121,6 +121,7 @@ pub fn run() {
             commands::get_default_download_dir,
             commands::set_download_dir,
             commands::get_local_media_url,
+            commands::get_local_server_port,
             commands::get_storage_space_info,
             commands::cache_image,
             commands::get_cache_stats,

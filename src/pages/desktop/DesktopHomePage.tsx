@@ -192,7 +192,7 @@ export function DesktopHomePage() {
                 AniCS
               </span>
               <span style={{ fontSize: 20, fontWeight: 700, color: 'var(--text-secondary)', marginLeft: 10 }}>
-                · {isDonghua ? 'MundoDonghua' : 'JKAnime'}
+                · {isDonghua ? 'Donghua' : 'Anime'}
               </span>
             </h1>
             <p style={{ color: 'var(--text-muted)', fontSize: 13, margin: '3px 0 0' }}>

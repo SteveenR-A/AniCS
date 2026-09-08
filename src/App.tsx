@@ -12,6 +12,7 @@ import { SettingsPage } from '@/pages/SettingsPage';
 import { ChangelogModal } from '@/components/ChangelogModal';
 import { UpdateAnnouncementModal } from '@/components/UpdateAnnouncementModal';
 import { PinDialogModal } from '@/components/PinDialogModal';
+import { SubscriptionModal } from '@/components/SubscriptionModal';
 import { useAnimeStore } from '@/stores/useAnimeStore';
 import { useDownloadStore } from '@/stores/useDownloadStore';
 import { useThemeStore } from '@/stores/useThemeStore';
@@ -136,6 +137,7 @@ function AppContent() {
         onUpdate={handleGoToUpdate}
       />
       <PinDialogModal />
+      <SubscriptionModal />
     </>
   );
 }

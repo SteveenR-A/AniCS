@@ -114,7 +114,7 @@ export function DesktopSchedulePage() {
               {isDonghua ? 'Donghuas en Emisión' : 'Horario de Emisión Semanal'}
             </h1>
             <p style={{ color: 'var(--text-muted)', fontSize: 13, margin: '3px 0 0' }}>
-              {totalAnimes} producciones en emisión oficial · {isDonghua ? 'MundoDonghua' : 'JKAnime'}
+              {totalAnimes} producciones en emisión oficial · {isDonghua ? 'Donghua' : 'Anime'}
             </p>
           </div>
         </div>

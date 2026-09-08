@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 import {
   mergeHistoryEntries,
   mergeHistoryWithTombstones,
@@ -15,15 +16,24 @@ import {
   getCalibratedTimestamp,
   makeHistoryCanonicalKey,
   MAX_CLOUD_HISTORY_ENTRIES,
-  fetchGistData,
-  findExistingGist,
-  createOrUpdateGist,
-  GistNotFoundError,
+  fetchFirestoreData,
+  saveFirestoreData,
   NeedPinForDecryptionError,
-  GIST_APP_NAME,
   isLocalFileHistory,
 } from '../syncService';
-import type { HistoryEntry, AnimeResult, UserProfile, GistFilesPayload, HistoryTombstone, GistSyncConfig } from '@/types';
+import type { HistoryEntry, AnimeResult, UserProfile, CloudSyncPayload, HistoryTombstone, CloudSyncConfig } from '@/types';
+
+vi.mock('@/services/firebase/firebaseConfig', () => ({
+  firestoreDb: {},
+  firebaseAuth: {},
+  firebaseApp: {},
+}));
+
+vi.mock('firebase/firestore', () => ({
+  doc: vi.fn().mockReturnValue('mock_doc_ref'),
+  getDoc: vi.fn(),
+  setDoc: vi.fn(),
+}));
 
 describe('syncService - Merge Engine & Migrations', () => {
   it('preserva múltiples episodios vistos de un mismo anime', () => {
@@ -480,25 +490,21 @@ describe('syncService - Deterministic Hashes & Change Detection', () => {
   });
 });
 
-describe('syncService - GitHub Gist Cloud Client & Multi-device Download', () => {
-  const originalFetch = globalThis.fetch;
-
+describe('syncService - Cloud Firestore Client & Multi-device Sync', () => {
   afterEach(() => {
-    globalThis.fetch = originalFetch;
     vi.restoreAllMocks();
   });
 
-  const mockConfig: GistSyncConfig = {
-    githubToken: 'ghp_mock_token_12345',
-    gistId: 'mock_gist_id_abc',
-    lastEtag: 'W/"etag-123"',
+  const mockConfig: CloudSyncConfig = {
+    userId: 'user_12345',
+    userEmail: 'user@example.com',
+    userDisplayName: 'Test User',
     autoSync: true,
     encryptionEnabled: false,
     lastSyncAt: '',
-    gistUrl: 'https://gist.github.com/mock_gist_id_abc',
   };
 
-  it('descarga correctamente el payload del Gist cuando los archivos están completos', async () => {
+  it('descarga correctamente el payload de Firestore cuando el documento existe', async () => {
     const mockSyncMeta = {
       schemaVersion: 2,
       appVersion: '0.2.2',
@@ -526,32 +532,22 @@ describe('syncService - GitHub Gist Cloud Client & Multi-device Download', () =>
     const mockFavorites = [{ title: 'Bleach', url: 'https://jkanime.net/bleach/', thumbnailUrl: '', source: 'jkanime', profileId: 'default' }];
     const mockSettings = { theme: 'dark' };
 
-    const mockGistResponse = {
-      id: 'mock_gist_id_abc',
-      description: GIST_APP_NAME,
-      files: {
-        'sync_meta.json': { content: JSON.stringify(mockSyncMeta), truncated: false },
-        'profiles.json': { content: JSON.stringify(mockProfiles), truncated: false },
-        'history.json': { content: JSON.stringify(mockHistory), truncated: false },
-        'favorites.json': { content: JSON.stringify(mockFavorites), truncated: false },
-        'settings.json': { content: JSON.stringify(mockSettings), truncated: false },
-      },
-    };
-
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      headers: new Headers({
-        ETag: 'W/"new-etag-456"',
-        date: 'Wed, 02 Sep 2026 12:05:00 GMT',
+    vi.mocked(getDoc).mockResolvedValueOnce({
+      exists: () => true,
+      data: () => ({
+        syncMeta: JSON.stringify(mockSyncMeta),
+        profiles: JSON.stringify(mockProfiles),
+        history: JSON.stringify(mockHistory),
+        favorites: JSON.stringify(mockFavorites),
+        settings: JSON.stringify(mockSettings),
+        settingsDesktop: JSON.stringify(mockSettings),
+        settingsMobile: '{}',
       }),
-      json: async () => mockGistResponse,
-    });
+    } as any);
 
-    const result = await fetchGistData(mockConfig);
+    const result = await fetchFirestoreData('user_12345', mockConfig);
 
     expect(result.notModified).toBe(false);
-    expect(result.etag).toBe('W/"new-etag-456"');
     expect(result.payload).not.toBeNull();
     expect(result.payload?.history.length).toBe(1);
     expect(result.payload?.history[0].animeTitle).toBe('Bleach');
@@ -559,126 +555,18 @@ describe('syncService - GitHub Gist Cloud Client & Multi-device Download', () =>
     expect(result.payload?.profiles.length).toBe(1);
   });
 
-  it('descarga correctamente archivos truncados desde raw_url sin cabecera Authorization (evita bloqueo CORS)', async () => {
-    const mockSyncMeta = {
-      schemaVersion: 2,
-      appVersion: '0.2.2',
-      lastModifiedAt: '2026-09-02T12:00:00Z',
-      fileHashes: {},
-      deletedFavorites: [],
-      deletedProfiles: [],
-      deletedHistory: [],
-    };
+  it('retorna null cuando el documento de Firestore no existe aún', async () => {
+    vi.mocked(getDoc).mockResolvedValueOnce({
+      exists: () => false,
+      data: () => null,
+    } as any);
 
-    const mockHistoryTruncated = Array.from({ length: 50 }, (_, i) => ({
-      id: `anime-${i}-1-default`,
-      animeTitle: `Anime ${i}`,
-      animeUrl: `https://jkanime.net/anime-${i}/`,
-      thumbnailUrl: '',
-      episodeNumber: 1,
-      episodeUrl: `https://jkanime.net/anime-${i}/1/`,
-      watchProgress: 0.5,
-      watchedAt: '2026-09-02T10:00:00Z',
-      source: 'jkanime',
-      profileId: 'default',
-    }));
-
-    const mockGistResponse = {
-      id: 'mock_gist_id_abc',
-      files: {
-        'sync_meta.json': { content: JSON.stringify(mockSyncMeta), truncated: false },
-        'profiles.json': { content: '[]', truncated: false },
-        'history.json': {
-          content: '',
-          truncated: true,
-          raw_url: 'https://gist.githubusercontent.com/user/raw/history.json',
-        },
-        'favorites.json': { content: '[]', truncated: false },
-        'settings.json': { content: '{}', truncated: false },
-      },
-    };
-
-    const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
-      if (url.includes('api.github.com')) {
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          headers: new Headers({ ETag: 'W/"raw-etag"' }),
-          json: async () => mockGistResponse,
-        });
-      }
-      if (url.includes('gist.githubusercontent.com')) {
-        // Verificar que NO se envíe Authorization a gist.githubusercontent.com para no provocar error de CORS
-        const headers = init?.headers as Record<string, string>;
-        expect(headers?.['Authorization']).toBeUndefined();
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          text: async () => JSON.stringify(mockHistoryTruncated),
-        });
-      }
-      return Promise.reject(new Error('Unknown URL'));
-    });
-
-    globalThis.fetch = fetchMock;
-
-    const result = await fetchGistData(mockConfig);
-
-    expect(result.payload?.history.length).toBe(50);
-    expect(result.payload?.history[0].animeTitle).toBe('Anime 0');
-    expect(fetchMock).toHaveBeenCalledWith('https://gist.githubusercontent.com/user/raw/history.json', expect.any(Object));
-  });
-
-  it('retorna notModified cuando GitHub responde con HTTP 304', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: false,
-      status: 304,
-      headers: new Headers(),
-    });
-
-    const result = await fetchGistData(mockConfig);
-    expect(result.notModified).toBe(true);
+    const result = await fetchFirestoreData('user_12345', mockConfig);
     expect(result.payload).toBeNull();
   });
 
-  it('arroja GistNotFoundError ante error 404', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: false,
-      status: 404,
-      headers: new Headers(),
-    });
-
-    await expect(fetchGistData(mockConfig)).rejects.toThrow(GistNotFoundError);
-  });
-
-  it('encuentra el Gist existente mediante findExistingGist en la misma cuenta', async () => {
-    const mockGistsList = [
-      {
-        id: 'unrelated_123',
-        description: 'Random notes',
-        files: { 'notes.txt': {} },
-      },
-      {
-        id: 'target_anics_gist',
-        description: GIST_APP_NAME,
-        files: { 'sync_meta.json': { filename: 'sync_meta.json' } },
-      },
-    ];
-
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      headers: new Headers(),
-      json: async () => mockGistsList,
-    });
-
-    const found = await findExistingGist('mock_token');
-    expect(found).not.toBeNull();
-    expect(found?.gistId).toBe('target_anics_gist');
-  });
-
   it('fusiona sincronización correctamente cuando dos dispositivos en la misma cuenta tienen episodios distintos', () => {
-    const pcData: GistFilesPayload = {
+    const pcData: CloudSyncPayload = {
       syncMeta: {
         schemaVersion: 2,
         appVersion: '0.2.2',
@@ -708,7 +596,7 @@ describe('syncService - GitHub Gist Cloud Client & Multi-device Download', () =>
       settings: { theme: 'dark' },
     };
 
-    const androidData: GistFilesPayload = {
+    const androidData: CloudSyncPayload = {
       syncMeta: {
         schemaVersion: 2,
         appVersion: '0.2.2',
@@ -749,7 +637,7 @@ describe('syncService - GitHub Gist Cloud Client & Multi-device Download', () =>
     expect(merged.favorites.map(f => f.title).sort()).toEqual(['Naruto', 'One Piece']);
   });
 
-  it('identifica correctamente y excluye archivos de video locales en disco para que no se suban al Gist', () => {
+  it('identifica correctamente y excluye archivos de video locales en disco para que no se suban', () => {
     const windowsLocalEpisode: HistoryEntry = {
       id: 'C:\\Users\\herna\\Videos\\AniCS\\Azur Lane\\Episodio 1.mp4-1-default',
       animeTitle: 'Azur Lane',
@@ -794,21 +682,14 @@ describe('syncService - GitHub Gist Cloud Client & Multi-device Download', () =>
     expect(isLocalFileHistory(onlineEpisode)).toBe(false);
   });
 
-  it('separa las configuraciones en settings_desktop.json y settings_mobile.json al subir a GitHub Gist', async () => {
-    let capturedPayload: any = null;
-    globalThis.fetch = vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
-      if (init?.body) {
-        capturedPayload = JSON.parse(init.body as string);
-      }
-      return Promise.resolve({
-        ok: true,
-        status: 200,
-        headers: new Headers({ ETag: 'W/"etag-separated"' }),
-        json: async () => ({ id: 'mock_gist_id_abc', html_url: 'https://gist.github.com/mock_gist_id_abc' }),
-      });
+  it('separa las configuraciones en settingsDesktop y settingsMobile al subir a Firestore', async () => {
+    let capturedDocData: any = null;
+    vi.mocked(setDoc).mockImplementationOnce((_ref: any, data: any) => {
+      capturedDocData = data;
+      return Promise.resolve();
     });
 
-    const testPayload: GistFilesPayload = {
+    const testPayload: CloudSyncPayload = {
       syncMeta: {
         schemaVersion: 2,
         appVersion: '0.2.1',
@@ -831,87 +712,22 @@ describe('syncService - GitHub Gist Cloud Client & Multi-device Download', () =>
       },
     };
 
-    await createOrUpdateGist(mockConfig, testPayload);
+    await saveFirestoreData('user_12345', mockConfig, testPayload);
 
-    expect(capturedPayload).not.toBeNull();
-    const files = capturedPayload.files;
+    expect(capturedDocData).not.toBeNull();
+    expect(capturedDocData.settingsDesktop).toBeDefined();
+    expect(capturedDocData.settingsMobile).toBeDefined();
 
-    // Verificar que existen ambos archivos en el Gist
-    expect(files['settings_desktop.json']).toBeDefined();
-    expect(files['settings_mobile.json']).toBeDefined();
-    expect(files['settings.json']).toBeDefined();
-
-    // settings_desktop.json debe contener la ruta de Windows
-    const desktopSettings = JSON.parse(files['settings_desktop.json'].content);
+    const desktopSettings = JSON.parse(capturedDocData.settingsDesktop);
     expect(desktopSettings.download_dir).toBe('C:\\Users\\herna\\Videos\\AniCS');
 
-    // settings_mobile.json debe conservar intacta la ruta de Android
-    const mobileSettings = JSON.parse(files['settings_mobile.json'].content);
+    const mobileSettings = JSON.parse(capturedDocData.settingsMobile);
     expect(mobileSettings.download_dir).toBe('/storage/emulated/0/Anime');
 
-    // sync_meta.json debe registrar los metadatos de los dispositivos
-    const syncMetaUploaded = JSON.parse(files['sync_meta.json'].content);
+    const syncMetaUploaded = JSON.parse(capturedDocData.syncMeta);
     expect(syncMetaUploaded.devices).toBeDefined();
     expect(syncMetaUploaded.devices.windows).toBeDefined();
   });
-
-  it('en PATCH desde escritorio no sobreescribe settings_mobile.json si está vacío', async () => {
-    const mockConfig: GistSyncConfig = {
-      githubToken: 'ghp_test_token_123',
-      gistId: 'existing_gist_456',
-      encryptionEnabled: false,
-      autoSync: false,
-    };
-
-    let capturedPayload: any = null;
-    globalThis.fetch = vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
-      if (init?.body) {
-        capturedPayload = JSON.parse(init.body as string);
-      }
-      return Promise.resolve({
-        ok: true,
-        status: 200,
-        headers: new Headers({ ETag: 'W/"etag-patch"' }),
-        json: async () => ({ id: 'existing_gist_456' }),
-      });
-    });
-
-    const testPayload: GistFilesPayload = {
-      syncMeta: {
-        schemaVersion: 2,
-        appVersion: '0.2.2',
-        lastModifiedAt: '2026-09-02T10:00:00Z',
-        lastModifiedDevice: 'windows',
-        devices: {
-          android: { lastSyncAt: '2026-09-01T10:00:00Z', appVersion: '0.2.2' },
-        },
-        fileHashes: { profiles: 'h1', history: 'h2', favorites: 'h3', settings: 'h4' },
-        deletedFavorites: [],
-        deletedProfiles: [],
-        deletedHistory: [],
-      },
-      profiles: [],
-      history: [],
-      favorites: [],
-      settings: {
-        player_type: 'internal',
-      },
-    };
-
-    await createOrUpdateGist(mockConfig, testPayload);
-
-    expect(capturedPayload).not.toBeNull();
-    const files = capturedPayload.files;
-
-    // Desktop settings deben enviarse
-    expect(files['settings_desktop.json']).toBeDefined();
-    // settings_mobile.json no debe incluirse en el PATCH para no sobreescribir el del Gist con {}
-    expect(files['settings_mobile.json']).toBeUndefined();
-
-    // sync_meta debe preservar el dispositivo Android preexistente
-    const syncMetaUploaded = JSON.parse(files['sync_meta.json'].content);
-    expect(syncMetaUploaded.devices.android).toBeDefined();
-    expect(syncMetaUploaded.devices.windows).toBeDefined();
-  });
 });
+
 

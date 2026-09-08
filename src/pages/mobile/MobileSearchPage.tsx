@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search, X, Loader2, SearchX,
-  RotateCcw, SlidersHorizontal, RefreshCw, Clock
+  RotateCcw, SlidersHorizontal, RefreshCw, Clock, Check
 } from 'lucide-react';
 import { useAnimeStore } from '@/stores/useAnimeStore';
 import { advancedSearch } from '@/services/animeService';
@@ -292,8 +292,11 @@ export function MobileSearchPage() {
     }
   };
 
-  const handleGenreToggle = (slug: string) => {
-    const nextGenre = selectedGenre === slug ? '' : slug;
+  const handleGenreToggle = (slug: string, name?: string) => {
+    const isCurrentlySelected =
+      selectedGenre.toLowerCase() === slug.toLowerCase() ||
+      (name ? selectedGenre.toLowerCase() === name.toLowerCase() : false);
+    const nextGenre = isCurrentlySelected ? '' : slug;
     setSelectedGenre(nextGenre);
     const key = `${activeSource}:${query}:${nextGenre}:${selectedStatus}:${selectedType}:${selectedOrder}:1`;
     lastExecutedKey.current = key;
@@ -312,6 +315,17 @@ export function MobileSearchPage() {
     const key = `${activeSource}::::::1`;
     lastExecutedKey.current = key;
     syncUrlParams('', '', '', '', '', 1);
+    saveSearchSession(activeSource, {
+      query: '',
+      genre: '',
+      status: '',
+      animeType: '',
+      orderBy: '',
+      results: [],
+      currentPage: 1,
+      totalPages: undefined,
+      hasNextPage: false,
+    });
     executeSearch('', '', '', '', '', 1);
   };
 
@@ -458,6 +472,58 @@ export function MobileSearchPage() {
         </div>
       )}
 
+      {/* Barra de Filtros Activos Móvil */}
+      {activeFilterCount > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>Filtros:</span>
+          {selectedGenre && (
+            <button
+              type="button"
+              onClick={() => handleGenreToggle(selectedGenre)}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                background: 'rgba(99, 102, 241, 0.15)', border: '1px solid rgba(99, 102, 241, 0.35)',
+                borderRadius: 'var(--radius-full)', padding: '3px 8px',
+                color: 'var(--accent-primary)', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+              }}
+            >
+              <span>{genres.find(g => g.slug.toLowerCase() === selectedGenre.toLowerCase() || g.name.toLowerCase() === selectedGenre.toLowerCase())?.name || selectedGenre}</span>
+              <X size={12} />
+            </button>
+          )}
+          {selectedType && (
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedType('');
+                syncUrlParams(query, selectedGenre, selectedStatus, '', selectedOrder, 1);
+                executeSearch(query, selectedGenre, selectedStatus, '', selectedOrder, 1);
+              }}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                background: 'rgba(99, 102, 241, 0.15)', border: '1px solid rgba(99, 102, 241, 0.35)',
+                borderRadius: 'var(--radius-full)', padding: '3px 8px',
+                color: 'var(--accent-primary)', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+              }}
+            >
+              <span>{selectedType}</span>
+              <X size={12} />
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={handleResetFilters}
+            style={{
+              background: 'none', border: 'none', color: 'var(--text-muted)',
+              fontSize: 11, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline',
+              padding: '2px 4px',
+            }}
+          >
+            Limpiar
+          </button>
+        </div>
+      )}
+
       {/* Panel Desplegable de Filtros Móvil */}
       <AnimatePresence>
         {showFilters && (
@@ -494,20 +560,23 @@ export function MobileSearchPage() {
               maxHeight: 110, overflowY: 'auto',
             }}>
               {genres.map((g) => {
-                const isSelected = selectedGenre === g.slug || selectedGenre === g.name;
+                const isSelected =
+                  selectedGenre.toLowerCase() === g.slug.toLowerCase() ||
+                  selectedGenre.toLowerCase() === g.name.toLowerCase();
                 return (
                   <button
                     key={g.slug}
-                    onClick={() => handleGenreToggle(g.slug)}
+                    onClick={() => handleGenreToggle(g.slug, g.name)}
                     style={{
-                      padding: '3px 8px', borderRadius: 'var(--radius-full)',
+                      padding: '4px 10px', borderRadius: 'var(--radius-full)',
                       background: isSelected ? 'var(--accent-primary)' : 'var(--bg-elevated)',
-                      border: 'none',
+                      border: isSelected ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)',
                       color: isSelected ? 'white' : 'var(--text-secondary)',
                       fontSize: 11, fontWeight: isSelected ? 700 : 500,
-                      cursor: 'pointer',
+                      cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4,
                     }}
                   >
+                    {isSelected && <Check size={11} />}
                     {g.name}
                   </button>
                 );

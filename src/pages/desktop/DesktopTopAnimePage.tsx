@@ -71,8 +71,8 @@ export function DesktopTopAnimePage() {
             </h1>
             <p style={{ color: 'var(--text-muted)', fontSize: 13, margin: '3px 0 0' }}>
               {isDonghua
-                ? 'Las producciones de animación china más destacadas · MundoDonghua'
-                : 'Los animes más valorados y aclamados por la comunidad · JKAnime'}
+                ? 'Las producciones de animación china más destacadas · Donghua'
+                : 'Los animes más valorados y aclamados por la comunidad · Anime'}
             </p>
           </div>
         </div>

@@ -1,15 +1,19 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Tv2, Heart, Settings, User } from 'lucide-react';
+import { Tv2, Heart, Settings, User, Crown } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useAnimeStore } from '@/stores/useAnimeStore';
 import { useProfileStore } from '@/stores/useProfileStore';
+import { useSubscriptionStore } from '@/stores/useSubscriptionStore';
+import { FEATURE_FLAGS } from '@/config/features';
 import { ProfileSelectorModal, getProfileAvatarIcon } from '@/components/ProfileSelectorModal';
+import { SubscriptionModal } from '@/components/SubscriptionModal';
 
 export function MobileHeader() {
   const navigate = useNavigate();
   const { activeSource, setActiveSource } = useAnimeStore();
   const { activeProfile } = useProfileStore();
+  const { isVip, openModal: openVipModal } = useSubscriptionStore();
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
 
   const ProfileIcon = activeProfile ? getProfileAvatarIcon(activeProfile.avatar) : User;
@@ -142,8 +146,29 @@ export function MobileHeader() {
           </button>
         </div>
 
-        {/* Acciones directas: Perfil, Favoritos y Ajustes */}
+        {/* Acciones directas: Perfil, Favoritos, VIP y Ajustes */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {FEATURE_FLAGS.SHOW_SUBSCRIPTION && (
+            <button
+              onClick={openVipModal}
+              title={isVip ? 'Yumework VIP Activo' : 'Obtener Yumework VIP'}
+              style={{
+                background: isVip ? 'linear-gradient(135deg, #f59e0b, #d97706)' : 'rgba(245, 158, 11, 0.15)',
+                border: isVip ? 'none' : '1px solid rgba(245, 158, 11, 0.3)',
+                color: isVip ? '#ffffff' : '#fbbf24',
+                padding: '5px 7px',
+                borderRadius: 'var(--radius-full)',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: isVip ? '0 2px 8px rgba(245, 158, 11, 0.4)' : 'none',
+              }}
+            >
+              <Crown size={15} />
+            </button>
+          )}
+
           <button
             onClick={() => setIsProfileModalOpen(true)}
             title={activeProfile ? `Perfil: ${activeProfile.name}` : 'Perfil'}
@@ -206,6 +231,7 @@ export function MobileHeader() {
         isOpen={isProfileModalOpen}
         onClose={() => setIsProfileModalOpen(false)}
       />
+      <SubscriptionModal />
     </>
   );
 }

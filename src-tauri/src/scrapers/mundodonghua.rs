@@ -39,7 +39,7 @@ impl AnimeExtractor for MundoDonghuaExtractor {
         "mundodonghua"
     }
     fn name(&self) -> &'static str {
-        "MundoDonghua"
+        "Donghua"
     }
     fn base_url(&self) -> &str {
         &self.base_url

@@ -40,3 +40,10 @@ pub fn detect_media_type(url: String) -> String {
         "unknown".to_string()
     }
 }
+
+/// Obtiene el puerto asignado al servidor local de streaming y auth
+#[tauri::command]
+pub fn get_local_server_port() -> u16 {
+    crate::downloader::media_server::get_server_port()
+}
+

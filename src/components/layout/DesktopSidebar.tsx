@@ -3,11 +3,14 @@ import { NavLink } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Home, Search, Calendar, Flame, Download, Clock,
-  BookMarked, Settings, ChevronLeft, ChevronRight, Tv2, User
+  Heart, Settings, ChevronLeft, ChevronRight, Tv2, User, Crown
 } from 'lucide-react';
 import { useAnimeStore } from '@/stores/useAnimeStore';
 import { useProfileStore } from '@/stores/useProfileStore';
+import { useSubscriptionStore } from '@/stores/useSubscriptionStore';
+import { FEATURE_FLAGS } from '@/config/features';
 import { ProfileSelectorModal, getProfileAvatarIcon } from '@/components/ProfileSelectorModal';
+import { SubscriptionModal } from '@/components/SubscriptionModal';
 
 const navItems = [
   { to: '/',          icon: Home,       label: 'Inicio'       },
@@ -16,7 +19,7 @@ const navItems = [
   { to: '/top',       icon: Flame,      label: 'Top Animes'   },
   { to: '/downloads', icon: Download,   label: 'Descargas'    },
   { to: '/history',   icon: Clock,      label: 'Historial'    },
-  { to: '/favorites', icon: BookMarked, label: 'Favoritos'    },
+  { to: '/favorites', icon: Heart,      label: 'Favoritos'    },
 ];
 
 /** Mapea el ID interno de la fuente a un label legible corto */
@@ -49,6 +52,7 @@ export function DesktopSidebar() {
 
   const { sources, activeSource, setActiveSource } = useAnimeStore();
   const { activeProfile } = useProfileStore();
+  const { isVip, openModal: openVipModal } = useSubscriptionStore();
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
 
   const ProfileIcon = activeProfile ? getProfileAvatarIcon(activeProfile.avatar) : User;
@@ -186,6 +190,45 @@ export function DesktopSidebar() {
 
         {/* Footer: Profile + Settings + Collapse toggle */}
         <div style={{ padding: '8px', borderTop: '1px solid var(--border-subtle)' }}>
+          {/* VIP Subscription CTA */}
+          {FEATURE_FLAGS.SHOW_SUBSCRIPTION && (
+            <button
+              onClick={openVipModal}
+              title={isVip ? 'Membresía Yumework VIP Activa' : 'Mejorar a Yumework VIP'}
+              style={{
+                width: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                padding: '8px 12px',
+                borderRadius: 'var(--radius-md)',
+                background: isVip
+                  ? 'linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(217, 119, 6, 0.1))'
+                  : 'linear-gradient(135deg, rgba(245, 158, 11, 0.12), transparent)',
+                border: '1px solid rgba(245, 158, 11, 0.3)',
+                color: '#fbbf24',
+                cursor: 'pointer',
+                justifyContent: collapsed ? 'center' : 'flex-start',
+                marginBottom: 6,
+                transition: 'all var(--transition-fast)',
+              }}
+            >
+              <Crown size={18} color="#f59e0b" style={{ flexShrink: 0 }} />
+              {!collapsed && (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: isVip ? '#fbbf24' : '#ffffff' }}>
+                    {isVip ? 'VIP Activo' : 'Yumework VIP'}
+                  </span>
+                  {!isVip && (
+                    <span style={{ fontSize: 10, fontWeight: 800, background: '#f59e0b', color: '#000', padding: '1px 5px', borderRadius: '4px' }}>
+                      PRO
+                    </span>
+                  )}
+                </div>
+              )}
+            </button>
+          )}
+
           {/* Profile Button */}
           <button
             onClick={() => setIsProfileModalOpen(true)}
@@ -222,9 +265,21 @@ export function DesktopSidebar() {
               <ProfileIcon size={14} />
             </div>
             {!collapsed && (
-              <span style={{ fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {activeProfile?.name || 'Perfil'}
-              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, overflow: 'hidden' }}>
+                <span style={{ fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {activeProfile?.name || 'Perfil'}
+                </span>
+                {FEATURE_FLAGS.SHOW_SUBSCRIPTION && isVip && (
+                  <span style={{
+                    fontSize: 9, fontWeight: 800,
+                    background: 'linear-gradient(135deg, #f59e0b, #d97706)',
+                    color: '#000', padding: '1px 5px', borderRadius: 4,
+                    display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0,
+                  }}>
+                    <Crown size={8} /> VIP
+                  </span>
+                )}
+              </div>
             )}
           </button>
 
@@ -266,6 +321,7 @@ export function DesktopSidebar() {
         isOpen={isProfileModalOpen}
         onClose={() => setIsProfileModalOpen(false)}
       />
+      <SubscriptionModal />
     </>
   );
 }

@@ -40,3 +40,21 @@ build_err.txt
 *.p12
 KEYSTORE*.txt
 
+# Firebase & Cloud Credentials
+.firebase/
+firebase-debug.log*
+firestore-debug.log*
+ui-debug.log*
+dataconnect-debug.log*
+.firebaserc.local
+*serviceAccountKey*.json
+*firebase-adminsdk*.json
+
+# Firebase Data Connect (cache local / emuladores)
+dataconnect/.dataconnect/
+
+# Agent & IDE local caches
+.claude/
+.agents/skills/
+skills-lock.json
+

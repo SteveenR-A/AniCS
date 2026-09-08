@@ -80,7 +80,7 @@ impl JKAnimeExtractor {
 #[async_trait]
 impl AnimeExtractor for JKAnimeExtractor {
     fn id(&self) -> &'static str { "jkanime" }
-    fn name(&self) -> &'static str { "JKAnime" }
+    fn name(&self) -> &'static str { "Anime" }
     fn base_url(&self) -> &str { &self.base_url }
 
     // Búsqueda simple

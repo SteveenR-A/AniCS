@@ -171,7 +171,7 @@ export function MobileHomePage() {
       }}>
         <div>
           <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0, color: 'var(--text-primary)' }}>
-            AniCS · {isDonghua ? 'MundoDonghua' : 'JKAnime'}
+            AniCS · {isDonghua ? 'Donghua' : 'Anime'}
           </h2>
           <p style={{ color: 'var(--text-muted)', fontSize: 11, margin: '2px 0 0' }}>
             {isDonghua ? 'Donghuas y animación china' : 'Episodios estrenados al instante'}

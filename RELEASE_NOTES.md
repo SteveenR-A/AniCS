@@ -1,15 +1,15 @@
-# AniCS v0.2.3 — Optimizaciones Móviles, Sincronización Nube y Anuncio de Actualizaciones
+# AniCS v0.2.4 — Multicuentas, Gestión de Suscripción VIP y Filtros Interactivos de Búsqueda
 
-**Fecha de lanzamiento:** 2026-09-04
+**Fecha de lanzamiento:** 2026-09-08
 
 ### 🚀 Novedades y Correcciones
 
-- Reproductor Móvil: Eliminación de botones redundantes para mayor visibilidad.
-- Buscador Móvil: Búsqueda debounced (700ms), soporte para Enter y corrección de recarga al borrar.
-- Anuncio de Actualizaciones: Modal visual flotante al iniciar en PC y Android con notas de versión.
-- Sincronización en la Nube: Compatibilidad total bidireccional entre Windows y Android sin sobrescribir configuraciones.
-- Cola de Descargas: Botón 'Limpiar completadas' para depurar la lista preservando los archivos descargados.
-- Historial Móvil: Interfaz compacta en encabezado y modal de seguridad para borrado selectivo o en la nube.
+- Multicuentas y perfil activo: Soporte para cambiar entre múltiples cuentas locales y cuentas de prueba VIP/Gratis con verificación dinámica en Firestore
+- Cancelación de suscripción VIP: Opción interactiva para cancelar la membresía con confirmación y sincronización en la nube
+- Filtros de búsqueda corregidos: Alternancia (toggle) de géneros, tipos y estados, y nueva barra de chips de filtros activos descartables
+- Flujo de autenticación Google optimizado: Corrección de dominio local para inicio de sesión seguro sin bloqueos de OAuth
+- Iconografía de favoritos actualizada: Icono de corazón en toda la aplicación y corrección de menús desplegables de estado
+- Optimización de repositorio: Integración con SonarCloud, exclusión de skills en gitignore y eliminación de credenciales hardcodeadas
 
 ---
 *Para ver el historial acumulativo completo de todas las versiones, consulta [CHANGELOG.md](./CHANGELOG.md).*

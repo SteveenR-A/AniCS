@@ -122,6 +122,7 @@ export function DesktopSearchPage() {
   const [showFilters, setShowFilters] = useState(Boolean(urlGenre || urlStatus || urlType));
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const isInitialMount = useRef(true);
   const activeFilterCount = (selectedGenre ? 1 : 0) + (selectedStatus ? 1 : 0) + (selectedType ? 1 : 0) + (selectedOrder ? 1 : 0);
 
   // Sincronizar fuente si está en los parámetros de la URL
@@ -231,21 +232,25 @@ export function DesktopSearchPage() {
     }
     lastExecutedKey.current = currentKey;
 
-    const session = getSearchSession(activeSource);
-    const hasParams = Boolean(urlQ || urlGenre || urlStatus || urlType || urlOrder || urlPage > 1);
+    // Solo restaurar la sesión guardada en el primer montaje si no hay parámetros en la URL
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      const session = getSearchSession(activeSource);
+      const hasParams = Boolean(urlQ || urlGenre || urlStatus || urlType || urlOrder || urlPage > 1);
 
-    if (!hasParams && session && session.results.length > 0) {
-      setQuery(session.query);
-      setSelectedGenre(session.genre);
-      setSelectedStatus(session.status);
-      setSelectedType(session.animeType);
-      setSelectedOrder(session.orderBy);
-      setCurrentPage(session.currentPage);
-      setTotalPages(session.totalPages);
-      setHasNextPage(session.hasNextPage);
-      setSearchResults(session.results, session.query, activeSource);
-      syncUrlParams(session.query, session.genre, session.status, session.animeType, session.orderBy, session.currentPage);
-      return;
+      if (!hasParams && session && session.results.length > 0) {
+        setQuery(session.query);
+        setSelectedGenre(session.genre);
+        setSelectedStatus(session.status);
+        setSelectedType(session.animeType);
+        setSelectedOrder(session.orderBy);
+        setCurrentPage(session.currentPage);
+        setTotalPages(session.totalPages);
+        setHasNextPage(session.hasNextPage);
+        setSearchResults(session.results, session.query, activeSource);
+        syncUrlParams(session.query, session.genre, session.status, session.animeType, session.orderBy, session.currentPage);
+        return;
+      }
     }
 
     setQuery(urlQ);
@@ -267,39 +272,69 @@ export function DesktopSearchPage() {
     }, 400);
   };
 
-  const handleGenreToggle = (slug: string) => {
-    const nextGenre = selectedGenre === slug ? '' : slug;
+  const handleGenreToggle = (slug: string, name?: string) => {
+    const isCurrentlySelected =
+      selectedGenre.toLowerCase() === slug.toLowerCase() ||
+      (name ? selectedGenre.toLowerCase() === name.toLowerCase() : false);
+    const nextGenre = isCurrentlySelected ? '' : slug;
     setSelectedGenre(nextGenre);
+    const key = `${activeSource}:${query}:${nextGenre}:${selectedStatus}:${selectedType}:${selectedOrder}:1`;
+    lastExecutedKey.current = key;
     syncUrlParams(query, nextGenre, selectedStatus, selectedType, selectedOrder, 1);
     executeSearch(query, nextGenre, selectedStatus, selectedType, selectedOrder, 1);
   };
 
   const handleTypeSelect = (t: string) => {
-    setSelectedType(t);
-    syncUrlParams(query, selectedGenre, selectedStatus, t, selectedOrder, 1);
-    executeSearch(query, selectedGenre, selectedStatus, t, selectedOrder, 1);
+    // Si ya está seleccionado ese tipo o se hace clic en 'Todos' (''), se desactiva
+    const nextType = (selectedType === t || t === '') ? '' : t;
+    setSelectedType(nextType);
+    const key = `${activeSource}:${query}:${selectedGenre}:${selectedStatus}:${nextType}:${selectedOrder}:1`;
+    lastExecutedKey.current = key;
+    syncUrlParams(query, selectedGenre, selectedStatus, nextType, selectedOrder, 1);
+    executeSearch(query, selectedGenre, selectedStatus, nextType, selectedOrder, 1);
   };
 
   const handleStatusSelect = (st: string) => {
-    setSelectedStatus(st);
-    syncUrlParams(query, selectedGenre, st, selectedType, selectedOrder, 1);
-    executeSearch(query, selectedGenre, st, selectedType, selectedOrder, 1);
+    // Si ya está seleccionado ese estado o se hace clic en 'Todos' (''), se desactiva
+    const nextStatus = (selectedStatus === st || st === '') ? '' : st;
+    setSelectedStatus(nextStatus);
+    const key = `${activeSource}:${query}:${selectedGenre}:${nextStatus}:${selectedType}:${selectedOrder}:1`;
+    lastExecutedKey.current = key;
+    syncUrlParams(query, selectedGenre, nextStatus, selectedType, selectedOrder, 1);
+    executeSearch(query, selectedGenre, nextStatus, selectedType, selectedOrder, 1);
   };
 
   const handleOrderChange = (ord: string) => {
-    setSelectedOrder(ord);
-    syncUrlParams(query, selectedGenre, selectedStatus, selectedType, ord, 1);
-    executeSearch(query, selectedGenre, selectedStatus, selectedType, ord, 1);
+    const nextOrder = selectedOrder === ord ? '' : ord;
+    setSelectedOrder(nextOrder);
+    const key = `${activeSource}:${query}:${selectedGenre}:${selectedStatus}:${selectedType}:${nextOrder}:1`;
+    lastExecutedKey.current = key;
+    syncUrlParams(query, selectedGenre, selectedStatus, selectedType, nextOrder, 1);
+    executeSearch(query, selectedGenre, selectedStatus, selectedType, nextOrder, 1);
   };
 
   const handleResetFilters = () => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
     setQuery('');
     setSelectedGenre('');
     setSelectedStatus('');
     setSelectedType('');
     setSelectedOrder('');
     setCurrentPage(1);
+    const key = `${activeSource}::::::1`;
+    lastExecutedKey.current = key;
     syncUrlParams('', '', '', '', '', 1);
+    saveSearchSession(activeSource, {
+      query: '',
+      genre: '',
+      status: '',
+      animeType: '',
+      orderBy: '',
+      results: [],
+      currentPage: 1,
+      totalPages: undefined,
+      hasNextPage: false,
+    });
     executeSearch('', '', '', '', '', 1);
   };
 
@@ -367,7 +402,7 @@ export function DesktopSearchPage() {
                 transition: 'all 0.15s ease',
               }}
             >
-              {src === 'jkanime' ? 'JKAnime' : 'MundoDonghua'}
+              {src === 'jkanime' ? 'Anime' : 'Donghua'}
             </button>
           ))}
         </div>
@@ -470,6 +505,88 @@ export function DesktopSearchPage() {
         </div>
       )}
 
+      {/* Barra de Filtros Activos con chips descartables con un solo clic */}
+      {activeFilterCount > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 18, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>Filtros activos:</span>
+          {selectedGenre && (
+            <button
+              type="button"
+              onClick={() => handleGenreToggle(selectedGenre)}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                background: 'rgba(99, 102, 241, 0.15)', border: '1px solid rgba(99, 102, 241, 0.35)',
+                borderRadius: 'var(--radius-full)', padding: '4px 10px',
+                color: 'var(--accent-primary)', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+              }}
+              title="Quitar filtro de género"
+            >
+              <span>Género: {genres.find(g => g.slug.toLowerCase() === selectedGenre.toLowerCase() || g.name.toLowerCase() === selectedGenre.toLowerCase())?.name || selectedGenre}</span>
+              <X size={13} />
+            </button>
+          )}
+          {selectedType && (
+            <button
+              type="button"
+              onClick={() => handleTypeSelect('')}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                background: 'rgba(99, 102, 241, 0.15)', border: '1px solid rgba(99, 102, 241, 0.35)',
+                borderRadius: 'var(--radius-full)', padding: '4px 10px',
+                color: 'var(--accent-primary)', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+              }}
+              title="Quitar filtro de tipo"
+            >
+              <span>Tipo: {selectedType === 'serie' ? 'Series' : selectedType === 'pelicula' ? 'Películas' : 'OVAs'}</span>
+              <X size={13} />
+            </button>
+          )}
+          {selectedStatus && (
+            <button
+              type="button"
+              onClick={() => handleStatusSelect('')}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                background: 'rgba(99, 102, 241, 0.15)', border: '1px solid rgba(99, 102, 241, 0.35)',
+                borderRadius: 'var(--radius-full)', padding: '4px 10px',
+                color: 'var(--accent-primary)', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+              }}
+              title="Quitar filtro de estado"
+            >
+              <span>Estado: {selectedStatus === 'en-emision' ? 'En emisión' : 'Concluido'}</span>
+              <X size={13} />
+            </button>
+          )}
+          {selectedOrder && (
+            <button
+              type="button"
+              onClick={() => handleOrderChange('')}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                background: 'rgba(99, 102, 241, 0.15)', border: '1px solid rgba(99, 102, 241, 0.35)',
+                borderRadius: 'var(--radius-full)', padding: '4px 10px',
+                color: 'var(--accent-primary)', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+              }}
+              title="Quitar ordenación"
+            >
+              <span>Orden: {selectedOrder === 'nombre' ? 'Nombre (A-Z)' : selectedOrder === 'fecha' ? 'Fecha' : selectedOrder === 'popularidad' ? 'Popularidad' : selectedOrder}</span>
+              <X size={13} />
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={handleResetFilters}
+            style={{
+              background: 'none', border: 'none', color: 'var(--text-muted)',
+              fontSize: 12, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline',
+              padding: '2px 6px',
+            }}
+          >
+            Limpiar todos
+          </button>
+        </div>
+      )}
+
       {/* Panel de Filtros Desktop */}
       <AnimatePresence>
         {showFilters && (
@@ -507,11 +624,13 @@ export function DesktopSearchPage() {
               maxHeight: 140, overflowY: 'auto', paddingRight: 4,
             }}>
               {genres.map((g) => {
-                const isSelected = selectedGenre === g.slug || selectedGenre === g.name;
+                const isSelected =
+                  selectedGenre.toLowerCase() === g.slug.toLowerCase() ||
+                  selectedGenre.toLowerCase() === g.name.toLowerCase();
                 return (
                   <button
                     key={g.slug}
-                    onClick={() => handleGenreToggle(g.slug)}
+                    onClick={() => handleGenreToggle(g.slug, g.name)}
                     style={{
                       padding: '6px 14px', borderRadius: 'var(--radius-full)',
                       background: isSelected ? 'var(--accent-primary)' : 'var(--bg-elevated)',
@@ -535,40 +654,50 @@ export function DesktopSearchPage() {
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>Tipo:</span>
-                {['', 'serie', 'pelicula', 'ova'].map((t) => (
-                  <button
-                    key={t}
-                    onClick={() => handleTypeSelect(t)}
-                    style={{
-                      padding: '5px 12px', borderRadius: 'var(--radius-md)',
-                      background: selectedType === t ? 'var(--bg-elevated)' : 'transparent',
-                      border: selectedType === t ? '1px solid var(--accent-primary)' : '1px solid transparent',
-                      color: selectedType === t ? 'var(--accent-primary)' : 'var(--text-secondary)',
-                      fontSize: 12, fontWeight: selectedType === t ? 700 : 500, cursor: 'pointer',
-                    }}
-                  >
-                    {t === '' ? 'Todos' : t === 'serie' ? 'Series' : t === 'pelicula' ? 'Películas' : 'OVAs'}
-                  </button>
-                ))}
+                {['', 'serie', 'pelicula', 'ova'].map((t) => {
+                  const isSelected = selectedType === t || (t === '' && !selectedType);
+                  return (
+                    <button
+                      key={t}
+                      onClick={() => handleTypeSelect(t)}
+                      style={{
+                        padding: '5px 12px', borderRadius: 'var(--radius-md)',
+                        background: isSelected ? 'var(--bg-elevated)' : 'transparent',
+                        border: isSelected ? '1px solid var(--accent-primary)' : '1px solid transparent',
+                        color: isSelected ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                        fontSize: 12, fontWeight: isSelected ? 700 : 500, cursor: 'pointer',
+                        display: 'inline-flex', alignItems: 'center', gap: 4,
+                      }}
+                    >
+                      {t !== '' && isSelected && <Check size={12} />}
+                      {t === '' ? 'Todos' : t === 'serie' ? 'Series' : t === 'pelicula' ? 'Películas' : 'OVAs'}
+                    </button>
+                  );
+                })}
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>Estado:</span>
-                {['', 'en-emision', 'concluido'].map((st) => (
-                  <button
-                    key={st}
-                    onClick={() => handleStatusSelect(st)}
-                    style={{
-                      padding: '5px 12px', borderRadius: 'var(--radius-md)',
-                      background: selectedStatus === st ? 'var(--bg-elevated)' : 'transparent',
-                      border: selectedStatus === st ? '1px solid var(--accent-primary)' : '1px solid transparent',
-                      color: selectedStatus === st ? 'var(--accent-primary)' : 'var(--text-secondary)',
-                      fontSize: 12, fontWeight: selectedStatus === st ? 700 : 500, cursor: 'pointer',
-                    }}
-                  >
-                    {st === '' ? 'Todos' : st === 'en-emision' ? 'En emisión' : 'Concluido'}
-                  </button>
-                ))}
+                {['', 'en-emision', 'concluido'].map((st) => {
+                  const isSelected = selectedStatus === st || (st === '' && !selectedStatus);
+                  return (
+                    <button
+                      key={st}
+                      onClick={() => handleStatusSelect(st)}
+                      style={{
+                        padding: '5px 12px', borderRadius: 'var(--radius-md)',
+                        background: isSelected ? 'var(--bg-elevated)' : 'transparent',
+                        border: isSelected ? '1px solid var(--accent-primary)' : '1px solid transparent',
+                        color: isSelected ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                        fontSize: 12, fontWeight: isSelected ? 700 : 500, cursor: 'pointer',
+                        display: 'inline-flex', alignItems: 'center', gap: 4,
+                      }}
+                    >
+                      {st !== '' && isSelected && <Check size={12} />}
+                      {st === '' ? 'Todos' : st === 'en-emision' ? 'En emisión' : 'Concluido'}
+                    </button>
+                  );
+                })}
               </div>
 
               <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>

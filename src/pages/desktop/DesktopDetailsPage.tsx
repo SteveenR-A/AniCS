@@ -3,9 +3,9 @@ import { useParams, useSearchParams, useNavigate, useLocation } from 'react-rout
 import { motion, AnimatePresence } from 'framer-motion';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import {
-  ArrowLeft, Play, Download, Bookmark, BookmarkCheck,
+  ArrowLeft, Play, Download, Heart,
   ChevronDown, ChevronUp, Check, HardDrive, CheckCircle2,
-  Calendar, Layers, Tag, Tv, Globe, Sparkles, Clock, DownloadCloud
+  Calendar, Layers, Tag, Tv, Globe, Sparkles, Clock, DownloadCloud, Crown, Lock
 } from 'lucide-react';
 import { getDetails, getServers, resolveStream } from '@/services/animeService';
 import { addFavorite, removeFavorite, isFavorite as checkFavorite, getHistory, getFavorites, updateFavoriteStatus } from '@/services/storageService';
@@ -15,6 +15,8 @@ import { useAnimeStore } from '@/stores/useAnimeStore';
 import { useDownloadStore } from '@/stores/useDownloadStore';
 import { useProfileStore } from '@/stores/useProfileStore';
 import { useSyncStore } from '@/stores/useSyncStore';
+import { useSubscriptionStore } from '@/stores/useSubscriptionStore';
+import { FEATURE_FLAGS } from '@/config/features';
 import { CachedImage } from '@/components/CachedImage';
 import { BatchDownloadModal } from '@/components/BatchDownloadModal';
 import { FavoriteStatusDropdown } from '@/components/FavoriteStatusDropdown';
@@ -57,6 +59,8 @@ export function DesktopDetailsPage() {
   const [showAllEps, setShowAllEps] = useState(false);
   const [epSearch, setEpSearch] = useState('');
   const [loadingEpisode, setLoadingEpisode] = useState<number | null>(null);
+
+  const { isVip, openModal: openVipModal } = useSubscriptionStore();
 
   // Sincronización con Descargas Locales e Historial de Visualización
   const [localEpisodesMap, setLocalEpisodesMap] = useState<Map<number, LocalEpisodeItem>>(new Map());
@@ -257,6 +261,10 @@ export function DesktopDetailsPage() {
   };
 
   const handleOpenDownloadModal = async (ep: Episode) => {
+    if (FEATURE_FLAGS.SHOW_SUBSCRIPTION && !isVip) {
+      openVipModal();
+      return;
+    }
     setDownloadModalEp(ep);
     setIsLoadingServers(true);
     setSelectedDownloadServer(null);
@@ -583,7 +591,7 @@ export function DesktopDetailsPage() {
                 color: 'var(--text-muted)', fontSize: 11, fontWeight: 600,
                 padding: '3px 9px', borderRadius: 'var(--radius-full)',
               }}>
-                {details.source === 'jkanime' ? 'JKAnime' : 'MundoDonghua'}
+                {details.source === 'jkanime' ? 'Catálogo Anime' : 'Catálogo Donghua'}
               </span>
             </div>
 
@@ -652,7 +660,7 @@ export function DesktopDetailsPage() {
                 display: 'flex', alignItems: 'center', gap: 8,
               }}
             >
-              {isFavorite ? <BookmarkCheck size={18} /> : <Bookmark size={18} />}
+              {isFavorite ? <Heart size={18} fill="#ec4899" color="#ec4899" /> : <Heart size={18} />}
               {isFavorite ? 'En Favoritos' : 'Añadir a Favoritos'}
             </motion.button>
 
@@ -669,7 +677,13 @@ export function DesktopDetailsPage() {
             <motion.button
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.97 }}
-              onClick={() => setShowBatchModal(true)}
+              onClick={() => {
+                if (FEATURE_FLAGS.SHOW_SUBSCRIPTION && !isVip) {
+                  openVipModal();
+                  return;
+                }
+                setShowBatchModal(true);
+              }}
               style={{
                 background: 'rgba(59, 130, 246, 0.15)',
                 border: '1px solid rgba(59, 130, 246, 0.4)',
@@ -680,6 +694,16 @@ export function DesktopDetailsPage() {
               }}
             >
               <DownloadCloud size={18} /> Descarga por Lotes
+              {FEATURE_FLAGS.SHOW_SUBSCRIPTION && !isVip && (
+                <span style={{
+                  fontSize: 9, fontWeight: 800,
+                  background: 'linear-gradient(135deg, #f59e0b, #d97706)',
+                  color: '#000', padding: '1px 5px', borderRadius: 4,
+                  display: 'inline-flex', alignItems: 'center', gap: 2,
+                }}>
+                  <Crown size={9} /> VIP
+                </span>
+              )}
             </motion.button>
           )}
         </div>
@@ -1006,17 +1030,29 @@ export function DesktopDetailsPage() {
 
                       <button
                         onClick={() => handleOpenDownloadModal(ep)}
-                        title={isDownloaded ? 'Ya descargado (clic para re-descargar)' : 'Descargar episodio'}
+                        title={
+                          isDownloaded
+                            ? 'Ya descargado (clic para re-descargar)'
+                            : (FEATURE_FLAGS.SHOW_SUBSCRIPTION && !isVip
+                              ? 'Descarga offline exclusiva para miembros VIP'
+                              : 'Descargar episodio')
+                        }
                         style={{
                           width: 32, height: 32, borderRadius: 8,
-                          background: isDownloaded ? 'rgba(16, 185, 129, 0.15)' : 'rgba(255,255,255,0.06)',
-                          border: isDownloaded ? '1px solid rgba(16, 185, 129, 0.3)' : 'none',
-                          color: isDownloaded ? '#34d399' : 'var(--text-secondary)',
+                          background: isDownloaded
+                            ? 'rgba(16, 185, 129, 0.15)'
+                            : (FEATURE_FLAGS.SHOW_SUBSCRIPTION && !isVip ? 'rgba(245, 158, 11, 0.1)' : 'rgba(255,255,255,0.06)'),
+                          border: isDownloaded
+                            ? '1px solid rgba(16, 185, 129, 0.3)'
+                            : (FEATURE_FLAGS.SHOW_SUBSCRIPTION && !isVip ? '1px dashed rgba(245, 158, 11, 0.35)' : 'none'),
+                          color: isDownloaded
+                            ? '#34d399'
+                            : (FEATURE_FLAGS.SHOW_SUBSCRIPTION && !isVip ? '#fbbf24' : 'var(--text-secondary)'),
                           display: 'flex', alignItems: 'center', justifyContent: 'center',
                           cursor: 'pointer',
                         }}
                       >
-                        {isDownloaded ? <Check size={14} /> : <Download size={14} />}
+                        {isDownloaded ? <Check size={14} /> : (FEATURE_FLAGS.SHOW_SUBSCRIPTION && !isVip ? <Lock size={13} /> : <Download size={14} />)}
                       </button>
                     </div>
 

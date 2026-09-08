@@ -1,10 +1,12 @@
 import React, { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { DownloadCloud, X, Layers, ListFilter, CheckSquare, Check, Loader2 } from 'lucide-react';
+import { DownloadCloud, X, Layers, ListFilter, CheckSquare, Check, Loader2, Crown } from 'lucide-react';
 import type { Episode } from '@/types';
 import { getServers, resolveStream } from '@/services/animeService';
 import { startDownload } from '@/services/downloadService';
 import { useDownloadStore } from '@/stores/useDownloadStore';
+import { useSubscriptionStore } from '@/stores/useSubscriptionStore';
+import { FEATURE_FLAGS } from '@/config/features';
 
 interface BatchDownloadModalProps {
   isOpen: boolean;
@@ -64,7 +66,14 @@ export const BatchDownloadModal: React.FC<BatchDownloadModalProps> = ({
     setSelectedEpNumbers(new Set());
   };
 
+  const { isVip, openModal: openVipModal } = useSubscriptionStore();
+
   const handleStartBatch = async () => {
+    if (FEATURE_FLAGS.SHOW_SUBSCRIPTION && !isVip) {
+      openVipModal();
+      onClose();
+      return;
+    }
     if (targetEpisodes.length === 0 || isProcessing) return;
 
     setIsProcessing(true);
@@ -530,8 +539,10 @@ export const BatchDownloadModal: React.FC<BatchDownloadModalProps> = ({
                 padding: '9px 20px',
                 borderRadius: 'var(--radius-md)',
                 border: 'none',
-                background: 'var(--accent-primary)',
-                color: 'white',
+                background: (FEATURE_FLAGS.SHOW_SUBSCRIPTION && !isVip)
+                  ? 'linear-gradient(135deg, #f59e0b, #d97706)'
+                  : 'var(--accent-primary)',
+                color: (FEATURE_FLAGS.SHOW_SUBSCRIPTION && !isVip) ? '#000' : 'white',
                 fontWeight: 700,
                 fontSize: 13,
                 cursor: targetEpisodes.length === 0 || isProcessing ? 'not-allowed' : 'pointer',
@@ -539,13 +550,20 @@ export const BatchDownloadModal: React.FC<BatchDownloadModalProps> = ({
                 display: 'flex',
                 alignItems: 'center',
                 gap: 8,
-                boxShadow: 'var(--shadow-btn)',
+                boxShadow: (FEATURE_FLAGS.SHOW_SUBSCRIPTION && !isVip)
+                  ? '0 4px 12px rgba(245, 158, 11, 0.35)'
+                  : 'var(--shadow-btn)',
               }}
             >
               {isProcessing ? (
                 <>
                   <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
                   Encolando ({enqueuedCount}/{targetEpisodes.length})...
+                </>
+              ) : (FEATURE_FLAGS.SHOW_SUBSCRIPTION && !isVip) ? (
+                <>
+                  <Crown size={16} />
+                  Desbloquear Descarga con VIP
                 </>
               ) : (
                 <>

@@ -14,12 +14,14 @@ interface FavoriteStatusDropdownProps {
   currentStatus: string;
   onSelectStatus: (status: FavoriteStatus) => void;
   size?: 'sm' | 'md';
+  dropDirection?: 'up' | 'down';
 }
 
 export const FavoriteStatusDropdown: React.FC<FavoriteStatusDropdownProps> = ({
   currentStatus,
   onSelectStatus,
   size = 'md',
+  dropDirection = 'down',
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -40,16 +42,28 @@ export const FavoriteStatusDropdown: React.FC<FavoriteStatusDropdownProps> = ({
   }, [isOpen]);
 
   const isSmall = size === 'sm';
+  const isUp = dropDirection === 'up';
 
   return (
-    <div ref={dropdownRef} style={{ position: 'relative', display: 'inline-block' }} onClick={(e) => e.stopPropagation()}>
+    <div
+      ref={dropdownRef}
+      style={{
+        position: 'relative',
+        display: 'inline-block',
+        zIndex: isOpen ? 60 : 'auto',
+      }}
+      onClick={(e) => e.stopPropagation()}
+    >
       <button
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={(e) => {
+          e.stopPropagation();
+          setIsOpen(!isOpen);
+        }}
         style={{
           display: 'flex',
           alignItems: 'center',
           gap: isSmall ? 4 : 6,
-          padding: isSmall ? '3px 8px' : '6px 12px',
+          padding: isSmall ? '4px 8px' : '6px 12px',
           borderRadius: isSmall ? 6 : 'var(--radius-md)',
           background: matched.bg,
           color: matched.color,
@@ -62,28 +76,33 @@ export const FavoriteStatusDropdown: React.FC<FavoriteStatusDropdownProps> = ({
       >
         <IconComponent size={isSmall ? 12 : 14} color={matched.color} />
         <span>{matched.label}</span>
-        <ChevronDown size={isSmall ? 12 : 14} style={{ transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
+        <ChevronDown
+          size={isSmall ? 12 : 14}
+          style={{
+            transform: isOpen ? (isUp ? 'none' : 'rotate(180deg)') : (isUp ? 'rotate(180deg)' : 'none'),
+            transition: 'transform 0.15s ease',
+          }}
+        />
       </button>
 
       <AnimatePresence>
         {isOpen && (
           <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: -4 }}
-            animate={{ opacity: 1, scale: 1, y: 4 }}
-            exit={{ opacity: 0, scale: 0.95, y: -4 }}
+            initial={{ opacity: 0, scale: 0.95, y: isUp ? 6 : -6 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: isUp ? 6 : -6 }}
             transition={{ duration: 0.12 }}
             style={{
               position: 'absolute',
-              top: '100%',
+              ...(isUp ? { bottom: 'calc(100% + 6px)' } : { top: 'calc(100% + 4px)' }),
               left: 0,
-              zIndex: 100,
-              background: 'var(--bg-surface)',
-              border: '1px solid var(--border-moderate)',
-              borderRadius: 'var(--radius-lg)',
-              boxShadow: '0 10px 25px rgba(0,0,0,0.4)',
-              minWidth: 140,
-              overflow: 'hidden',
-              padding: 4,
+              zIndex: 9999,
+              background: 'var(--bg-surface, #181b22)',
+              border: '1px solid var(--border-moderate, rgba(255,255,255,0.15))',
+              borderRadius: 'var(--radius-lg, 12px)',
+              boxShadow: '0 12px 32px rgba(0,0,0,0.65)',
+              minWidth: 145,
+              padding: 5,
             }}
           >
             {FAVORITE_STATUSES.map(item => {

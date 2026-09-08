@@ -3,8 +3,8 @@ import { useParams, useSearchParams, useNavigate, useLocation } from 'react-rout
 import { motion, AnimatePresence } from 'framer-motion';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import {
-  ArrowLeft, Play, Download, Bookmark, BookmarkCheck,
-  ChevronDown, ChevronUp, Check, HardDrive, CheckCircle2, Loader2, Calendar, DownloadCloud
+  ArrowLeft, Play, Download, Heart,
+  ChevronDown, ChevronUp, Check, HardDrive, CheckCircle2, Loader2, Calendar, DownloadCloud, Crown, Lock
 } from 'lucide-react';
 import { getDetails, getServers, resolveStream } from '@/services/animeService';
 import { addFavorite, removeFavorite, isFavorite as checkFavorite, getHistory, getFavorites, updateFavoriteStatus } from '@/services/storageService';
@@ -14,6 +14,8 @@ import { useAnimeStore } from '@/stores/useAnimeStore';
 import { useDownloadStore } from '@/stores/useDownloadStore';
 import { useProfileStore } from '@/stores/useProfileStore';
 import { useSyncStore } from '@/stores/useSyncStore';
+import { useSubscriptionStore } from '@/stores/useSubscriptionStore';
+import { FEATURE_FLAGS } from '@/config/features';
 import { CachedImage } from '@/components/CachedImage';
 import { BatchDownloadModal } from '@/components/BatchDownloadModal';
 import { FavoriteStatusDropdown } from '@/components/FavoriteStatusDropdown';
@@ -56,6 +58,8 @@ export function MobileDetailsPage() {
   const [showAllEps, setShowAllEps] = useState(false);
   const [epSearch, setEpSearch] = useState('');
   const [loadingEpisode, setLoadingEpisode] = useState<number | null>(null);
+
+  const { isVip, openModal: openVipModal } = useSubscriptionStore();
 
   // Sincronización con Descargas Locales e Historial de Visualización en Móvil
   const [localEpisodesMap, setLocalEpisodesMap] = useState<Map<number, LocalEpisodeItem>>(new Map());
@@ -256,6 +260,10 @@ export function MobileDetailsPage() {
   };
 
   const handleOpenDownloadModal = async (ep: Episode) => {
+    if (FEATURE_FLAGS.SHOW_SUBSCRIPTION && !isVip) {
+      openVipModal();
+      return;
+    }
     setDownloadModalEp(ep);
     setIsLoadingServers(true);
     setSelectedDownloadServer(null);
@@ -618,7 +626,7 @@ export function MobileDetailsPage() {
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
             }}
           >
-            {isFavorite ? <BookmarkCheck size={15} /> : <Bookmark size={15} />}
+            {isFavorite ? <Heart size={15} fill="#ec4899" color="#ec4899" /> : <Heart size={15} />}
             {isFavorite ? 'Favorito' : 'Guardar'}
           </motion.button>
 
@@ -633,7 +641,13 @@ export function MobileDetailsPage() {
           {details.episodes.length > 0 && (
             <motion.button
               whileTap={{ scale: 0.95 }}
-              onClick={() => setShowBatchModal(true)}
+              onClick={() => {
+                if (FEATURE_FLAGS.SHOW_SUBSCRIPTION && !isVip) {
+                  openVipModal();
+                  return;
+                }
+                setShowBatchModal(true);
+              }}
               style={{
                 background: 'rgba(59, 130, 246, 0.15)',
                 border: '1px solid rgba(59, 130, 246, 0.4)',
@@ -644,6 +658,16 @@ export function MobileDetailsPage() {
               }}
             >
               <DownloadCloud size={15} /> Lotes
+              {FEATURE_FLAGS.SHOW_SUBSCRIPTION && !isVip && (
+                <span style={{
+                  fontSize: 8, fontWeight: 800,
+                  background: 'linear-gradient(135deg, #f59e0b, #d97706)',
+                  color: '#000', padding: '1px 4px', borderRadius: 3,
+                  display: 'inline-flex', alignItems: 'center', gap: 1,
+                }}>
+                  <Crown size={8} /> VIP
+                </span>
+              )}
             </motion.button>
           )}
         </div>
@@ -821,16 +845,28 @@ export function MobileDetailsPage() {
 
                       <button
                         onClick={() => handleOpenDownloadModal(ep)}
-                        title={isDownloaded ? 'Ya descargado' : 'Descargar'}
+                        title={
+                          isDownloaded
+                            ? 'Ya descargado'
+                            : (FEATURE_FLAGS.SHOW_SUBSCRIPTION && !isVip
+                              ? 'Descarga exclusiva VIP'
+                              : 'Descargar')
+                        }
                         style={{
                           width: 24, height: 24, borderRadius: 5,
-                          background: isDownloaded ? 'rgba(16, 185, 129, 0.15)' : 'rgba(255,255,255,0.06)',
-                          border: isDownloaded ? '1px solid rgba(16, 185, 129, 0.3)' : 'none',
-                          color: isDownloaded ? '#34d399' : 'var(--text-secondary)',
+                          background: isDownloaded
+                            ? 'rgba(16, 185, 129, 0.15)'
+                            : (FEATURE_FLAGS.SHOW_SUBSCRIPTION && !isVip ? 'rgba(245, 158, 11, 0.1)' : 'rgba(255,255,255,0.06)'),
+                          border: isDownloaded
+                            ? '1px solid rgba(16, 185, 129, 0.3)'
+                            : (FEATURE_FLAGS.SHOW_SUBSCRIPTION && !isVip ? '1px dashed rgba(245, 158, 11, 0.35)' : 'none'),
+                          color: isDownloaded
+                            ? '#34d399'
+                            : (FEATURE_FLAGS.SHOW_SUBSCRIPTION && !isVip ? '#fbbf24' : 'var(--text-secondary)'),
                           display: 'flex', alignItems: 'center', justifyContent: 'center',
                         }}
                       >
-                        {isDownloaded ? <Check size={11} /> : <Download size={11} />}
+                        {isDownloaded ? <Check size={11} /> : (FEATURE_FLAGS.SHOW_SUBSCRIPTION && !isVip ? <Lock size={10} /> : <Download size={11} />)}
                       </button>
                     </div>
 
