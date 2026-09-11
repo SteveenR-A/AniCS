@@ -10,7 +10,10 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "bump": "node scripts/bump-version.js",
-    "test": "vitest run"
+    "test": "vitest run",
+    "install:linux": "bash scripts/install-linux.sh",
+    "uninstall:linux": "bash scripts/install-linux.sh --uninstall",
+    "bundle:appimage": "tauri build -- --bundles appimage"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",

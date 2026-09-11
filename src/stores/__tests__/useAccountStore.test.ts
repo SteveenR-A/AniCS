@@ -7,6 +7,12 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
 }));
 
+vi.mock('@/config/features', () => ({
+  FEATURE_FLAGS: {
+    SHOW_SUBSCRIPTION: true,
+  },
+}));
+
 vi.mock('@/services/firebase/firebaseConfig', () => ({
   firestoreDb: {},
   firebaseAuth: {},

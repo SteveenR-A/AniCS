@@ -1,0 +1,72 @@
+# Maintainer: SteveenR-A <https://github.com/SteveenR-A>
+pkgname=anics-git
+_pkgname=anics
+pkgver=0.2.4.r0.g0000000
+pkgrel=1
+pkgdesc="Cliente de streaming y descarga de anime multiplataforma de alto rendimiento"
+arch=('x86_64')
+url="https://github.com/SteveenR-A/AniCS"
+license=('MIT')
+depends=(
+    'webkit2gtk-4.1'
+    'gtk3'
+    'gstreamer'
+    'gst-plugins-base'
+    'gst-plugins-good'
+    'gst-plugins-bad'
+    'gst-plugins-ugly'
+    'gst-libav'
+    'openssl'
+    'hicolor-icon-theme'
+)
+makedepends=('git' 'nodejs' 'npm' 'rust' 'cargo')
+optdepends=('mpv: reproducción externa de alto rendimiento')
+provides=('anics')
+conflicts=('anics' 'anics-bin')
+source=("AniCS::git+https://github.com/SteveenR-A/AniCS.git#branch=main")
+sha256sums=('SKIP')
+
+pkgver() {
+    cd "$srcdir/AniCS"
+    git describe --long --tags --abbrev=7 2>/dev/null | sed 's/^v//;s/\([^-]*-g\)/r\1/;s/-/./g' ||
+    printf "0.2.4.r%s.g%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short=7 HEAD)"
+}
+
+prepare() {
+    cd "$srcdir/AniCS"
+    npm ci
+}
+
+build() {
+    cd "$srcdir/AniCS"
+    export CARGO_HOME="$srcdir/cargo"
+    npm run build
+    cargo build --release --manifest-path src-tauri/Cargo.toml
+}
+
+package() {
+    cd "$srcdir/AniCS"
+    install -Dm755 src-tauri/target/release/anics "$pkgdir/usr/bin/anics"
+    
+    # Iconos del sistema (estándar hicolor)
+    install -Dm644 src-tauri/icons/icon.png "$pkgdir/usr/share/icons/hicolor/512x512/apps/anics.png"
+    install -Dm644 src-tauri/icons/128x128.png "$pkgdir/usr/share/icons/hicolor/128x128/apps/anics.png"
+    install -Dm644 src-tauri/icons/64x64.png "$pkgdir/usr/share/icons/hicolor/64x64/apps/anics.png"
+    install -Dm644 src-tauri/icons/32x32.png "$pkgdir/usr/share/icons/hicolor/32x32/apps/anics.png"
+
+    # Entrada del menú de aplicaciones (.desktop)
+    install -d "$pkgdir/usr/share/applications"
+    cat <<EOF > "$pkgdir/usr/share/applications/anics.desktop"
+[Desktop Entry]
+Name=AniCS
+Comment=Cliente de streaming y descarga de anime
+Exec=/usr/bin/anics %u
+Icon=anics
+Terminal=false
+Type=Application
+Categories=AudioVideo;Video;Player;Network;
+StartupWMClass=anics
+Keywords=anime;streaming;player;video;
+EOF
+    chmod 644 "$pkgdir/usr/share/applications/anics.desktop"
+}

@@ -58,3 +58,8 @@ dataconnect/.dataconnect/
 .agents/skills/
 skills-lock.json
 
+# Arch Linux packaging artifacts
+*.pkg.tar.zst
+packaging/arch/pkg/
+packaging/arch/src/
+
