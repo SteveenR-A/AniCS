@@ -82,6 +82,7 @@ export function DesktopSettingsPage() {
   const [dbStats, setDbStats] = useState<DatabaseStats | null>(null);
   const [isOptimizingDb, setIsOptimizingDb] = useState(false);
   const [isResettingDb, setIsResettingDb] = useState(false);
+  const [windowDecorations, setWindowDecorations] = useState<boolean>(true);
 
   useEffect(() => {
     const unlisten = listen('update-download-progress', (event: any) => {
@@ -174,6 +175,9 @@ export function DesktopSettingsPage() {
     loadCache();
     loadDb();
     loadLocations();
+    invoke<boolean>('get_window_decorations')
+      .then(setWindowDecorations)
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -974,6 +978,52 @@ export function DesktopSettingsPage() {
                 </motion.div>
               );
             })}
+          </div>
+        </div>
+
+        {/* Barra de Título / Decoraciones de Ventana (Especialmente para Hyprland / Tiling WMs) */}
+        <div style={{
+          background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)',
+          border: '1px solid var(--border-subtle)', padding: 22,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ padding: 8, borderRadius: 'var(--radius-md)', background: 'rgba(168, 85, 247, 0.15)' }}>
+                <Layers size={20} color="var(--accent-secondary)" />
+              </div>
+              <div>
+                <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Barra de Título del Sistema</h2>
+                <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '2px 0 0' }}>
+                  Decoraciones nativas de la ventana (se recomienda desactivar en Hyprland, Sway o gestores de ventanas tipo Tiling)
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={async () => {
+                const nextState = !windowDecorations;
+                try {
+                  await invoke('set_window_decorations', { enabled: nextState });
+                  setWindowDecorations(nextState);
+                  setSaveStatus(nextState ? 'Barra de título activada' : 'Barra de título desactivada (Modo Hyprland / Sin bordes)');
+                  setTimeout(() => setSaveStatus(null), 3000);
+                } catch (err) {
+                  console.error(err);
+                }
+              }}
+              style={{
+                background: windowDecorations ? 'var(--accent-primary-glow)' : 'var(--bg-elevated)',
+                border: windowDecorations ? '1px solid var(--accent-primary)' : '1px solid var(--border-moderate)',
+                borderRadius: 'var(--radius-md)', padding: '9px 18px',
+                color: windowDecorations ? 'var(--text-primary)' : 'var(--text-secondary)',
+                fontSize: 13, fontWeight: 700, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: 8,
+              }}
+            >
+              <Check size={15} color={windowDecorations ? 'var(--accent-primary)' : 'transparent'} />
+              {windowDecorations ? 'Barra de título visible' : 'Ocultar barra de título (Recomendado Hyprland)'}
+            </button>
           </div>
         </div>
 

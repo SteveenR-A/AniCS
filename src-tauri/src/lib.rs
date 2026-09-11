@@ -53,6 +53,23 @@ pub fn run() {
                 if let Some(icon) = app.default_window_icon() {
                     let _ = main_win.set_icon(icon.clone());
                 }
+
+                // En entornos de tiling como Hyprland o Sway, desactivar por defecto la barra de título GTK
+                let is_tiling_wm = std::env::var("HYPRLAND_INSTANCE_SIGNATURE").is_ok()
+                    || std::env::var("SWAYSOCK").is_ok()
+                    || std::env::var("XDG_CURRENT_DESKTOP").map(|d| {
+                        let l = d.to_lowercase();
+                        l.contains("hyprland") || l.contains("sway") || l.contains("i3")
+                    }).unwrap_or(false);
+
+                let saved_decorations = storage::get_setting("window_decorations").ok().flatten();
+                let should_decorate = match saved_decorations.as_deref() {
+                    Some("true") => true,
+                    Some("false") => false,
+                    _ => !is_tiling_wm,
+                };
+
+                let _ = main_win.set_decorations(should_decorate);
             }
 
             // En escritorio: Si el usuario cierra la ventana mientras hay descargas activas,
@@ -106,6 +123,7 @@ pub fn run() {
             commands::get_servers,
             commands::resolve_stream,
             commands::detect_media_type,
+            commands::open_in_external_player,
             // Descargas y Archivos Locales
             commands::start_download,
             commands::pause_download,
@@ -175,6 +193,8 @@ pub fn run() {
             commands::reset_database,
             commands::get_storage_locations,
             commands::set_image_cache_dir,
+            commands::set_window_decorations,
+            commands::get_window_decorations,
         ])
         .run(tauri::generate_context!())
         .expect("Error while running AniCS");

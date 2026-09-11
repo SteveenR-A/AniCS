@@ -47,3 +47,25 @@ pub fn get_local_server_port() -> u16 {
     crate::downloader::media_server::get_server_port()
 }
 
+/// Abre una URL de stream directamente en un reproductor externo (MPV, VLC)
+#[tauri::command]
+pub fn open_in_external_player(stream_url: String, player_path: Option<String>) -> Result<(), String> {
+    #[cfg(desktop)]
+    {
+        let exe = player_path
+            .filter(|p| !p.trim().is_empty())
+            .unwrap_or_else(|| "mpv".to_string());
+
+        std::process::Command::new(exe)
+            .arg(stream_url)
+            .spawn()
+            .map_err(|e| format!("Error iniciando reproductor externo: {}", e))?;
+    }
+    #[cfg(not(desktop))]
+    {
+        let _ = (stream_url, player_path);
+    }
+    Ok(())
+}
+
+

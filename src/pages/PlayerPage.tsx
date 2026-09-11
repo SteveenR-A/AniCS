@@ -7,7 +7,7 @@ import {
   Maximize, Minimize, Settings, ChevronLeft,
   Loader2, SkipForward, SkipBack, RotateCcw, RotateCw,
   Sun, ListVideo, Zap, AlertCircle,
-  Scaling, Smartphone, Crown, Lock
+  Scaling, Smartphone, Crown, Lock, ExternalLink
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { usePlayerStore } from '@/stores/usePlayerStore';
@@ -140,7 +140,7 @@ export function PlayerPage() {
   };
 
   // Gestos & HUD Toasts
-  const [hudToast, setHudToast] = useState<{ icon: 'volume' | 'brightness' | 'seek' | 'aspect' | 'vip'; text: string; value?: number } | null>(null);
+  const [hudToast, setHudToast] = useState<{ icon: 'volume' | 'brightness' | 'seek' | 'aspect' | 'vip' | 'external'; text: string; value?: number } | null>(null);
   const [brightness, setBrightness] = useState(1.0);
   const [doubleTapSide, setDoubleTapSide] = useState<'left' | 'right' | null>(null);
   const [centerPlayPulse, setCenterPlayPulse] = useState<'play' | 'pause' | null>(null);
@@ -211,7 +211,7 @@ export function PlayerPage() {
     }
   };
 
-  const showToast = (toast: { icon: 'volume' | 'brightness' | 'seek' | 'aspect' | 'vip'; text: string; value?: number }) => {
+  const showToast = (toast: { icon: 'volume' | 'brightness' | 'seek' | 'aspect' | 'vip' | 'external'; text: string; value?: number }) => {
     setHudToast(toast);
     if (toastTimeout.current) clearTimeout(toastTimeout.current);
     toastTimeout.current = setTimeout(() => setHudToast(null), 1500);
@@ -1218,6 +1218,7 @@ export function PlayerPage() {
             {hudToast.icon === 'seek' && <Zap size={16} color="var(--accent-secondary)" />}
             {hudToast.icon === 'aspect' && <Scaling size={16} color="var(--accent-primary)" />}
             {hudToast.icon === 'vip' && <Crown size={16} color="#fbbf24" />}
+            {hudToast.icon === 'external' && <ExternalLink size={16} color="var(--accent-primary)" />}
             <span>{hudToast.text}</span>
           </motion.div>
         )}
@@ -1463,6 +1464,36 @@ export function PlayerPage() {
                 >
                   <Settings size={isPortrait ? 13 : 15} />
                 </button>
+
+                {/* Botón Abrir en Reproductor Externo (MPV) */}
+                {!isMobile && resolvedMedia?.directUrl && (
+                  <button
+                    onClick={async () => {
+                      try {
+                        const settings: Record<string, string> = await invoke('get_all_settings');
+                        const extPath = settings.external_player_path || '';
+                        await invoke('open_in_external_player', {
+                          streamUrl: resolvedMedia.directUrl,
+                          playerPath: extPath ? extPath : null,
+                        });
+                        showToast({ icon: 'external', text: 'Abriendo transmisión en MPV...' });
+                      } catch (err: any) {
+                        console.error('Error lanzando reproductor externo:', err);
+                        showToast({ icon: 'external', text: 'No se pudo abrir reproductor externo' });
+                      }
+                    }}
+                    title="Abrir transmisión en MPV (reproductor externo)"
+                    style={{
+                      background: 'rgba(255,255,255,0.12)',
+                      border: '1px solid rgba(255,255,255,0.2)',
+                      borderRadius: 'var(--radius-full)', width: isPortrait ? 30 : 34, height: isPortrait ? 30 : 34,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      color: 'white', cursor: 'pointer', backdropFilter: 'blur(10px)',
+                    }}
+                  >
+                    <ExternalLink size={isPortrait ? 13 : 15} />
+                  </button>
+                )}
               </div>
             </div>
 
