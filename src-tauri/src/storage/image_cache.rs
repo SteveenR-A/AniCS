@@ -142,6 +142,16 @@ pub fn bytes_to_data_uri(bytes: &[u8], mime_type: Option<&str>) -> String {
 
 /// Obtiene e inicializa el directorio de caché de imágenes en disco
 pub fn get_image_cache_dir(app_handle: &AppHandle) -> AppResult<PathBuf> {
+    if let Ok(Some(custom_dir)) = crate::storage::get_setting("image_cache_dir") {
+        let trimmed = custom_dir.trim();
+        if !trimmed.is_empty() {
+            let p = PathBuf::from(trimmed);
+            if fs::create_dir_all(&p).is_ok() && p.exists() {
+                return Ok(p);
+            }
+        }
+    }
+
     let base_cache = app_handle
         .path()
         .app_cache_dir()

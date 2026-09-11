@@ -293,3 +293,54 @@ pub async fn reset_database() -> Result<(), String> {
     storage::reset_database().map_err(|e| e.to_string())
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StorageLocations {
+    pub download_dir: String,
+    pub image_cache_dir: String,
+    pub database_path: String,
+    pub app_data_dir: String,
+}
+
+/// Obtiene las ubicaciones físicas en disco de descargas, caché de imágenes y base de datos SQLite
+#[tauri::command]
+pub fn get_storage_locations(app_handle: tauri::AppHandle) -> Result<StorageLocations, String> {
+    use tauri::Manager;
+    let app_data = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
+    let db_path = app_data.join("anics.db");
+    let img_cache = crate::storage::get_image_cache_dir(&app_handle).map_err(|e| e.to_string())?;
+    let dl_dir = crate::commands::download_cmd::get_default_download_dir(app_handle)?;
+
+    Ok(StorageLocations {
+        download_dir: dl_dir,
+        image_cache_dir: img_cache.to_string_lossy().to_string(),
+        database_path: db_path.to_string_lossy().to_string(),
+        app_data_dir: app_data.to_string_lossy().to_string(),
+    })
+}
+
+/// Permite reubicar la carpeta de caché de imágenes en disco
+#[tauri::command]
+pub fn set_image_cache_dir(custom_path: String, app_handle: tauri::AppHandle) -> Result<String, String> {
+    use std::path::Path;
+    let trimmed = custom_path.trim();
+    if trimmed.is_empty() {
+        let _ = storage::set_setting("image_cache_dir", "");
+        let default_dir = storage::get_image_cache_dir(&app_handle).map_err(|e| e.to_string())?;
+        return Ok(default_dir.to_string_lossy().to_string());
+    }
+
+    let p = Path::new(trimmed);
+    if !p.exists() {
+        std::fs::create_dir_all(p).map_err(|e| format!("No se pudo crear el directorio: {}", e))?;
+    }
+    if !p.is_dir() {
+        return Err("La ruta especificada no es un directorio válido".to_string());
+    }
+
+    let canonical = p.canonicalize().map_err(|e| format!("Ruta inválida: {}", e))?;
+    let path_str = canonical.to_string_lossy().to_string();
+    storage::set_setting("image_cache_dir", &path_str).map_err(|e| e.to_string())?;
+    Ok(path_str)
+}
+

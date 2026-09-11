@@ -8,7 +8,7 @@ import {
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
-import { openUrl } from '@tauri-apps/plugin-opener';
+import { openUrl, openPath } from '@tauri-apps/plugin-opener';
 import { ChangelogModal } from '@/components/ChangelogModal';
 import { ProfileSelectorModal, getProfileAvatarIcon } from '@/components/ProfileSelectorModal';
 import { GistSyncModal } from '@/components/GistSyncModal';
@@ -118,9 +118,62 @@ export function DesktopSettingsPage() {
     }
   };
 
+  interface StorageLocations {
+    downloadDir: string;
+    imageCacheDir: string;
+    databasePath: string;
+    appDataDir: string;
+  }
+
+  const [storageLocations, setStorageLocations] = useState<StorageLocations | null>(null);
+
+  const loadLocations = async () => {
+    try {
+      const locs = await invoke<StorageLocations>('get_storage_locations');
+      setStorageLocations(locs);
+      if (!downloadDir && locs.downloadDir) {
+        setDownloadDir(locs.downloadDir);
+      }
+    } catch (e) {
+      console.error('Failed to get storage locations', e);
+    }
+  };
+
+  const handleSelectImageCacheDir = async () => {
+    try {
+      const selected = await openDialog({
+        directory: true,
+        multiple: false,
+        title: 'Seleccionar carpeta de caché de imágenes',
+      });
+      if (selected && typeof selected === 'string') {
+        const newPath = await invoke<string>('set_image_cache_dir', { customPath: selected });
+        setStorageLocations(prev => prev ? { ...prev, imageCacheDir: newPath } : null);
+        loadCache();
+        setSaveStatus('Ubicación de caché actualizada');
+        setTimeout(() => setSaveStatus(null), 3000);
+      }
+    } catch (e) {
+      console.error('Error selecting image cache dir', e);
+    }
+  };
+
+  const handleResetImageCacheDir = async () => {
+    try {
+      const defaultPath = await invoke<string>('set_image_cache_dir', { customPath: '' });
+      setStorageLocations(prev => prev ? { ...prev, imageCacheDir: defaultPath } : null);
+      loadCache();
+      setSaveStatus('Caché restaurada a la ubicación por defecto');
+      setTimeout(() => setSaveStatus(null), 3000);
+    } catch (e) {
+      console.error('Error resetting image cache dir', e);
+    }
+  };
+
   useEffect(() => {
     loadCache();
     loadDb();
+    loadLocations();
   }, []);
 
   useEffect(() => {
@@ -1120,18 +1173,39 @@ export function DesktopSettingsPage() {
               <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', display: 'block', marginBottom: 6 }}>
                 Carpeta de Descargas
               </label>
-              <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 <input
                   type="text"
                   value={downloadDir}
                   onChange={(e) => setDownloadDir(e.target.value)}
                   placeholder="Por defecto: Carpeta Videos/AniCS"
                   style={{
-                    flex: 1, background: 'var(--bg-elevated)',
+                    flex: 1, minWidth: 260, background: 'var(--bg-elevated)',
                     border: '1px solid var(--border-moderate)', borderRadius: 'var(--radius-md)',
                     padding: '10px 14px', color: 'var(--text-primary)', fontSize: 14, outline: 'none',
                   }}
                 />
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (downloadDir) {
+                      try {
+                        await openPath(downloadDir);
+                      } catch (err) {
+                        console.error('Error al abrir carpeta de descargas:', err);
+                      }
+                    }
+                  }}
+                  title="Abrir carpeta de descargas en el gestor de archivos"
+                  style={{
+                    background: 'var(--bg-elevated)', border: '1px solid var(--border-moderate)',
+                    borderRadius: 'var(--radius-md)', padding: '10px 16px',
+                    color: 'var(--text-primary)', cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600,
+                  }}
+                >
+                  <FolderOpen size={16} color="var(--accent-primary)" /> Abrir
+                </button>
                 <button
                   onClick={handleSelectDownloadDir}
                   style={{
@@ -1217,7 +1291,7 @@ export function DesktopSettingsPage() {
                   type="text"
                   value={externalPlayerPath}
                   onChange={(e) => setExternalPlayerPath(e.target.value)}
-                  placeholder="C:\Program Files\mpv\mpv.exe"
+                  placeholder={typeof navigator !== 'undefined' && navigator.userAgent.toLowerCase().includes('windows') ? "C:\\Program Files\\mpv\\mpv.exe" : "/usr/bin/mpv (o mpv / vlc)"}
                   style={{
                     width: '100%', background: 'var(--bg-elevated)',
                     border: '1px solid var(--border-moderate)', borderRadius: 'var(--radius-md)',
@@ -1239,10 +1313,72 @@ export function DesktopSettingsPage() {
               <HardDrive size={20} color="var(--accent-primary)" />
             </div>
             <div>
-              <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Caché en Disco</h2>
+              <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Caché en Disco e Imágenes</h2>
               <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '2px 0 0' }}>
-                Imágenes almacenadas localmente para navegación rápida
+                Imágenes almacenadas localmente para navegación rápida y desconectada
               </p>
+            </div>
+          </div>
+
+          {/* Banner de ruta física de caché */}
+          <div style={{
+            background: 'var(--bg-elevated)', padding: '12px 16px', borderRadius: 'var(--radius-md)',
+            border: '1px solid var(--border-subtle)', marginBottom: 14,
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10,
+          }}>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                Ubicación física en disco
+              </div>
+              <div style={{ fontSize: 13, fontWeight: 600, fontFamily: 'monospace', color: 'var(--text-primary)', marginTop: 2, wordBreak: 'break-all' }}>
+                {storageLocations?.imageCacheDir || 'Cargando directorio...'}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (storageLocations?.imageCacheDir) {
+                    try {
+                      await openPath(storageLocations.imageCacheDir);
+                    } catch (err) {
+                      console.error('Error abriendo caché:', err);
+                    }
+                  }
+                }}
+                style={{
+                  background: 'var(--bg-surface)', border: '1px solid var(--border-moderate)',
+                  borderRadius: 'var(--radius-md)', padding: '7px 12px',
+                  color: 'var(--text-primary)', fontSize: 12, fontWeight: 600,
+                  cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5,
+                }}
+              >
+                <FolderOpen size={14} color="var(--accent-primary)" /> Abrir
+              </button>
+              <button
+                type="button"
+                onClick={handleSelectImageCacheDir}
+                style={{
+                  background: 'var(--bg-surface)', border: '1px solid var(--border-moderate)',
+                  borderRadius: 'var(--radius-md)', padding: '7px 12px',
+                  color: 'var(--text-secondary)', fontSize: 12, fontWeight: 600,
+                  cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5,
+                }}
+              >
+                Cambiar
+              </button>
+              <button
+                type="button"
+                onClick={handleResetImageCacheDir}
+                title="Restaurar a la ubicación predeterminada del sistema"
+                style={{
+                  background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-md)', padding: '7px 10px',
+                  color: 'var(--text-muted)', fontSize: 12, cursor: 'pointer',
+                }}
+              >
+                <Undo2 size={13} />
+              </button>
             </div>
           </div>
 
@@ -1333,6 +1469,42 @@ export function DesktopSettingsPage() {
                 Mantenimiento de integridad, optimización de índices y limpieza segura sin dañar la app
               </p>
             </div>
+          </div>
+
+          {/* Banner de ruta física de base de datos */}
+          <div style={{
+            background: 'var(--bg-elevated)', padding: '12px 16px', borderRadius: 'var(--radius-md)',
+            border: '1px solid var(--border-subtle)', marginBottom: 16,
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10,
+          }}>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                Archivo de Base de Datos SQLite
+              </div>
+              <div style={{ fontSize: 13, fontWeight: 600, fontFamily: 'monospace', color: 'var(--text-primary)', marginTop: 2, wordBreak: 'break-all' }}>
+                {storageLocations?.databasePath || 'Cargando directorio...'}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={async () => {
+                if (storageLocations?.appDataDir) {
+                  try {
+                    await openPath(storageLocations.appDataDir);
+                  } catch (err) {
+                    console.error('Error abriendo carpeta de datos:', err);
+                  }
+                }
+              }}
+              style={{
+                background: 'var(--bg-surface)', border: '1px solid var(--border-moderate)',
+                borderRadius: 'var(--radius-md)', padding: '7px 12px',
+                color: 'var(--text-primary)', fontSize: 12, fontWeight: 600,
+                cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5,
+              }}
+            >
+              <FolderOpen size={14} color="#34d399" /> Abrir carpeta de datos
+            </button>
           </div>
 
           <div style={{

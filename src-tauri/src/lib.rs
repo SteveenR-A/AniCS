@@ -173,6 +173,8 @@ pub fn run() {
             commands::get_database_stats,
             commands::optimize_database,
             commands::reset_database,
+            commands::get_storage_locations,
+            commands::set_image_cache_dir,
         ])
         .run(tauri::generate_context!())
         .expect("Error while running AniCS");

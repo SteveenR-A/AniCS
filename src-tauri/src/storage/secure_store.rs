@@ -67,6 +67,10 @@ mod tests {
 
     #[test]
     fn test_secure_store_roundtrip() {
+        let test_dir = std::env::temp_dir().join(format!("anics_sec_test_{}", uuid::Uuid::new_v4()));
+        let _ = std::fs::create_dir_all(&test_dir);
+        let _ = database::init_database(test_dir.clone());
+
         let test_key = "test-token";
         let test_val = "secret_12345";
 
@@ -83,5 +87,7 @@ mod tests {
         // 4. Verificar que ya no exista
         let after_delete = get_secure_secret(test_key).expect("Failed to query after delete");
         assert_eq!(after_delete, None);
+
+        let _ = std::fs::remove_dir_all(test_dir);
     }
 }

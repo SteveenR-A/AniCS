@@ -8,6 +8,7 @@ import {
   CheckSquare, Square, X, Layers, PlayCircle, Heart, AlertTriangle, CheckCircle2
 } from 'lucide-react';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
+import { openPath } from '@tauri-apps/plugin-opener';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import {
   getHistory, clearHistory, removeHistory, removeHistoryBatch,
@@ -1254,7 +1255,27 @@ export function DesktopDownloadsPage() {
                 </span>
               </div>
             </div>
-            <div style={{ display: 'flex', gap: 10 }}>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <button
+                onClick={async () => {
+                  if (downloadFolder) {
+                    try {
+                      await openPath(downloadFolder);
+                    } catch (err) {
+                      console.error('Error abriendo carpeta de descargas:', err);
+                    }
+                  }
+                }}
+                title="Abrir carpeta de descargas en el gestor de archivos"
+                style={{
+                  background: 'var(--bg-elevated)', border: '1px solid var(--border-moderate)',
+                  borderRadius: 'var(--radius-md)', padding: '8px 14px',
+                  color: 'var(--text-primary)', fontSize: 12, fontWeight: 600,
+                  cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
+                }}
+              >
+                <Folder size={14} color="var(--accent-primary)" /> Abrir en explorador
+              </button>
               <button
                 onClick={handleSelectFolder}
                 style={{
@@ -1361,6 +1382,24 @@ export function DesktopDownloadsPage() {
                       </div>
 
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }} onClick={e => e.stopPropagation()}>
+                        <button
+                          onClick={async () => {
+                            try {
+                              await openPath(anime.folderPath);
+                            } catch (err) {
+                              console.error('Error abriendo carpeta del anime:', err);
+                            }
+                          }}
+                          title="Abrir carpeta de esta serie en el gestor de archivos"
+                          style={{
+                            background: 'var(--bg-elevated)', border: '1px solid var(--border-moderate)',
+                            borderRadius: 'var(--radius-md)', padding: '6px 10px',
+                            color: 'var(--text-secondary)', fontSize: 12, cursor: 'pointer',
+                            display: 'flex', alignItems: 'center', gap: 5,
+                          }}
+                        >
+                          <FolderOpen size={13} /> Carpeta
+                        </button>
                         <button
                           onClick={() => handleSearchOnline(anime)}
                           title="Buscar serie online para más info/episodios"
