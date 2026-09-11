@@ -17,7 +17,7 @@ path = "src/main.rs"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["protocol-asset"] }
+tauri = { version = "2", features = ["protocol-asset", "custom-protocol"] }
 tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
@@ -52,7 +52,9 @@ keyring = { version = "3", features = ["windows-native", "apple-native", "sync-s
 sha2 = "0.10"
 subtle = "2.6"
 hex = "0.4"
-zeroize = { version = "1.8", features = ["derive"] }
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
 
 [profile.release]
 panic = "abort"

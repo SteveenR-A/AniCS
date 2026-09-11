@@ -70,11 +70,8 @@ echo -e "${BLUE}==============================================${NC}"
 cd "$PROJECT_ROOT"
 
 if [ "$NO_BUILD" = false ]; then
-    echo -e "${BLUE}1. Compilando frontend (Vite)...${NC}"
-    npm run build
-
-    echo -e "${BLUE}2. Compilando binario optimizado en Rust (release)...${NC}"
-    cargo build --release --manifest-path src-tauri/Cargo.toml
+    echo -e "${BLUE}1. Compilando frontend y binario release con Tauri CLI...${NC}"
+    npx tauri build --no-bundle
 fi
 
 RELEASE_BIN="$PROJECT_ROOT/src-tauri/target/release/anics"
