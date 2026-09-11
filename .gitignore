@@ -62,4 +62,5 @@ skills-lock.json
 *.pkg.tar.zst
 packaging/arch/pkg/
 packaging/arch/src/
+packaging/arch/AniCS/
 

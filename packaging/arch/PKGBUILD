@@ -1,7 +1,7 @@
 # Maintainer: SteveenR-A <https://github.com/SteveenR-A>
 pkgname=anics-git
 _pkgname=anics
-pkgver=0.2.4.r0.g0000000
+pkgver=0.2.4.r4.g4912569
 pkgrel=1
 pkgdesc="Cliente de streaming y descarga de anime multiplataforma de alto rendimiento"
 arch=('x86_64')
@@ -23,6 +23,7 @@ makedepends=('git' 'nodejs' 'npm' 'rust' 'cargo')
 optdepends=('mpv: reproducción externa de alto rendimiento')
 provides=('anics')
 conflicts=('anics' 'anics-bin')
+options=('!lto')
 source=("AniCS::git+https://github.com/SteveenR-A/AniCS.git#branch=main")
 sha256sums=('SKIP')
 
@@ -40,6 +41,11 @@ prepare() {
 build() {
     cd "$srcdir/AniCS"
     export CARGO_HOME="$srcdir/cargo"
+    # Evitar conflicto de GCC LTO con rust-lld
+    export CFLAGS="${CFLAGS//-flto=auto/}"
+    export CFLAGS="${CFLAGS//-flto/}"
+    export CXXFLAGS="${CXXFLAGS//-flto=auto/}"
+    export CXXFLAGS="${CXXFLAGS//-flto/}"
     npm run build
     cargo build --release --manifest-path src-tauri/Cargo.toml
 }
