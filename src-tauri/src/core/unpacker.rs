@@ -89,28 +89,81 @@ impl JsUnpacker {
             html.to_string()
         };
 
-        // 2. Buscar .m3u8
+        fn is_discarded_url(u: &str) -> bool {
+            let lower = u.to_lowercase();
+            // Ignorar scripts, estilos, imágenes y fuentes
+            if lower.ends_with(".js")
+                || lower.ends_with(".css")
+                || lower.ends_with(".png")
+                || lower.ends_with(".jpg")
+                || lower.ends_with(".jpeg")
+                || lower.ends_with(".gif")
+                || lower.ends_with(".svg")
+                || lower.ends_with(".ico")
+                || lower.ends_with(".webp")
+                || lower.ends_with(".html")
+                || lower.ends_with(".php")
+                || lower.ends_with(".json")
+                || lower.ends_with(".xml")
+            {
+                return true;
+            }
+            // Ignorar analíticas y rastreadores
+            if lower.contains("cloudflareinsights")
+                || lower.contains("googletagmanager")
+                || lower.contains("google-analytics")
+                || lower.contains("doubleclick")
+                || lower.contains("ads-twitter")
+                || lower.contains("facebook")
+                || lower.contains("yandex")
+                || lower.contains("beacon")
+                || lower.contains("test-videos.co.uk")
+            {
+                return true;
+            }
+            false
+        }
+
+        // 2. Buscar .m3u8 (HLS directo o maestro)
         static M3U8_RE: Lazy<Regex> = Lazy::new(|| {
             Regex::new(r#"(https?://[^\s"'\\<>]+\.m3u8[^\s"'\\<>]*)"#).unwrap()
         });
-        if let Some(m) = M3U8_RE.find(&text) {
-            return Some(m.as_str().replace('\\', ""));
+        for m in M3U8_RE.find_iter(&text) {
+            let u = m.as_str().replace('\\', "");
+            if !is_discarded_url(&u) {
+                return Some(u);
+            }
         }
 
-        // 3. Buscar file: "url" o source: "url"
-        static FILE_RE: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r#"(?:file|source|src)\s*[:=]\s*["'](https?://[^"']+)["']"#).unwrap()
-        });
-        if let Some(cap) = FILE_RE.captures(&text) {
-            return Some(cap[1].replace('\\', ""));
-        }
-
-        // 4. Buscar .mp4
+        // 3. Buscar .mp4 directo
         static MP4_RE: Lazy<Regex> = Lazy::new(|| {
             Regex::new(r#"(https?://[^\s"'\\<>]+\.mp4[^\s"'\\<>]*)"#).unwrap()
         });
-        if let Some(m) = MP4_RE.find(&text) {
-            return Some(m.as_str().replace('\\', ""));
+        for m in MP4_RE.find_iter(&text) {
+            let u = m.as_str().replace('\\', "");
+            if !is_discarded_url(&u) {
+                return Some(u);
+            }
+        }
+
+        // 4. Buscar asignaciones explícitas file: "url" o source: "url"
+        static FILE_RE: Lazy<Regex> = Lazy::new(|| {
+            Regex::new(r#"(?:file|source|src)\s*[:=]\s*["'](https?://[^"']+)["']"#).unwrap()
+        });
+        for cap in FILE_RE.captures_iter(&text) {
+            let u = cap[1].replace('\\', "");
+            if !is_discarded_url(&u) {
+                let lower = u.to_lowercase();
+                if lower.contains(".m3u8")
+                    || lower.contains(".mp4")
+                    || lower.contains(".mkv")
+                    || lower.contains("hls")
+                    || lower.contains("/stream")
+                    || lower.contains("master")
+                {
+                    return Some(u);
+                }
+            }
         }
 
         None

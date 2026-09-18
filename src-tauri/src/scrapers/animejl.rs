@@ -9,8 +9,12 @@ use crate::scrapers::{fetch_html, AnimeExtractor};
 
 const DEFAULT_ANIMEJL_URL: &str = "https://www.anime-jl.net";
 
-static EPISODES_ARRAY_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"var\s+episodes\s*=\s*(\[\[.*?\]\]);"#).unwrap()
+static EPISODES_BLOCK_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"(?s)var\s+episodes\s*=\s*\[(.*?)\]\s*;"#).unwrap()
+});
+
+static EPISODE_ITEM_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"\[\s*(\d+)\s*,\s*["']([^"']*)["']\s*(?:,\s*["']([^"']*)["'])?"#).unwrap()
 });
 
 static VIDEO_ARRAY_RE: Lazy<Regex> = Lazy::new(|| {
@@ -275,6 +279,30 @@ impl AnimeExtractor for AnimeJLExtractor {
             let doc = Html::parse_document(&html);
             let mut results = vec![];
 
+            // Mapear pósters oficiales de series presentes en la portada (ListAnimes, Series, Slider)
+            let mut poster_map: HashMap<String, String> = HashMap::new();
+            let series_card_sel = Selector::parse("ul.ListAnimes li article, article.Anime, .Series li, .Slider li, .Top li").expect("Invalid CSS selector");
+            let series_link_sel = Selector::parse("a[href*='/anime/']").expect("Invalid CSS selector");
+            let series_img_sel = Selector::parse("figure img, img").expect("Invalid CSS selector");
+
+            for card in doc.select(&series_card_sel) {
+                if let Some(link) = card.select(&series_link_sel).next() {
+                    let href = attr(&link, "href");
+                    if href.is_empty() {
+                        continue;
+                    }
+                    let canonical = self.canonical_series_url(&href);
+                    if let Some(img) = card.select(&series_img_sel).next() {
+                        let src = attr(&img, "src");
+                        let data_src = attr(&img, "data-src");
+                        let chosen_src = if !src.is_empty() { src } else { data_src };
+                        if !chosen_src.is_empty() && (chosen_src.contains("animes_tumbl") || !chosen_src.contains("episodes_tumbl")) {
+                            poster_map.insert(canonical, self.normalize_url(&chosen_src));
+                        }
+                    }
+                }
+            }
+
             let item_sel = Selector::parse("ul.ListEpisodios li").expect("Invalid CSS selector");
             let link_sel = Selector::parse("a").expect("Invalid CSS selector");
             let title_sel = Selector::parse("strong.Title, .Title").expect("Invalid CSS selector");
@@ -313,7 +341,7 @@ impl AnimeExtractor for AnimeJLExtractor {
                     .map(|c| inner_text(&c))
                     .or_else(|| self.extract_episode_number(&href).map(|n| format!("Episodio {}", n)));
 
-                let thumbnail_url = item
+                let raw_thumb = item
                     .select(&img_sel)
                     .next()
                     .map(|i| {
@@ -326,6 +354,9 @@ impl AnimeExtractor for AnimeJLExtractor {
                     })
                     .map(|src| self.normalize_url(&src))
                     .unwrap_or_default();
+
+                // Preferir póster oficial si está disponible en la portada, de lo contrario usar captura
+                let thumbnail_url = poster_map.get(&canonical_url).cloned().unwrap_or(raw_thumb);
 
                 results.push(AnimeResult {
                     title,
@@ -649,47 +680,41 @@ impl AnimeExtractor for AnimeJLExtractor {
         // Extraer lista de episodios
         let mut episodes: Vec<Episode> = vec![];
 
-        // Método 1: Variable JavaScript 'var episodes = [[118, "episodio-118", "..."], ...];'
-        if let Some(caps) = EPISODES_ARRAY_RE.captures(&html) {
-            if let Some(json_str) = caps.get(1) {
-                // Parsear JSON como array de arrays
-                if let Ok(raw_list) = serde_json::from_str::<Vec<serde_json::Value>>(json_str.as_str()) {
-                    for item in raw_list {
-                        if let Some(arr) = item.as_array() {
-                            if arr.len() >= 2 {
-                                let ep_num = arr[0].as_u64().unwrap_or(0) as u32;
-                                let ep_slug = arr[1].as_str().unwrap_or("");
-                                let thumb_path = arr.get(2).and_then(|v| v.as_str()).unwrap_or("");
+        // Método 1: Variable JavaScript 'var episodes = [[25, "episodio-25", "..."], ..., [1, "episodio-1", "..."],];'
+        if let Some(caps) = EPISODES_BLOCK_RE.captures(&html) {
+            if let Some(block_match) = caps.get(1) {
+                let block = block_match.as_str();
+                for item_caps in EPISODE_ITEM_RE.captures_iter(block) {
+                    let ep_num = item_caps.get(1).and_then(|m| m.as_str().parse::<u32>().ok()).unwrap_or(0);
+                    let ep_slug = item_caps.get(2).map(|m| m.as_str()).unwrap_or("");
+                    let thumb_path = item_caps.get(3).map(|m| m.as_str()).unwrap_or("");
 
-                                if ep_num > 0 {
-                                    let ep_url = if ep_slug.is_empty() {
-                                        format!("{}/episodio-{}", series_url, ep_num)
-                                    } else {
-                                        format!("{}/{}", series_url, ep_slug.trim_start_matches('/'))
-                                    };
+                    if ep_num > 0 {
+                        let ep_url = if ep_slug.is_empty() {
+                            format!("{}/episodio-{}", series_url, ep_num)
+                        } else {
+                            format!("{}/{}", series_url, ep_slug.trim_start_matches('/'))
+                        };
 
-                                    let ep_thumb = if !thumb_path.is_empty() {
-                                        let clean_thumb = if thumb_path.starts_with('/') {
-                                            thumb_path.to_string()
-                                        } else {
-                                            format!("/storage/{}", thumb_path)
-                                        };
-                                        Some(self.normalize_url(&clean_thumb))
-                                    } else {
-                                        None
-                                    };
+                        let ep_thumb = if !thumb_path.is_empty() {
+                            let clean_thumb = if thumb_path.starts_with('/') {
+                                thumb_path.to_string()
+                            } else {
+                                format!("/storage/{}", thumb_path)
+                            };
+                            Some(self.normalize_url(&clean_thumb))
+                        } else {
+                            None
+                        };
 
-                                    episodes.push(Episode {
-                                        number: ep_num,
-                                        title: Some(format!("Episodio {}", ep_num)),
-                                        url: ep_url,
-                                        thumbnail_url: ep_thumb,
-                                        watched: false,
-                                        watch_progress: None,
-                                    });
-                                }
-                            }
-                        }
+                        episodes.push(Episode {
+                            number: ep_num,
+                            title: Some(format!("Episodio {}", ep_num)),
+                            url: ep_url,
+                            thumbnail_url: ep_thumb,
+                            watched: false,
+                            watch_progress: None,
+                        });
                     }
                 }
             }

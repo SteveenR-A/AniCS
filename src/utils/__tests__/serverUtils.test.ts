@@ -53,11 +53,11 @@ describe('serverUtils', () => {
       const result = maskAndFilterServers(input);
       expect(result[0].name).toBe('Servidor Dedicado (1080p Ultra HD)');
       expect(result[1].name).toBe('Servidor Alta Velocidad (1080p)');
-      expect(result[2].name).toBe('Servidor Principal HLS (1080p)');
+      expect(result[2].name).toBe('Servidor Espejo Web');
       expect(result[3].name).toBe('Servidor Espejo (MP4 Directo)');
       expect(result[4].name).toBe('Servidor Rápido (720p HD)');
-      expect(result[5].name).toBe('Servidor Alternativo CDN');
-      expect(result[6].name).toBe('Servidor Respaldo CDN');
+      expect(result[5].name).toBe('Servidor Alta Velocidad (1080p)');
+      expect(result[6].name).toBe('Servidor Principal (1080p)');
       expect(result[7].name).toBe('Servidor CDN 1');
     });
 

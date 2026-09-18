@@ -98,3 +98,34 @@ Para crear y publicar una nueva versión de AniCS (`major.minor.patch`):
      ```
    - GitHub Actions generará los binarios para Windows (`AniCS-setup.exe`) y Android (`AniCS.apk`), publicándolos junto con `RELEASE_NOTES.md`.
 
+---
+
+### 7. Estándares de Scrapers y Extracción Resiliente
+- **Tolerancia a Sintaxis JavaScript en Cliente**:
+  - Sitios como Anime-JL incrustan estructuras de datos en scripts JS que no cumplen la especificación estricta de JSON (por ejemplo, comas finales trailing commas `[...,],];`, comillas variadas o arrays sin comillas).
+  - **Nunca** asumir que un bloque de script JS es JSON válido consumible por `serde_json::from_str`.
+  - Utilizar escaneo regex robusto de dos fases: un patrón de bloque para aislar el contenedor (`var episodes = [(...)];`) y un patrón de elemento iterativo (`EPISODE_ITEM_RE.captures_iter(...)`) para extraer tuplas de forma segura.
+- **Normalización Canónica de URLs**:
+  - Toda URL de serie debe depurarse de sufijos de episodios (`/episodio-\d+`, `/capitulo-\d+`), query params (`?`) y fragmentos (`#`) para garantizar claves uniformes de persistencia y caché.
+- **Distinción Estricta entre Póster de Serie y Miniatura de Episodio**:
+  - Los pósters oficiales son imágenes verticales canónicas (`/storage/animes_tumbl/...`).
+  - Las capturas de episodios son fotos horizontales provisionales (`/storage/episodes_tumbl/...`).
+  - En feeds de inicio, asociar cada episodio con el póster oficial si está disponible en la portada.
+  - En el frontend (`DesktopDetailsPage.tsx` y `MobileDetailsPage.tsx`), la respuesta de `getDetails()` debe sustituir inmediatamente cualquier captura provisional en el estado local y en caché.
+
+---
+
+### 8. Estándares de Modales, Visores Multimedia e Interfaz (UI/UX)
+- **Estética Limpia Sin Emojis**:
+  - Prohibido el uso de emojis en cualquier componente, modal, visor o notificación; emplear siempre iconos vectoriales SVG de `lucide-react` con tipografía limpia y estructurada.
+- **Accesibilidad y Descarte de Modales**:
+  - Todo modal o visor flotante (`ImageLightboxModal`, etc.) debe cerrarse automáticamente al presionar la tecla `Escape` y al hacer clic o toque en el fondo exterior (backdrop).
+  - Prevenir la propagación de eventos en el contenedor de contenido (`e.stopPropagation()`) para evitar cierres accidentales al interactuar con el contenido o imagen.
+- **Efectos Visuales Modernos y Fluidez**:
+  - Utilizar fondos de oscurecimiento profundo (`rgba(0, 0, 0, 0.88)`) combinados con `backdrop-filter: blur(16px)` y `WebkitBackdropFilter`.
+  - Implementar transiciones suaves de entrada y salida mediante `framer-motion` y `AnimatePresence`.
+- **Ergonomía Multiplataforma**:
+  - En escritorio: cursor interactivo (`zoom-in`), atajos de teclado y tooltips explicativos.
+  - En móvil: áreas de toque táctiles amplias, contenedor centrado con límites de escala (`92vw`, `82vh`) y `object-fit: contain` para garantizar una visualización impecable sin desbordamiento.
+
+

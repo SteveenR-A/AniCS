@@ -18,6 +18,7 @@ import { useSyncStore } from '@/stores/useSyncStore';
 import { CachedImage } from '@/components/CachedImage';
 import { BatchDownloadModal } from '@/components/BatchDownloadModal';
 import { FavoriteStatusDropdown } from '@/components/FavoriteStatusDropdown';
+import { ImageLightboxModal } from '@/components/ImageLightboxModal';
 import type { AnimeDetails, Episode, VideoServer, LocalEpisodeItem, FavoriteStatus } from '@/types';
 
 export function DesktopDetailsPage() {
@@ -50,10 +51,11 @@ export function DesktopDetailsPage() {
     return null;
   });
 
-  const [isLoading, setIsLoading] = useState(!cached && (!passedAnime || !passedAnime.episodes?.length));
+  const [isLoading, setIsLoading] = useState(!cached && !passedAnime);
   const [isFavorite, setIsFavorite] = useState(false);
   const [favoriteStatus, setFavoriteStatus] = useState<FavoriteStatus>('favorite');
   const [showBatchModal, setShowBatchModal] = useState(false);
+  const [showCoverZoom, setShowCoverZoom] = useState(false);
   const [showAllEps, setShowAllEps] = useState(false);
   const [epSearch, setEpSearch] = useState('');
   const [loadingEpisode, setLoadingEpisode] = useState<number | null>(null);
@@ -76,47 +78,73 @@ export function DesktopDetailsPage() {
   const { activeProfile } = useProfileStore();
 
   useEffect(() => {
+    let isCancelled = false;
+
     const load = async () => {
-      if (cached && cached.episodes && cached.episodes.length > 0) {
-        setDetails(cached);
-        setIsLoading(false);
-        checkFavorite(decodedUrl, activeProfile?.id).then(fav => {
-          setIsFavorite(fav);
-          if (fav) {
-            getFavorites(activeProfile?.id).then(list => {
-              const found = list.find(f => f.url === decodedUrl);
-              if (found?.status) setFavoriteStatus(found.status as FavoriteStatus);
-            }).catch(() => {});
-          }
-        }).catch(() => {});
-        return;
+      // Si tenemos una entrada completa en caché para esta URL, usarla de inmediato
+      if (cached && cached.title && cached.url === decodedUrl) {
+        const hasTempThumbnail = cached.thumbnailUrl && cached.thumbnailUrl.includes('episodes_tumbl');
+        if (!hasTempThumbnail) {
+          setDetails(cached);
+          setIsLoading(false);
+          checkFavorite(decodedUrl, activeProfile?.id).then(fav => {
+            if (isCancelled) return;
+            setIsFavorite(fav);
+            if (fav) {
+              getFavorites(activeProfile?.id).then(list => {
+                if (isCancelled) return;
+                const found = list.find(f => f.url === decodedUrl);
+                if (found?.status) setFavoriteStatus(found.status as FavoriteStatus);
+              }).catch(() => {});
+            }
+          }).catch(() => {});
+          return;
+        }
       }
 
-      if (!passedAnime || !passedAnime.episodes?.length) {
+      if (!cached && !passedAnime) {
         setIsLoading(true);
       }
+
       try {
         const [det, fav] = await Promise.all([
           getDetails(decodedUrl, source),
           checkFavorite(decodedUrl, activeProfile?.id),
         ]);
+        if (isCancelled) return;
         setDetails(det);
         cacheDetails(det);
         setIsFavorite(fav);
         if (fav) {
           getFavorites(activeProfile?.id).then(list => {
+            if (isCancelled) return;
             const found = list.find(f => f.url === decodedUrl);
             if (found?.status) setFavoriteStatus(found.status as FavoriteStatus);
           }).catch(() => {});
         }
       } catch (e) {
-        console.error(e);
+        console.error('Failed to load anime details:', e);
+        if (!isCancelled) {
+          setDetails(prev => {
+            if (prev && prev.synopsis === 'Cargando información del anime...') {
+              return { ...prev, synopsis: 'No se pudo cargar la información detallada del anime.' };
+            }
+            return prev;
+          });
+        }
       } finally {
-        setIsLoading(false);
+        if (!isCancelled) {
+          setIsLoading(false);
+        }
       }
     };
+
     load();
-  }, [decodedUrl, source, cached, cacheDetails, activeProfile?.id]);
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [decodedUrl, source, activeProfile?.id]);
 
   // Normalizador de títulos ultra-tolerante (ignora tildes, guiones, espacios y puntuación)
   const normalizeTitle = (str: string): string => {
@@ -531,12 +559,17 @@ export function DesktopDetailsPage() {
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
+            whileHover={{ scale: 1.025 }}
+            onClick={() => setShowCoverZoom(true)}
+            title="Haz clic para ampliar la portada"
             style={{
               width: 150, height: 215, borderRadius: 'var(--radius-lg)',
               overflow: 'hidden', flexShrink: 0,
               border: '2px solid var(--border-moderate)',
               boxShadow: '0 12px 32px rgba(0,0,0,0.6)',
               background: 'var(--bg-elevated)',
+              cursor: 'zoom-in',
+              position: 'relative',
             }}
           >
             <CachedImage
@@ -1193,6 +1226,16 @@ export function DesktopDetailsPage() {
             setDownloadSuccessToast(msg);
             setTimeout(() => setDownloadSuccessToast(null), 4000);
           }}
+        />
+      )}
+
+      {/* Visor de Portada Ampliada */}
+      {details && (
+        <ImageLightboxModal
+          isOpen={showCoverZoom}
+          onClose={() => setShowCoverZoom(false)}
+          imageUrl={details.thumbnailUrl}
+          title={details.title}
         />
       )}
     </div>

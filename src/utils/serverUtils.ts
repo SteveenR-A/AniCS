@@ -55,15 +55,19 @@ export function maskAndFilterServers(servers: VideoServer[]): VideoServer[] {
       maskedName = 'Servidor Dedicado (1080p Ultra HD)';
     } else if (rawName.includes('desu')) {
       maskedName = 'Servidor Alta Velocidad (1080p)';
-    } else if (rawName.includes('asura') || rawUrl.includes('redirector.php') || rawUrl.includes('.m3u8')) {
-      maskedName = 'Servidor Principal HLS (1080p)';
+    } else if (rawName.includes('vidhide')) {
+      maskedName = 'Servidor Principal (1080p)';
+    } else if (rawName.includes('streamwish')) {
+      maskedName = 'Servidor Alta Velocidad (1080p)';
+    } else if (rawName.includes('asura') || rawUrl.includes('redirector.php')) {
+      maskedName = 'Servidor Espejo Web';
     } else if (rawName.includes('mediafire')) {
       maskedName = 'Servidor Espejo (MP4 Directo)';
     } else if (rawName.includes('voe')) {
       maskedName = 'Servidor Rápido (720p HD)';
     } else if (rawName.includes('gupload') || rawUrl.includes('gupload')) {
       maskedName = 'Servidor GUpload (1080p HD)';
-    } else if (rawName.includes('byse') || rawUrl.includes('byse')) {
+    } else if (rawName.includes('fmoon') || rawName.includes('byse') || rawUrl.includes('byse')) {
       maskedName = 'Servidor Byse (720p HD)';
     } else if (rawName.includes('morencius') || rawUrl.includes('morencius')) {
       maskedName = 'Servidor Morencius (HD)';
@@ -75,10 +79,6 @@ export function maskAndFilterServers(servers: VideoServer[]): VideoServer[] {
       maskedName = 'Servidor YourUpload (720p)';
     } else if (rawName.includes('mp4upload') || rawUrl.includes('mp4upload')) {
       maskedName = 'Servidor MP4Upload (Directo HD)';
-    } else if (rawName.includes('streamwish')) {
-      maskedName = 'Servidor Alternativo CDN';
-    } else if (rawName.includes('vidhide') || rawName.includes('fmoon')) {
-      maskedName = 'Servidor Respaldo CDN';
     } else {
       maskedName = `Servidor CDN ${cdnCounter++}`;
     }

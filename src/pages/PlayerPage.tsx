@@ -84,6 +84,23 @@ export function PlayerPage() {
   const [activeDrawer, setActiveDrawer] = useState<'none' | 'servers' | 'settings'>('none');
   const [showServerDropdown, setShowServerDropdown] = useState(false);
 
+  const playbackTimeRef = useRef(playbackTime);
+  const durationRef = useRef(duration);
+  const currentAnimeRef = useRef(currentAnime);
+  const currentEpisodeRef = useRef(currentEpisode);
+  const hasResumedProgressRef = useRef(false);
+  const readyToSaveRef = useRef(false);
+  const pendingProgressPromiseRef = useRef<Promise<number | null> | null>(null);
+
+  useEffect(() => { playbackTimeRef.current = playbackTime; }, [playbackTime]);
+  useEffect(() => { durationRef.current = duration; }, [duration]);
+  useEffect(() => { currentAnimeRef.current = currentAnime; }, [currentAnime]);
+  useEffect(() => {
+    currentEpisodeRef.current = currentEpisode;
+    hasResumedProgressRef.current = false;
+    readyToSaveRef.current = false;
+  }, [currentEpisode]);
+
   // Detección reactiva de orientación vertical (Portrait)
   const [isPortrait, setIsPortrait] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -399,6 +416,8 @@ export function PlayerPage() {
           watched: false,
         };
         setCurrentEpisode(targetEp);
+        const activeProfileId = useProfileStore.getState().activeProfile?.id;
+        pendingProgressPromiseRef.current = getEpisodeProgress(targetEp.url, activeProfileId);
 
         setIsResolving(true);
         if (querySource === 'local' || details.source === 'local' || (!targetEp.url.startsWith('http://') && !targetEp.url.startsWith('https://'))) {
@@ -418,7 +437,10 @@ export function PlayerPage() {
           setServers(srvs);
 
           const preferred = srvs.find(s => s.name.toLowerCase().includes('dedicado'))
+            ?? srvs.find(s => s.name.toLowerCase().includes('principal'))
             ?? srvs.find(s => s.name.toLowerCase().includes('alta velocidad'))
+            ?? srvs.find(s => s.name.toLowerCase().includes('vidhide'))
+            ?? srvs.find(s => s.name.toLowerCase().includes('streamwish'))
             ?? srvs.find(s => s.isDirect)
             ?? srvs[0];
 
@@ -523,9 +545,19 @@ export function PlayerPage() {
       const hls = new Hls({
         enableWorker: true,
         loader: RobustLoader as any,
-        maxBufferLength: 60,
-        maxMaxBufferLength: 120,
-        maxBufferSize: 60 * 1000 * 1000,
+        startFragPrefetch: true,
+        maxBufferLength: 30,
+        maxMaxBufferLength: 60,
+        maxBufferSize: 30 * 1000 * 1000,
+        backBufferLength: 30,
+        maxBufferHole: 0.5,
+        highBufferWatchdogPeriod: 1,
+        nudgeOffset: 0.1,
+        nudgeMaxRetry: 5,
+        abrEwmaDefaultEstimate: 5000000,
+        abrBandWidthFactor: 0.85,
+        abrBandWidthUpFactor: 0.7,
+        capLevelToPlayerSize: true,
         fragLoadingTimeOut: 10000,
         manifestLoadingTimeOut: 10000,
         fragLoadingMaxRetry: 4,
@@ -534,17 +566,78 @@ export function PlayerPage() {
         lowLatencyMode: false,
       });
       hlsRef.current = hls;
+
+      let playTriggered = false;
+      const attemptAutoPlay = () => {
+        if (!playTriggered) {
+          playTriggered = true;
+          video.play().catch(err => {
+            console.warn('[AniCS Stream] Autoplay error o bloqueado por navegador:', err);
+          });
+        }
+      };
+
+      // 1. Reanudar progreso inmediatamente al cargar los niveles de HLS, antes de descargar fragmentos
+      hls.once(Hls.Events.LEVEL_LOADED, async (_, data) => {
+        const totalDuration = data.details?.totalduration;
+        if (totalDuration && totalDuration > 0) {
+          setDuration(totalDuration);
+          durationRef.current = totalDuration;
+
+          // Si cambiamos de servidor dentro del mismo episodio y ya estábamos en reproducción avanzada
+          if (playbackTimeRef.current > 2 && !hasResumedProgressRef.current) {
+            hasResumedProgressRef.current = true;
+            video.currentTime = playbackTimeRef.current;
+            setTimeout(() => { readyToSaveRef.current = true; }, 1500);
+            return;
+          }
+
+          if (!hasResumedProgressRef.current && currentEpisodeRef.current) {
+            try {
+              const activeProfileId = useProfileStore.getState().activeProfile?.id;
+              const savedProg = pendingProgressPromiseRef.current
+                ? await pendingProgressPromiseRef.current
+                : await getEpisodeProgress(currentEpisodeRef.current.url, activeProfileId);
+
+              if (savedProg && savedProg > 0.01 && savedProg < 0.95 && totalDuration > 0) {
+                const targetTime = savedProg * totalDuration;
+                hasResumedProgressRef.current = true;
+                video.currentTime = targetTime;
+                showToast({ icon: 'seek', text: `Reanudado al ${Math.round(savedProg * 100)}%` });
+                setTimeout(() => { readyToSaveRef.current = true; }, 1500);
+                return;
+              }
+            } catch (e) {
+              console.warn('Error reanudando progreso en LEVEL_LOADED:', e);
+            }
+          }
+        }
+        readyToSaveRef.current = true;
+      });
+
+      // 2. Iniciar reproducción tan pronto como el primer fragmento esté listo en el buffer MSE
+      hls.once(Hls.Events.FRAG_BUFFERED, () => {
+        attemptAutoPlay();
+      });
+
+      // 3. Fallback de seguridad si el buffer o evento se demora
+      hls.once(Hls.Events.MANIFEST_PARSED, () => {
+        if (video.readyState >= 2) {
+          attemptAutoPlay();
+        } else {
+          setTimeout(attemptAutoPlay, 1200);
+        }
+      });
+
       hls.loadSource(sourceUrl);
       hls.attachMedia(video);
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        video.play().catch(() => {});
-      });
+
       hls.on(Hls.Events.ERROR, (_, data) => {
         if (data.fatal) {
           switch (data.type) {
             case Hls.ErrorTypes.NETWORK_ERROR:
-              console.warn('[AniCS Stream] Error de red fatal en HLS, intentando recuperar...', data);
-              hls.startLoad();
+              console.warn('[AniCS Stream] Error de red fatal en HLS, cambiando a servidor alternativo...', data);
+              tryFallbackServerRef.current();
               break;
             case Hls.ErrorTypes.MEDIA_ERROR:
               console.warn('[AniCS Stream] Error de decodificación en HLS, intentando recuperar...', data);
@@ -559,10 +652,16 @@ export function PlayerPage() {
       });
     } else if (isHls && video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = sourceUrl;
-      video.play().catch(() => {});
+      const onCanPlay = () => {
+        video.play().catch(() => {});
+      };
+      video.addEventListener('canplay', onCanPlay, { once: true });
     } else {
       video.src = sourceUrl;
-      video.play().catch(() => {});
+      const onCanPlay = () => {
+        video.play().catch(() => {});
+      };
+      video.addEventListener('canplay', onCanPlay, { once: true });
     }
 
     return () => {
@@ -574,21 +673,6 @@ export function PlayerPage() {
     };
   }, [resolvedMedia]);
 
-  const playbackTimeRef = useRef(playbackTime);
-  const durationRef = useRef(duration);
-  const currentAnimeRef = useRef(currentAnime);
-  const currentEpisodeRef = useRef(currentEpisode);
-  const hasResumedProgressRef = useRef(false);
-  const readyToSaveRef = useRef(false);
-
-  useEffect(() => { playbackTimeRef.current = playbackTime; }, [playbackTime]);
-  useEffect(() => { durationRef.current = duration; }, [duration]);
-  useEffect(() => { currentAnimeRef.current = currentAnime; }, [currentAnime]);
-  useEffect(() => {
-    currentEpisodeRef.current = currentEpisode;
-    hasResumedProgressRef.current = false;
-    readyToSaveRef.current = false;
-  }, [currentEpisode]);
 
   // Guardar progreso en el historial de SQLite
   const saveProgress = useCallback((overrideProgress?: number) => {
@@ -707,6 +791,8 @@ export function PlayerPage() {
     }
 
     setCurrentEpisode(ep);
+    const activeProfileId = useProfileStore.getState().activeProfile?.id;
+    pendingProgressPromiseRef.current = getEpisodeProgress(ep.url, activeProfileId);
     setResolvedMedia(null);
     setPlaybackTime(0);
     setDuration(0);
@@ -735,7 +821,10 @@ export function PlayerPage() {
       setServers(srvs);
 
       const preferred = srvs.find(s => s.name.toLowerCase().includes('dedicado'))
+        ?? srvs.find(s => s.name.toLowerCase().includes('principal'))
         ?? srvs.find(s => s.name.toLowerCase().includes('alta velocidad'))
+        ?? srvs.find(s => s.name.toLowerCase().includes('vidhide'))
+        ?? srvs.find(s => s.name.toLowerCase().includes('streamwish'))
         ?? srvs.find(s => s.isDirect)
         ?? srvs[0];
 
@@ -1054,14 +1143,27 @@ export function PlayerPage() {
           onLoadedMetadata={async () => {
             const v = videoRef.current;
             if (v) {
-              setDuration(v.duration);
-              durationRef.current = v.duration;
+              if (v.duration && v.duration > 0) {
+                setDuration(v.duration);
+                durationRef.current = v.duration;
+              }
+
+              // Si ya se mantuvo posición por cambio de servidor
+              if (playbackTimeRef.current > 2 && !hasResumedProgressRef.current) {
+                hasResumedProgressRef.current = true;
+                v.currentTime = playbackTimeRef.current;
+                setTimeout(() => { readyToSaveRef.current = true; }, 1500);
+                return;
+              }
+
+              // Si no se reanudó vía HLS LEVEL_LOADED (ej. MP4 directo o local)
               if (!hasResumedProgressRef.current && currentEpisodeRef.current) {
                 try {
-                  const savedProg = await getEpisodeProgress(
-                    currentEpisodeRef.current.url,
-                    useProfileStore.getState().activeProfile?.id
-                  );
+                  const activeProfileId = useProfileStore.getState().activeProfile?.id;
+                  const savedProg = pendingProgressPromiseRef.current
+                    ? await pendingProgressPromiseRef.current
+                    : await getEpisodeProgress(currentEpisodeRef.current.url, activeProfileId);
+
                   if (savedProg && savedProg > 0.01 && savedProg < 0.95 && v.duration > 0) {
                     const targetTime = savedProg * v.duration;
                     v.currentTime = targetTime;
@@ -1072,7 +1174,7 @@ export function PlayerPage() {
                     readyToSaveRef.current = true;
                   }
                 } catch (e) {
-                  console.error('Error resuming progress:', e);
+                  console.error('Error resuming progress in onLoadedMetadata:', e);
                   readyToSaveRef.current = true;
                 }
               } else {

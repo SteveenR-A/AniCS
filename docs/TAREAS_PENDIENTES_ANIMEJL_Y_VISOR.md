@@ -1,6 +1,8 @@
-# Tareas Pendientes: Anime-JL (Episodios y Portadas) y Visor de Imágenes
+# Tareas Resueltas: Anime-JL (Episodios y Portadas) y Visor de Imágenes
 
-Este documento detalla los hallazgos técnicos, causas raíces y la guía de implementación para abordar en una próxima sesión.
+> **Estado**: Completado y Verificado (Backend Rust + Frontend React + Reglas .agents)
+
+Este documento detalla los hallazgos técnicos, causas raíces y la resolución implementada para Anime-JL y el visor ampliado de portadas.
 
 ---
 

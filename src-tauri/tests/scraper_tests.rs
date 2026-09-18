@@ -1,5 +1,7 @@
 use anics_lib::scrapers::{AnimeJLExtractor, JKAnimeExtractor, MundoDonghuaExtractor, AnimeExtractor};
 use anics_lib::core::SearchFilters;
+use once_cell::sync::Lazy;
+use regex::Regex;
 
 #[tokio::test]
 async fn test_jkanime_get_latest() {
@@ -68,6 +70,59 @@ async fn test_mundodonghua_get_latest() {
     }
     assert!(!results.is_empty(), "MundoDonghua get_latest returned empty results");
 }
+
+#[tokio::test]
+async fn test_mundodonghua_check_schedule_and_details() {
+    let extractor = MundoDonghuaExtractor::new();
+    let schedule = extractor.get_schedule_days().await.unwrap();
+    for day in schedule {
+        println!("Schedule Day: {}, count: {}", day.day, day.animes.len());
+        for a in day.animes.iter().take(5) {
+            println!("Anime in schedule: title='{}', url='{}'", a.title, a.url);
+        }
+    }
+
+    // 1. Probar Vidhide m3u8 con Origin headers (CORS)
+    let ep_url = "https://www.mundodonghua.com/ver/perfect-world/287";
+    let servers = extractor.get_servers(ep_url).await.unwrap();
+    if let Some(vidhide) = servers.iter().find(|s| s.name.to_lowercase().contains("vidhide")) {
+        let res = extractor.resolve_stream(vidhide).await.unwrap();
+        println!("Vidhide resolved: direct_url='{}'", res.direct_url);
+        let client = reqwest::Client::new();
+        let resp = client.get(&res.direct_url)
+            .header("Origin", "http://localhost:1420")
+            .send().await;
+        match resp {
+            Ok(r) => println!("Vidhide m3u8 CORS status: {}, allow_origin: {:?}", r.status(), r.headers().get("access-control-allow-origin")),
+            Err(e) => println!("Vidhide CORS err: {:?}", e),
+        }
+    }
+
+    // 2. Probar VOE siguiendo la redirección JS y buscando scripts
+    if let Some(voe) = servers.iter().find(|s| s.name == "VOE") {
+        let html = anics_lib::scrapers::fetch_html(&voe.url, Some(ep_url)).await.unwrap_or_default();
+        static VOE_REDIRECT_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r#"window\.location\.href\s*=\s*['"]([^'"]+)['"]"#).unwrap());
+        if let Some(cap) = VOE_REDIRECT_RE.captures(&html) {
+            let next_url = &cap[1];
+            println!("VOE next URL: {}", next_url);
+            let next_html = anics_lib::scrapers::fetch_html(next_url, Some(&voe.url)).await.unwrap_or_default();
+            let doc = scraper::Html::parse_document(&next_html);
+            let script_sel = scraper::Selector::parse("script").unwrap();
+            for (idx, s) in doc.select(&script_sel).enumerate() {
+                let text = s.text().collect::<Vec<_>>().join(" ");
+                if text.contains("sources") || text.contains("hls") || text.contains("JSON.parse") || text.contains("atob") || text.contains("mp4") {
+                    println!(" - VOE script #{idx} (len={}): {}", text.len(), &text[..text.len().min(300)]);
+                }
+            }
+        }
+    }
+}
+
+
+
+
+
+
 
 #[tokio::test]
 async fn test_jkanime_schedule_and_top() {
@@ -139,13 +194,68 @@ async fn test_animejl_get_latest() {
     let extractor = AnimeJLExtractor::new();
     let results = extractor.get_latest(1).await.expect("Failed to get latest from AnimeJL");
     println!("AnimeJL Latest results count: {}", results.len());
+    assert!(!results.is_empty(), "Expected results from AnimeJL get_latest");
     for r in results.iter().take(5) {
         println!(" - Title: '{}', Ep: {:?}, URL: '{}', Thumb: '{}'", r.title, r.episode, r.url, r.thumbnail_url);
         let det = extractor.get_details(&r.url).await;
         match det {
-            Ok(d) => println!("   -> Details OK: title='{}', thumb='{}', eps={}", d.title, d.thumbnail_url, d.episodes.len()),
-            Err(e) => println!("   -> Details ERR: {:?}", e),
+            Ok(d) => {
+                println!("   -> Details OK: title='{}', thumb='{}', eps={}", d.title, d.thumbnail_url, d.episodes.len());
+                assert!(!d.episodes.is_empty(), "Expected at least 1 episode for AnimeJL anime: {}", d.title);
+            },
+            Err(e) => panic!("Failed to get details for {}: {:?}", r.url, e),
         }
     }
 }
+
+#[tokio::test]
+async fn test_animejl_details_episodes() {
+    let extractor = AnimeJLExtractor::new();
+    // Probar una serie conocida con múltiples episodios
+    let url = "https://www.anime-jl.net/anime/1082/ni-tian-zhizun-v2-7";
+    let details = extractor.get_details(url).await.expect("Failed to get details for Ni Tian Zhizun");
+    println!("AnimeJL Specific Anime: title='{}', thumb='{}', episodes={}", details.title, details.thumbnail_url, details.episodes.len());
+    assert!(!details.title.is_empty());
+    assert!(!details.thumbnail_url.is_empty());
+    assert!(details.thumbnail_url.contains("animes_tumbl"), "Expected series poster in details thumbnail");
+    assert!(details.episodes.len() >= 50, "Expected at least 50 episodes for Ni Tian Zhizun");
+    let first_ep = details.episodes.first().unwrap();
+    println!("First Ep: #{} -> url='{}', thumb='{:?}'", first_ep.number, first_ep.url, first_ep.thumbnail_url);
+    assert_eq!(first_ep.number, 1);
+    assert!(first_ep.url.contains("/episodio-1"));
+}
+
+#[tokio::test]
+async fn test_mundodonghua_full_flow() {
+    let extractor = MundoDonghuaExtractor::new();
+    let schedule = extractor.get_schedule().await.expect("Failed schedule");
+    println!("MundoDonghua Schedule items count: {}", schedule.len());
+    for s in schedule.iter().take(5) {
+        println!(" - Title: '{}', URL: '{}', Thumb: '{}'", s.title, s.url, s.thumbnail_url);
+        // Verify URL is absolute
+        assert!(s.url.starts_with("http"), "Schedule URL must be absolute: {}", s.url);
+    }
+
+    // Probar Against the Gods 2
+    let atg2_url = "https://www.mundodonghua.com/donghua/against-the-gods-2";
+    let details = extractor.get_details(atg2_url).await.expect("Failed details for Against the Gods 2");
+    println!("Against the Gods 2: title='{}', thumb='{}', eps count={}, status={:?}, total_eps={:?}, synopsis='{}'",
+        details.title, details.thumbnail_url, details.episodes.len(), details.status, details.total_episodes, details.synopsis);
+    
+    if let Some(first_ep) = details.episodes.first() {
+        println!("First Ep in list: number={}, url='{}'", first_ep.number, first_ep.url);
+        assert_eq!(first_ep.number, 1);
+        assert!(first_ep.url.ends_with("/1"));
+
+        let servers = extractor.get_servers(&first_ep.url).await.expect("Failed servers");
+        println!("Servers count: {}", servers.len());
+        assert!(!servers.is_empty());
+        assert!(servers[0].name.contains("Vidhide"), "Expected Vidhide to be ranked first: {}", servers[0].name);
+
+        let res = extractor.resolve_stream(&servers[0]).await.expect("Failed to resolve Vidhide");
+        assert_eq!(res.media_type, anics_lib::core::MediaType::Hls);
+        assert!(!res.direct_url.is_empty());
+    }
+}
+
 
