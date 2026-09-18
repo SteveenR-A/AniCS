@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
 import {
   mergeHistoryEntries,
   mergeHistoryWithTombstones,
@@ -16,24 +15,12 @@ import {
   getCalibratedTimestamp,
   makeHistoryCanonicalKey,
   MAX_CLOUD_HISTORY_ENTRIES,
-  fetchFirestoreData,
-  saveFirestoreData,
+  fetchGistData,
+  createOrUpdateGist,
   NeedPinForDecryptionError,
   isLocalFileHistory,
 } from '../syncService';
-import type { HistoryEntry, AnimeResult, UserProfile, CloudSyncPayload, HistoryTombstone, CloudSyncConfig } from '@/types';
-
-vi.mock('@/services/firebase/firebaseConfig', () => ({
-  firestoreDb: {},
-  firebaseAuth: {},
-  firebaseApp: {},
-}));
-
-vi.mock('firebase/firestore', () => ({
-  doc: vi.fn().mockReturnValue('mock_doc_ref'),
-  getDoc: vi.fn(),
-  setDoc: vi.fn(),
-}));
+import type { HistoryEntry, AnimeResult, UserProfile, GistFilesPayload, HistoryTombstone, GistSyncConfig } from '@/types';
 
 describe('syncService - Merge Engine & Migrations', () => {
   it('preserva múltiples episodios vistos de un mismo anime', () => {
@@ -490,21 +477,20 @@ describe('syncService - Deterministic Hashes & Change Detection', () => {
   });
 });
 
-describe('syncService - Cloud Firestore Client & Multi-device Sync', () => {
+describe('syncService - GitHub Gist Client & Multi-device Sync', () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  const mockConfig: CloudSyncConfig = {
-    userId: 'user_12345',
-    userEmail: 'user@example.com',
-    userDisplayName: 'Test User',
+  const mockConfig: GistSyncConfig = {
+    githubToken: 'ghp_test12345',
+    gistId: 'gist_12345',
     autoSync: true,
     encryptionEnabled: false,
     lastSyncAt: '',
   };
 
-  it('descarga correctamente el payload de Firestore cuando el documento existe', async () => {
+  it('descarga correctamente el payload de GitHub Gist', async () => {
     const mockSyncMeta = {
       schemaVersion: 2,
       appVersion: '0.2.2',
@@ -532,20 +518,27 @@ describe('syncService - Cloud Firestore Client & Multi-device Sync', () => {
     const mockFavorites = [{ title: 'Bleach', url: 'https://jkanime.net/bleach/', thumbnailUrl: '', source: 'jkanime', profileId: 'default' }];
     const mockSettings = { theme: 'dark' };
 
-    vi.mocked(getDoc).mockResolvedValueOnce({
-      exists: () => true,
-      data: () => ({
-        syncMeta: JSON.stringify(mockSyncMeta),
-        profiles: JSON.stringify(mockProfiles),
-        history: JSON.stringify(mockHistory),
-        favorites: JSON.stringify(mockFavorites),
-        settings: JSON.stringify(mockSettings),
-        settingsDesktop: JSON.stringify(mockSettings),
-        settingsMobile: '{}',
-      }),
-    } as any);
+    const mockGistResponse = {
+      files: {
+        'sync_meta.json': { content: JSON.stringify(mockSyncMeta) },
+        'profiles.json': { content: JSON.stringify(mockProfiles) },
+        'history.json': { content: JSON.stringify(mockHistory) },
+        'favorites.json': { content: JSON.stringify(mockFavorites) },
+        'settings.json': { content: JSON.stringify(mockSettings) },
+        'settings_desktop.json': { content: JSON.stringify(mockSettings) },
+        'settings_mobile.json': { content: '{}' },
+      },
+    };
 
-    const result = await fetchFirestoreData('user_12345', mockConfig);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: { get: (h: string) => (h.toLowerCase() === 'etag' ? '"etag-123"' : null) },
+      json: () => Promise.resolve(mockGistResponse),
+      text: () => Promise.resolve(''),
+    } as any));
+
+    const result = await fetchGistData(mockConfig);
 
     expect(result.notModified).toBe(false);
     expect(result.payload).not.toBeNull();
@@ -553,20 +546,24 @@ describe('syncService - Cloud Firestore Client & Multi-device Sync', () => {
     expect(result.payload?.history[0].animeTitle).toBe('Bleach');
     expect(result.payload?.favorites.length).toBe(1);
     expect(result.payload?.profiles.length).toBe(1);
+    expect(result.etag).toBe('"etag-123"');
   });
 
-  it('retorna null cuando el documento de Firestore no existe aún', async () => {
-    vi.mocked(getDoc).mockResolvedValueOnce({
-      exists: () => false,
-      data: () => null,
-    } as any);
+  it('retorna notModified cuando el Gist responde 304 Not Modified', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce({
+      ok: true,
+      status: 304,
+      headers: { get: () => null },
+      text: () => Promise.resolve(''),
+    } as any));
 
-    const result = await fetchFirestoreData('user_12345', mockConfig);
+    const result = await fetchGistData(mockConfig);
+    expect(result.notModified).toBe(true);
     expect(result.payload).toBeNull();
   });
 
   it('fusiona sincronización correctamente cuando dos dispositivos en la misma cuenta tienen episodios distintos', () => {
-    const pcData: CloudSyncPayload = {
+    const pcData: GistFilesPayload = {
       syncMeta: {
         schemaVersion: 2,
         appVersion: '0.2.2',
@@ -596,7 +593,7 @@ describe('syncService - Cloud Firestore Client & Multi-device Sync', () => {
       settings: { theme: 'dark' },
     };
 
-    const androidData: CloudSyncPayload = {
+    const androidData: GistFilesPayload = {
       syncMeta: {
         schemaVersion: 2,
         appVersion: '0.2.2',
@@ -682,14 +679,20 @@ describe('syncService - Cloud Firestore Client & Multi-device Sync', () => {
     expect(isLocalFileHistory(onlineEpisode)).toBe(false);
   });
 
-  it('separa las configuraciones en settingsDesktop y settingsMobile al subir a Firestore', async () => {
-    let capturedDocData: any = null;
-    vi.mocked(setDoc).mockImplementationOnce((_ref: any, data: any) => {
-      capturedDocData = data;
-      return Promise.resolve();
-    });
+  it('separa las configuraciones en settings_desktop y settings_mobile al subir a GitHub Gist', async () => {
+    let capturedBody: any = null;
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((_url, opts: any) => {
+      capturedBody = JSON.parse(opts.body);
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: { get: () => '"new-etag"' },
+        json: () => Promise.resolve({ id: 'gist_12345', html_url: 'https://gist.github.com/test' }),
+        text: () => Promise.resolve(''),
+      });
+    }));
 
-    const testPayload: CloudSyncPayload = {
+    const testPayload: GistFilesPayload = {
       syncMeta: {
         schemaVersion: 2,
         appVersion: '0.2.1',
@@ -707,26 +710,26 @@ describe('syncService - Cloud Firestore Client & Multi-device Sync', () => {
         download_dir: 'C:\\Users\\herna\\Videos\\AniCS',
         player_type: 'internal',
       },
+      settingsDesktop: {
+        download_dir: 'C:\\Users\\herna\\Videos\\AniCS',
+      },
       settingsMobile: {
         download_dir: '/storage/emulated/0/Anime',
       },
     };
 
-    await saveFirestoreData('user_12345', mockConfig, testPayload);
+    await createOrUpdateGist(mockConfig, testPayload);
 
-    expect(capturedDocData).not.toBeNull();
-    expect(capturedDocData.settingsDesktop).toBeDefined();
-    expect(capturedDocData.settingsMobile).toBeDefined();
+    expect(capturedBody).not.toBeNull();
+    expect(capturedBody.files['settings_desktop.json']).toBeDefined();
+    expect(capturedBody.files['settings_mobile.json']).toBeDefined();
+    expect(capturedBody.files['sync_meta.json']).toBeDefined();
 
-    const desktopSettings = JSON.parse(capturedDocData.settingsDesktop);
+    const desktopSettings = JSON.parse(capturedBody.files['settings_desktop.json'].content);
     expect(desktopSettings.download_dir).toBe('C:\\Users\\herna\\Videos\\AniCS');
 
-    const mobileSettings = JSON.parse(capturedDocData.settingsMobile);
+    const mobileSettings = JSON.parse(capturedBody.files['settings_mobile.json'].content);
     expect(mobileSettings.download_dir).toBe('/storage/emulated/0/Anime');
-
-    const syncMetaUploaded = JSON.parse(capturedDocData.syncMeta);
-    expect(syncMetaUploaded.devices).toBeDefined();
-    expect(syncMetaUploaded.devices.windows).toBeDefined();
   });
 });
 

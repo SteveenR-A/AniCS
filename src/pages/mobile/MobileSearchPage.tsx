@@ -3,7 +3,8 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search, X, Loader2, SearchX,
-  RotateCcw, SlidersHorizontal, RefreshCw, Clock, Check
+  RotateCcw, SlidersHorizontal, RefreshCw, Clock, Check,
+  Sparkles, Flame, Film
 } from 'lucide-react';
 import { useAnimeStore } from '@/stores/useAnimeStore';
 import { advancedSearch } from '@/services/animeService';
@@ -63,11 +64,26 @@ function MobileResultCard({ anime, onClick }: { anime: AnimeResult; onClick: () 
   );
 }
 
+const STATUS_OPTIONS = [
+  { id: '', label: 'Todos' },
+  { id: 'estreno', label: 'Estrenos' },
+  { id: 'en-emision', label: 'En emisión' },
+  { id: 'concluido', label: 'Concluidos' },
+];
+
+const TYPE_OPTIONS = [
+  { id: '', label: 'Todos' },
+  { id: 'anime', label: 'Anime' },
+  { id: 'pelicula', label: 'Película' },
+  { id: 'ova', label: 'OVA' },
+  { id: 'especial', label: 'Especial' },
+];
+
 export function MobileSearchPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const {
-    activeSource, searchResults, setSearchResults,
+    activeSource, setActiveSource, searchResults, setSearchResults,
     isSearching, setIsSearching, genres, loadGenres,
     saveSearchSession, getSearchSession,
     recentSearches, addRecentSearch, removeRecentSearch, clearRecentSearches
@@ -426,6 +442,136 @@ export function MobileSearchPage() {
         </button>
       </div>
 
+      {/* Selector de Fuente Móvil */}
+      <div style={{
+        display: 'flex', background: 'var(--bg-surface)',
+        padding: 3, borderRadius: 'var(--radius-full)',
+        border: '1px solid var(--border-subtle)',
+        gap: 2, marginBottom: 10,
+      }}>
+        {[
+          { id: 'jkanime', label: 'JKAnime' },
+          { id: 'animejl', label: 'Anime-JL' },
+          { id: 'mundodonghua', label: 'Donghua' },
+        ].map((src) => (
+          <button
+            key={src.id}
+            onClick={() => {
+              setActiveSource(src.id);
+              syncUrlParams(query, selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
+              executeSearch(query, selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
+            }}
+            style={{
+              flex: 1, padding: '6px 8px', borderRadius: 'var(--radius-full)',
+              background: activeSource === src.id ? 'var(--accent-primary)' : 'transparent',
+              color: activeSource === src.id ? 'white' : 'var(--text-secondary)',
+              border: 'none', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+              whiteSpace: 'nowrap', textAlign: 'center',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            {src.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Barra de Acceso Rápido / Categorías y Estrenos */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 6,
+        marginBottom: 12, overflowX: 'auto', paddingBottom: 2,
+      }}>
+        <button
+          onClick={() => {
+            setSelectedStatus('');
+            setSelectedType('');
+            syncUrlParams(query, selectedGenre, '', '', selectedOrder, 1);
+            executeSearch(query, selectedGenre, '', '', selectedOrder, 1);
+          }}
+          style={{
+            padding: '5px 12px', borderRadius: 'var(--radius-full)',
+            background: !selectedStatus && !selectedType ? 'var(--accent-primary)' : 'var(--bg-surface)',
+            color: !selectedStatus && !selectedType ? '#ffffff' : 'var(--text-secondary)',
+            border: `1px solid ${!selectedStatus && !selectedType ? 'transparent' : 'var(--border-subtle)'}`,
+            fontSize: 11, fontWeight: 700, cursor: 'pointer', flexShrink: 0,
+            transition: 'all var(--transition-fast)',
+          }}
+        >
+          Todos
+        </button>
+
+        <button
+          onClick={() => {
+            const nextStatus = selectedStatus === 'estreno' ? '' : 'estreno';
+            setSelectedStatus(nextStatus);
+            syncUrlParams(query, selectedGenre, nextStatus, selectedType, selectedOrder, 1);
+            executeSearch(query, selectedGenre, nextStatus, selectedType, selectedOrder, 1);
+          }}
+          style={{
+            padding: '5px 12px', borderRadius: 'var(--radius-full)',
+            background: selectedStatus === 'estreno'
+              ? 'linear-gradient(135deg, #f59e0b, #ef4444)'
+              : 'var(--bg-surface)',
+            color: selectedStatus === 'estreno' ? '#ffffff' : 'var(--text-secondary)',
+            border: `1px solid ${selectedStatus === 'estreno' ? 'transparent' : 'var(--border-subtle)'}`,
+            fontSize: 11, fontWeight: 700, cursor: 'pointer', flexShrink: 0,
+            display: 'inline-flex', alignItems: 'center', gap: 5,
+            boxShadow: selectedStatus === 'estreno' ? '0 2px 8px rgba(245, 158, 11, 0.4)' : 'none',
+            transition: 'all var(--transition-fast)',
+          }}
+        >
+          <Sparkles size={12} />
+          <span>Estrenos</span>
+        </button>
+
+        <button
+          onClick={() => {
+            const nextStatus = selectedStatus === 'en-emision' ? '' : 'en-emision';
+            setSelectedStatus(nextStatus);
+            syncUrlParams(query, selectedGenre, nextStatus, selectedType, selectedOrder, 1);
+            executeSearch(query, selectedGenre, nextStatus, selectedType, selectedOrder, 1);
+          }}
+          style={{
+            padding: '5px 12px', borderRadius: 'var(--radius-full)',
+            background: selectedStatus === 'en-emision'
+              ? 'linear-gradient(135deg, #10b981, #059669)'
+              : 'var(--bg-surface)',
+            color: selectedStatus === 'en-emision' ? '#ffffff' : 'var(--text-secondary)',
+            border: `1px solid ${selectedStatus === 'en-emision' ? 'transparent' : 'var(--border-subtle)'}`,
+            fontSize: 11, fontWeight: 700, cursor: 'pointer', flexShrink: 0,
+            display: 'inline-flex', alignItems: 'center', gap: 5,
+            boxShadow: selectedStatus === 'en-emision' ? '0 2px 8px rgba(16, 185, 129, 0.4)' : 'none',
+            transition: 'all var(--transition-fast)',
+          }}
+        >
+          <Flame size={12} />
+          <span>En Emisión</span>
+        </button>
+
+        <button
+          onClick={() => {
+            const nextType = selectedType === 'pelicula' ? '' : 'pelicula';
+            setSelectedType(nextType);
+            syncUrlParams(query, selectedGenre, selectedStatus, nextType, selectedOrder, 1);
+            executeSearch(query, selectedGenre, selectedStatus, nextType, selectedOrder, 1);
+          }}
+          style={{
+            padding: '5px 12px', borderRadius: 'var(--radius-full)',
+            background: selectedType === 'pelicula'
+              ? 'linear-gradient(135deg, #8b5cf6, #ec4899)'
+              : 'var(--bg-surface)',
+            color: selectedType === 'pelicula' ? '#ffffff' : 'var(--text-secondary)',
+            border: `1px solid ${selectedType === 'pelicula' ? 'transparent' : 'var(--border-subtle)'}`,
+            fontSize: 11, fontWeight: 700, cursor: 'pointer', flexShrink: 0,
+            display: 'inline-flex', alignItems: 'center', gap: 5,
+            boxShadow: selectedType === 'pelicula' ? '0 2px 8px rgba(139, 92, 246, 0.4)' : 'none',
+            transition: 'all var(--transition-fast)',
+          }}
+        >
+          <Film size={12} />
+          <span>Películas</span>
+        </button>
+      </div>
+
       {/* Chips de Búsquedas Recientes Móvil */}
       {recentSearches.length > 0 && !query && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 14, overflowX: 'auto', paddingBottom: 4 }}>
@@ -491,6 +637,25 @@ export function MobileSearchPage() {
               <X size={12} />
             </button>
           )}
+          {selectedStatus && (
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedStatus('');
+                syncUrlParams(query, selectedGenre, '', selectedType, selectedOrder, 1);
+                executeSearch(query, selectedGenre, '', selectedType, selectedOrder, 1);
+              }}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                background: 'rgba(245, 158, 11, 0.15)', border: '1px solid rgba(245, 158, 11, 0.35)',
+                borderRadius: 'var(--radius-full)', padding: '3px 8px',
+                color: '#f59e0b', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+              }}
+            >
+              <span>{STATUS_OPTIONS.find(s => s.id === selectedStatus)?.label || selectedStatus}</span>
+              <X size={12} />
+            </button>
+          )}
           {selectedType && (
             <button
               type="button"
@@ -506,7 +671,7 @@ export function MobileSearchPage() {
                 color: 'var(--accent-primary)', fontSize: 11, fontWeight: 600, cursor: 'pointer',
               }}
             >
-              <span>{selectedType}</span>
+              <span>{TYPE_OPTIONS.find(t => t.id === selectedType)?.label || selectedType}</span>
               <X size={12} />
             </button>
           )}
@@ -535,12 +700,13 @@ export function MobileSearchPage() {
               overflow: 'hidden',
               background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
               borderRadius: 'var(--radius-lg)', padding: '12px 14px', marginBottom: 14,
-              display: 'flex', flexDirection: 'column', gap: 10,
+              display: 'flex', flexDirection: 'column', gap: 12,
             }}
           >
+            {/* Header Filtros */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                Géneros ({genres.length})
+              <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--text-primary)' }}>
+                Filtros Avanzados
               </span>
               {activeFilterCount > 0 && (
                 <button
@@ -555,32 +721,104 @@ export function MobileSearchPage() {
               )}
             </div>
 
-            <div style={{
-              display: 'flex', flexWrap: 'wrap', gap: 4,
-              maxHeight: 110, overflowY: 'auto',
-            }}>
-              {genres.map((g) => {
-                const isSelected =
-                  selectedGenre.toLowerCase() === g.slug.toLowerCase() ||
-                  selectedGenre.toLowerCase() === g.name.toLowerCase();
-                return (
-                  <button
-                    key={g.slug}
-                    onClick={() => handleGenreToggle(g.slug, g.name)}
-                    style={{
-                      padding: '4px 10px', borderRadius: 'var(--radius-full)',
-                      background: isSelected ? 'var(--accent-primary)' : 'var(--bg-elevated)',
-                      border: isSelected ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)',
-                      color: isSelected ? 'white' : 'var(--text-secondary)',
-                      fontSize: 11, fontWeight: isSelected ? 700 : 500,
-                      cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4,
-                    }}
-                  >
-                    {isSelected && <Check size={11} />}
-                    {g.name}
-                  </button>
-                );
-              })}
+            {/* Filtro de Estado */}
+            <div>
+              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>
+                Estado
+              </span>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                {STATUS_OPTIONS.map((st) => {
+                  const isSelected = selectedStatus === st.id;
+                  return (
+                    <button
+                      key={st.id}
+                      onClick={() => {
+                        setSelectedStatus(st.id);
+                        syncUrlParams(query, selectedGenre, st.id, selectedType, selectedOrder, 1);
+                        executeSearch(query, selectedGenre, st.id, selectedType, selectedOrder, 1);
+                      }}
+                      style={{
+                        padding: '4px 10px', borderRadius: 'var(--radius-full)',
+                        background: isSelected ? 'var(--accent-primary)' : 'var(--bg-elevated)',
+                        border: isSelected ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)',
+                        color: isSelected ? 'white' : 'var(--text-secondary)',
+                        fontSize: 11, fontWeight: isSelected ? 700 : 500,
+                        cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4,
+                      }}
+                    >
+                      {isSelected && <Check size={11} />}
+                      {st.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Filtro de Tipo */}
+            <div>
+              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>
+                Tipo
+              </span>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                {TYPE_OPTIONS.map((tp) => {
+                  const isSelected = selectedType === tp.id;
+                  return (
+                    <button
+                      key={tp.id}
+                      onClick={() => {
+                        setSelectedType(tp.id);
+                        syncUrlParams(query, selectedGenre, selectedStatus, tp.id, selectedOrder, 1);
+                        executeSearch(query, selectedGenre, selectedStatus, tp.id, selectedOrder, 1);
+                      }}
+                      style={{
+                        padding: '4px 10px', borderRadius: 'var(--radius-full)',
+                        background: isSelected ? 'var(--accent-primary)' : 'var(--bg-elevated)',
+                        border: isSelected ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)',
+                        color: isSelected ? 'white' : 'var(--text-secondary)',
+                        fontSize: 11, fontWeight: isSelected ? 700 : 500,
+                        cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4,
+                      }}
+                    >
+                      {isSelected && <Check size={11} />}
+                      {tp.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Filtro de Géneros */}
+            <div>
+              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>
+                Géneros ({genres.length})
+              </span>
+              <div style={{
+                display: 'flex', flexWrap: 'wrap', gap: 4,
+                maxHeight: 120, overflowY: 'auto',
+              }}>
+                {genres.map((g) => {
+                  const isSelected =
+                    selectedGenre.toLowerCase() === g.slug.toLowerCase() ||
+                    selectedGenre.toLowerCase() === g.name.toLowerCase();
+                  return (
+                    <button
+                      key={g.slug}
+                      onClick={() => handleGenreToggle(g.slug, g.name)}
+                      style={{
+                        padding: '4px 10px', borderRadius: 'var(--radius-full)',
+                        background: isSelected ? 'var(--accent-primary)' : 'var(--bg-elevated)',
+                        border: isSelected ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)',
+                        color: isSelected ? 'white' : 'var(--text-secondary)',
+                        fontSize: 11, fontWeight: isSelected ? 700 : 500,
+                        cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4,
+                      }}
+                    >
+                      {isSelected && <Check size={11} />}
+                      {g.name}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </motion.div>
         )}

@@ -7,8 +7,6 @@ import {
 } from 'lucide-react';
 import { useProfileStore } from '@/stores/useProfileStore';
 import { useSyncStore } from '@/stores/useSyncStore';
-import { useSubscriptionStore } from '@/stores/useSubscriptionStore';
-import { FEATURE_FLAGS } from '@/config/features';
 import { getProfileStats } from '@/services/profileService';
 import type { UserProfile, ProfileStats } from '@/types';
 
@@ -55,7 +53,6 @@ interface Props {
 
 export const ProfileSelectorModal: React.FC<Props> = ({ isOpen, onClose }) => {
   const { profiles, activeProfile, switchProfile, createProfile, updateProfile, deleteProfile } = useProfileStore();
-  const { isVip } = useSubscriptionStore();
 
   const [mode, setMode] = useState<'list' | 'create' | 'edit'>('list');
   const [editingProfile, setEditingProfile] = useState<UserProfile | null>(null);
@@ -307,24 +304,6 @@ export const ProfileSelectorModal: React.FC<Props> = ({ isOpen, onClose }) => {
                                   }}
                                 >
                                   Activo
-                                </span>
-                              )}
-                              {FEATURE_FLAGS.SHOW_SUBSCRIPTION && isVip && isActive && (
-                                <span
-                                  style={{
-                                    fontSize: 10,
-                                    padding: '2px 6px',
-                                    borderRadius: '10px',
-                                    background: 'linear-gradient(135deg, #f59e0b, #d97706)',
-                                    color: '#000',
-                                    fontWeight: 800,
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: 3,
-                                  }}
-                                >
-                                  <Crown size={10} />
-                                  VIP
                                 </span>
                               )}
                             </div>

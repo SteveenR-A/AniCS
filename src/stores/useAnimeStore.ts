@@ -90,6 +90,7 @@ function isItemSourceValid(item: AnimeResult, src: string): boolean {
   if (item.url) {
     if (src === 'jkanime' && !item.url.includes('jkanime.net')) return false;
     if (src === 'mundodonghua' && !item.url.includes('mundodonghua.com')) return false;
+    if (src === 'animejl' && !item.url.includes('anime-jl.net')) return false;
   }
   return true;
 }

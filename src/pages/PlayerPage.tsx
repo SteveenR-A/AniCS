@@ -7,21 +7,18 @@ import {
   Maximize, Minimize, Settings, ChevronLeft,
   Loader2, SkipForward, SkipBack, RotateCcw, RotateCw,
   Sun, ListVideo, Zap, AlertCircle,
-  Scaling, Smartphone, Crown, Lock, ExternalLink
+  Scaling, Smartphone, ExternalLink
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { usePlayerStore } from '@/stores/usePlayerStore';
 import { useAnimeStore } from '@/stores/useAnimeStore';
 import { useProfileStore } from '@/stores/useProfileStore';
 import { useSyncStore } from '@/stores/useSyncStore';
-import { useSubscriptionStore } from '@/stores/useSubscriptionStore';
-import { FEATURE_FLAGS } from '@/config/features';
 import { resolveStream, getServers, getDetails } from '@/services/animeService';
 import { upsertHistory, getEpisodeProgress } from '@/services/storageService';
 import { getLocalMediaUrl, setKeepScreenOn, setNativeFullscreen, setNativeScreenOrientation } from '@/services/downloadService';
 import { useResponsive } from '@/hooks/useResponsive';
 import { rewriteDeadCdnUrl, createRobustHlsLoader } from '@/utils/hlsLoader';
-import { isVipServer } from '@/utils/serverUtils';
 import type { VideoServer } from '@/types';
 
 function formatTime(s: number) {
@@ -74,7 +71,6 @@ export function PlayerPage() {
     setServers, setCurrentEpisode, setCurrentAnime, resetPlayback
   } = usePlayerStore();
 
-  const { isVip, openModal: openVipModal } = useSubscriptionStore();
   const { getCachedDetails, cacheDetails } = useAnimeStore();
 
   const [isLoadingInitial, setIsLoadingInitial] = useState(false);
@@ -421,17 +417,10 @@ export function PlayerPage() {
           const srvs = await getServers(targetEp.url, querySource);
           setServers(srvs);
 
-          const isUserVip = !FEATURE_FLAGS.SHOW_SUBSCRIPTION || isVip;
-
-          let preferred: VideoServer | undefined;
-          if (isUserVip) {
-            preferred = srvs.find(s => isVipServer(s.name))
-              ?? srvs.find(s => s.isDirect)
-              ?? srvs[0];
-          } else {
-            const standardServers = srvs.filter(s => !isVipServer(s.name));
-            preferred = standardServers.find(s => s.isDirect) ?? standardServers[0] ?? srvs[0];
-          }
+          const preferred = srvs.find(s => s.name.toLowerCase().includes('dedicado'))
+            ?? srvs.find(s => s.name.toLowerCase().includes('alta velocidad'))
+            ?? srvs.find(s => s.isDirect)
+            ?? srvs[0];
 
           if (preferred) {
             setSelectedServer(preferred);
@@ -457,7 +446,7 @@ export function PlayerPage() {
         hlsRef.current = null;
       }
     };
-  }, [queryUrl, queryEp, querySource, isVip]);
+  }, [queryUrl, queryEp, querySource]);
 
   // Sincronizar volumen y velocidad en el elemento <video>
   useEffect(() => {
@@ -470,15 +459,6 @@ export function PlayerPage() {
   const tryFallbackServerRef = useRef<() => void>(() => {});
 
   const handleSelectServer = async (server: VideoServer) => {
-    const isTargetVip = isVipServer(server.name);
-    if (isTargetVip && FEATURE_FLAGS.SHOW_SUBSCRIPTION && !isVip) {
-      showToast({
-        icon: 'vip',
-        text: `El servidor ${server.name} es exclusivo para miembros VIP`,
-      });
-      openVipModal();
-      return;
-    }
     setSelectedServer(server);
     setIsResolving(true);
     try {
@@ -494,17 +474,13 @@ export function PlayerPage() {
 
   const tryFallbackServer = useCallback(() => {
     if (!servers.length || !selectedServer) return;
-    const isUserVip = !FEATURE_FLAGS.SHOW_SUBSCRIPTION || isVip;
-    const allowed = isUserVip ? servers : servers.filter(s => !isVipServer(s.name));
-    if (!allowed.length) return;
-
-    const currentIndex = allowed.findIndex(s => s.url === selectedServer.url);
-    const nextServer = allowed[(currentIndex + 1) % allowed.length];
+    const currentIndex = servers.findIndex(s => s.url === selectedServer.url);
+    const nextServer = servers[(currentIndex + 1) % servers.length];
 
     if (nextServer && nextServer.url !== selectedServer.url) {
       handleSelectServer(nextServer);
     }
-  }, [servers, selectedServer, querySource, isVip]);
+  }, [servers, selectedServer, querySource]);
 
   useEffect(() => {
     tryFallbackServerRef.current = tryFallbackServer;
@@ -758,23 +734,14 @@ export function PlayerPage() {
       const srvs = await getServers(ep.url, querySource);
       setServers(srvs);
 
-      const isUserVip = !FEATURE_FLAGS.SHOW_SUBSCRIPTION || isVip;
-      const isVipServer = (name: string) => /magi|desu/i.test(name);
+      const preferred = srvs.find(s => s.name.toLowerCase().includes('dedicado'))
+        ?? srvs.find(s => s.name.toLowerCase().includes('alta velocidad'))
+        ?? srvs.find(s => s.isDirect)
+        ?? srvs[0];
 
-      let direct: VideoServer | undefined;
-      if (isUserVip) {
-        direct = srvs.find(s => s.name.toLowerCase().includes('magi'))
-          ?? srvs.find(s => s.name.toLowerCase().includes('desu'))
-          ?? srvs.find(s => s.isDirect)
-          ?? srvs[0];
-      } else {
-        const standardServers = srvs.filter(s => !isVipServer(s.name));
-        direct = standardServers.find(s => s.isDirect) ?? standardServers[0] ?? srvs[0];
-      }
-
-      if (direct) {
-        const media = await resolveStream(direct, querySource);
-        setSelectedServer(direct);
+      if (preferred) {
+        const media = await resolveStream(preferred, querySource);
+        setSelectedServer(preferred);
         setResolvedMedia(media);
       }
     } catch (e) {
@@ -1216,7 +1183,6 @@ export function PlayerPage() {
             {hudToast.icon === 'brightness' && <Sun size={16} color="#fbbf24" />}
             {hudToast.icon === 'seek' && <Zap size={16} color="var(--accent-secondary)" />}
             {hudToast.icon === 'aspect' && <Scaling size={16} color="var(--accent-primary)" />}
-            {hudToast.icon === 'vip' && <Crown size={16} color="#fbbf24" />}
             {hudToast.icon === 'external' && <ExternalLink size={16} color="var(--accent-primary)" />}
             <span>{hudToast.text}</span>
           </motion.div>
@@ -1327,9 +1293,6 @@ export function PlayerPage() {
                     }}
                   >
                     <span>{selectedServer?.name || '1080p'}</span>
-                    {selectedServer && isVipServer(selectedServer.name) && (
-                      <Crown size={11} color="#fbbf24" style={{ flexShrink: 0 }} />
-                    )}
                   </button>
 
                   <AnimatePresence>
@@ -1351,59 +1314,28 @@ export function PlayerPage() {
                         </span>
                         {servers.map((srv, idx) => {
                           const isSelected = selectedServer?.url === srv.url;
-                          const isTargetVip = isVipServer(srv.name);
-                          const isLocked = isTargetVip && FEATURE_FLAGS.SHOW_SUBSCRIPTION && !isVip;
 
                           return (
                             <button
                               key={idx}
                               onClick={() => {
-                                if (isLocked) {
-                                  showToast({
-                                    icon: 'vip',
-                                    text: `El servidor ${srv.name} requiere membresía VIP`,
-                                  });
-                                  openVipModal();
-                                } else {
-                                  handleSelectServer(srv);
-                                  setShowServerDropdown(false);
-                                }
+                                handleSelectServer(srv);
+                                setShowServerDropdown(false);
                               }}
                               style={{
                                 padding: '6px 10px', borderRadius: 'var(--radius-sm)',
                                 background: isSelected
                                   ? 'var(--accent-primary)'
-                                  : isLocked
-                                  ? 'rgba(245, 158, 11, 0.08)'
                                   : 'transparent',
-                                border: isLocked ? '1px dashed rgba(245, 158, 11, 0.35)' : 'none',
-                                color: isSelected ? 'white' : (isLocked ? '#fbbf24' : 'var(--text-primary)'),
+                                border: 'none',
+                                color: isSelected ? 'white' : 'var(--text-primary)',
                                 fontSize: 12, fontWeight: isSelected ? 700 : 500, cursor: 'pointer',
                                 textAlign: 'left', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                                opacity: isLocked ? 0.9 : 1,
                               }}
                             >
                               <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                                 {srv.name}
                               </span>
-                              {isTargetVip && (
-                                <span
-                                  style={{
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: 3,
-                                    fontSize: 9,
-                                    fontWeight: 800,
-                                    background: isLocked ? 'rgba(245, 158, 11, 0.2)' : 'linear-gradient(135deg, #f59e0b, #d97706)',
-                                    color: isLocked ? '#fbbf24' : '#000',
-                                    padding: '1px 5px',
-                                    borderRadius: '4px',
-                                  }}
-                                >
-                                  {isLocked ? <Lock size={8} /> : <Crown size={9} />}
-                                  VIP
-                                </span>
-                              )}
                             </button>
                           );
                         })}

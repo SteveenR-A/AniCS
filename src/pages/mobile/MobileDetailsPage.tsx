@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import {
   ArrowLeft, Play, Download, Heart,
-  ChevronDown, ChevronUp, Check, HardDrive, CheckCircle2, Loader2, Calendar, DownloadCloud, Crown, Lock
+  ChevronDown, ChevronUp, Check, HardDrive, CheckCircle2, Loader2, Calendar, DownloadCloud
 } from 'lucide-react';
 import { getDetails, getServers, resolveStream } from '@/services/animeService';
 import { addFavorite, removeFavorite, isFavorite as checkFavorite, getHistory, getFavorites, updateFavoriteStatus } from '@/services/storageService';
@@ -14,8 +14,6 @@ import { useAnimeStore } from '@/stores/useAnimeStore';
 import { useDownloadStore } from '@/stores/useDownloadStore';
 import { useProfileStore } from '@/stores/useProfileStore';
 import { useSyncStore } from '@/stores/useSyncStore';
-import { useSubscriptionStore } from '@/stores/useSubscriptionStore';
-import { FEATURE_FLAGS } from '@/config/features';
 import { CachedImage } from '@/components/CachedImage';
 import { BatchDownloadModal } from '@/components/BatchDownloadModal';
 import { FavoriteStatusDropdown } from '@/components/FavoriteStatusDropdown';
@@ -58,8 +56,6 @@ export function MobileDetailsPage() {
   const [showAllEps, setShowAllEps] = useState(false);
   const [epSearch, setEpSearch] = useState('');
   const [loadingEpisode, setLoadingEpisode] = useState<number | null>(null);
-
-  const { isVip, openModal: openVipModal } = useSubscriptionStore();
 
   // Sincronización con Descargas Locales e Historial de Visualización en Móvil
   const [localEpisodesMap, setLocalEpisodesMap] = useState<Map<number, LocalEpisodeItem>>(new Map());
@@ -260,10 +256,6 @@ export function MobileDetailsPage() {
   };
 
   const handleOpenDownloadModal = async (ep: Episode) => {
-    if (FEATURE_FLAGS.SHOW_SUBSCRIPTION && !isVip) {
-      openVipModal();
-      return;
-    }
     setDownloadModalEp(ep);
     setIsLoadingServers(true);
     setSelectedDownloadServer(null);
@@ -642,10 +634,6 @@ export function MobileDetailsPage() {
             <motion.button
               whileTap={{ scale: 0.95 }}
               onClick={() => {
-                if (FEATURE_FLAGS.SHOW_SUBSCRIPTION && !isVip) {
-                  openVipModal();
-                  return;
-                }
                 setShowBatchModal(true);
               }}
               style={{
@@ -658,16 +646,6 @@ export function MobileDetailsPage() {
               }}
             >
               <DownloadCloud size={15} /> Lotes
-              {FEATURE_FLAGS.SHOW_SUBSCRIPTION && !isVip && (
-                <span style={{
-                  fontSize: 8, fontWeight: 800,
-                  background: 'linear-gradient(135deg, #f59e0b, #d97706)',
-                  color: '#000', padding: '1px 4px', borderRadius: 3,
-                  display: 'inline-flex', alignItems: 'center', gap: 1,
-                }}>
-                  <Crown size={8} /> VIP
-                </span>
-              )}
             </motion.button>
           )}
         </div>
@@ -848,25 +826,23 @@ export function MobileDetailsPage() {
                         title={
                           isDownloaded
                             ? 'Ya descargado'
-                            : (FEATURE_FLAGS.SHOW_SUBSCRIPTION && !isVip
-                              ? 'Descarga exclusiva VIP'
-                              : 'Descargar')
+                            : 'Descargar'
                         }
                         style={{
                           width: 24, height: 24, borderRadius: 5,
                           background: isDownloaded
                             ? 'rgba(16, 185, 129, 0.15)'
-                            : (FEATURE_FLAGS.SHOW_SUBSCRIPTION && !isVip ? 'rgba(245, 158, 11, 0.1)' : 'rgba(255,255,255,0.06)'),
+                            : 'rgba(255,255,255,0.06)',
                           border: isDownloaded
                             ? '1px solid rgba(16, 185, 129, 0.3)'
-                            : (FEATURE_FLAGS.SHOW_SUBSCRIPTION && !isVip ? '1px dashed rgba(245, 158, 11, 0.35)' : 'none'),
+                            : 'none',
                           color: isDownloaded
                             ? '#34d399'
-                            : (FEATURE_FLAGS.SHOW_SUBSCRIPTION && !isVip ? '#fbbf24' : 'var(--text-secondary)'),
+                            : 'var(--text-secondary)',
                           display: 'flex', alignItems: 'center', justifyContent: 'center',
                         }}
                       >
-                        {isDownloaded ? <Check size={11} /> : (FEATURE_FLAGS.SHOW_SUBSCRIPTION && !isVip ? <Lock size={10} /> : <Download size={11} />)}
+                        {isDownloaded ? <Check size={11} /> : <Download size={11} />}
                       </button>
                     </div>
 

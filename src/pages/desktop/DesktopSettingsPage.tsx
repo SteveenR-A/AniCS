@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Globe, Download, Tv, RefreshCw, Check, Undo2,
   FolderOpen, ExternalLink, Sparkles, ShieldCheck, Palette, HardDrive, Trash2, Database, Activity, Cloud, User,
-  Film, Clock, Crown, Plus, Layers, Lock, ArrowRightLeft, ShieldAlert
+  Film, Clock, Plus, Layers, ShieldAlert
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -12,18 +12,14 @@ import { openUrl, openPath } from '@tauri-apps/plugin-opener';
 import { ChangelogModal } from '@/components/ChangelogModal';
 import { ProfileSelectorModal, getProfileAvatarIcon } from '@/components/ProfileSelectorModal';
 import { GistSyncModal } from '@/components/GistSyncModal';
-import { SubscriptionModal } from '@/components/SubscriptionModal';
 import { useThemeStore, THEMES } from '@/stores/useThemeStore';
 import { useProfileStore } from '@/stores/useProfileStore';
 import { useSyncStore } from '@/stores/useSyncStore';
-import { useSubscriptionStore, SUBSCRIPTION_PLANS } from '@/stores/useSubscriptionStore';
-import { useAccountStore } from '@/stores/useAccountStore';
-import { FEATURE_FLAGS } from '@/config/features';
 import { getProfileStats } from '@/services/profileService';
 import { getCacheStats, clearImageCache } from '@/services/downloadService';
 import { getDatabaseStats, optimizeDatabase, resetDatabase, clearHistory, type DatabaseStats } from '@/services/storageService';
 import { clearMemoryCache } from '@/components/CachedImage';
-import { DEFAULT_JKANIME, DEFAULT_MUNDODONGHUA } from '@/services/animeService';
+import { DEFAULT_JKANIME, DEFAULT_MUNDODONGHUA, DEFAULT_ANIMEJL } from '@/services/animeService';
 import { CURRENT_VERSION } from '@/services/updateService';
 import type { ProfileStats } from '@/types';
 
@@ -44,11 +40,10 @@ interface GitHubRelease {
 
 export function DesktopSettingsPage() {
   const { currentTheme, setTheme } = useThemeStore();
-  const { isVip, openModal: openVipModal, activePlan } = useSubscriptionStore();
-  const { quickLoginVipDemo, quickLoginFreeDemo, isSwitching: isAccountSwitching } = useAccountStore();
 
   const [jkanimeUrl, setJkanimeUrl] = useState(DEFAULT_JKANIME);
   const [donghuaUrl, setDonghuaUrl] = useState(DEFAULT_MUNDODONGHUA);
+  const [animejlUrl, setAnimejlUrl] = useState(DEFAULT_ANIMEJL);
   const [showAddSourceModal, setShowAddSourceModal] = useState(false);
   const [customSources, setCustomSources] = useState<Array<{ name: string; url: string; type: string }>>([]);
   const [newSourceName, setNewSourceName] = useState('');
@@ -186,6 +181,7 @@ export function DesktopSettingsPage() {
         const settings: Record<string, string> = await invoke('get_all_settings');
         if (settings.jkanime_base_url) setJkanimeUrl(settings.jkanime_base_url);
         if (settings.mundodonghua_base_url) setDonghuaUrl(settings.mundodonghua_base_url);
+        if (settings.animejl_base_url) setAnimejlUrl(settings.animejl_base_url);
         if (settings.download_dir) setDownloadDir(settings.download_dir);
         if (settings.max_concurrent_downloads) setMaxConcurrent(settings.max_concurrent_downloads);
         if (settings.player_type) setPlayerType(settings.player_type);
@@ -211,6 +207,7 @@ export function DesktopSettingsPage() {
     try {
       await invoke('set_setting', { key: 'jkanime_base_url', value: jkanimeUrl.trim() });
       await invoke('set_setting', { key: 'mundodonghua_base_url', value: donghuaUrl.trim() });
+      await invoke('set_setting', { key: 'animejl_base_url', value: animejlUrl.trim() });
       await invoke('set_setting', { key: 'download_dir', value: downloadDir.trim() });
       await invoke('set_setting', { key: 'max_concurrent_downloads', value: maxConcurrent });
       await invoke('set_setting', { key: 'player_type', value: playerType });
@@ -230,9 +227,11 @@ export function DesktopSettingsPage() {
   const handleResetUrls = async () => {
     setJkanimeUrl(DEFAULT_JKANIME);
     setDonghuaUrl(DEFAULT_MUNDODONGHUA);
+    setAnimejlUrl(DEFAULT_ANIMEJL);
     try {
       await invoke('set_setting', { key: 'jkanime_base_url', value: DEFAULT_JKANIME });
       await invoke('set_setting', { key: 'mundodonghua_base_url', value: DEFAULT_MUNDODONGHUA });
+      await invoke('set_setting', { key: 'animejl_base_url', value: DEFAULT_ANIMEJL });
       setSaveStatus('URLs de catálogos restauradas por defecto');
       setTimeout(() => setSaveStatus(null), 3000);
     } catch (e) {
@@ -285,6 +284,7 @@ export function DesktopSettingsPage() {
   // Perfiles y Sincronización en la Nube
   const { profiles, activeProfile } = useProfileStore();
   const { config: syncConfig } = useSyncStore();
+  const isGistLinked = Boolean(syncConfig.githubToken && syncConfig.gistId);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
   const [activeProfileStats, setActiveProfileStats] = useState<ProfileStats | null>(null);
@@ -361,7 +361,7 @@ export function DesktopSettingsPage() {
             <div>
               <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Cuentas y Sincronización en la Nube</h2>
               <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '2px 0 0' }}>
-                Perfiles locales multi-usuario y sincronización en la nube con Cuenta de Google / Firebase
+                Perfiles locales multi-usuario y sincronización en la nube con GitHub Gist
               </p>
             </div>
           </div>
@@ -492,41 +492,29 @@ export function DesktopSettingsPage() {
                     width: 44,
                     height: 44,
                     borderRadius: '12px',
-                    background: syncConfig.userId ? 'rgba(16, 185, 129, 0.15)' : 'rgba(59, 130, 246, 0.15)',
-                    border: syncConfig.userId ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(59, 130, 246, 0.3)',
+                    background: isGistLinked ? 'rgba(16, 185, 129, 0.15)' : 'rgba(59, 130, 246, 0.15)',
+                    border: isGistLinked ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(59, 130, 246, 0.3)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    color: syncConfig.userId ? '#10b981' : 'var(--accent-primary)',
+                    color: isGistLinked ? '#10b981' : 'var(--accent-primary)',
                   }}
                 >
                   <Cloud size={22} />
                 </div>
                 <div>
                   <div style={{ fontSize: 14, fontWeight: 700, color: 'white', display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span>Sincronización en la Nube</span>
-                    {syncConfig.userId && (
+                    <span>Sincronización en la Nube (Gist)</span>
+                    {isGistLinked && (
                       <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: '8px', background: 'rgba(16,185,129,0.2)', color: '#10b981' }}>
-                        Activo
-                      </span>
-                    )}
-                    {FEATURE_FLAGS.SHOW_SUBSCRIPTION && (
-                      <span style={{
-                        fontSize: 10, fontWeight: 800,
-                        background: isVip ? 'rgba(245, 158, 11, 0.2)' : 'rgba(245, 158, 11, 0.15)',
-                        color: '#fbbf24', padding: '1px 6px', borderRadius: '6px',
-                        border: '1px solid rgba(245, 158, 11, 0.3)',
-                        display: 'inline-flex', alignItems: 'center', gap: 3,
-                      }}>
-                        <Crown size={10} />
-                        VIP
+                        Conectado
                       </span>
                     )}
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                    {syncConfig.userId
-                      ? (syncConfig.userEmail || (syncConfig.lastSyncAt ? `Sync: ${new Date(syncConfig.lastSyncAt).toLocaleDateString()}` : 'Conectado'))
-                      : 'Historial y favoritos multi-dispositivo'}
+                    {isGistLinked
+                      ? (syncConfig.lastSyncAt ? `Última sinc: ${new Date(syncConfig.lastSyncAt).toLocaleDateString()}` : 'Conectado a Gist')
+                      : 'Historial y favoritos multi-dispositivo con GitHub Gist'}
                   </div>
                 </div>
               </div>
@@ -545,334 +533,9 @@ export function DesktopSettingsPage() {
                   cursor: 'pointer',
                 }}
               >
-                {syncConfig.userId ? 'Gestionar Cuenta' : 'Iniciar Sesión'}
+                {isGistLinked ? 'Gestionar Gist' : 'Configurar Gist'}
               </button>
             </div>
-
-            {/* Barra de Demostración Rápida Multicuentas */}
-            {FEATURE_FLAGS.SHOW_SUBSCRIPTION && (
-              <div
-                style={{
-                  gridColumn: '1 / -1',
-                  marginTop: '10px',
-                  padding: '14px 18px',
-                  borderRadius: 'var(--radius-lg)',
-                  background: 'rgba(255, 255, 255, 0.03)',
-                  border: '1px dashed var(--border-color)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: '12px',
-                  flexWrap: 'wrap',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <div
-                    style={{
-                      width: 34,
-                      height: 34,
-                      borderRadius: 10,
-                      background: 'rgba(99, 102, 241, 0.12)',
-                      border: '1px solid rgba(99, 102, 241, 0.25)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: 'var(--accent-primary)',
-                    }}
-                  >
-                    <ArrowRightLeft size={17} />
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                      Demostración Multicuentas en Vivo
-                      <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 4, background: 'rgba(255,255,255,0.06)', color: 'var(--text-secondary)' }}>
-                        QA / Presentación
-                      </span>
-                    </div>
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                      Cambia al instante entre la cuenta VIP y la cuenta Gratis para verificar el bloqueo y desbloqueo de funciones Pro.
-                    </div>
-                  </div>
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <button
-                    type="button"
-                    disabled={isAccountSwitching || (syncConfig.userEmail === 'vip@anics.app' && isVip)}
-                    onClick={() => quickLoginVipDemo()}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      padding: '8px 12px',
-                      borderRadius: 'var(--radius-md)',
-                      fontSize: 12,
-                      fontWeight: 700,
-                      cursor: (isAccountSwitching || (syncConfig.userEmail === 'vip@anics.app' && isVip)) ? 'default' : 'pointer',
-                      background: (syncConfig.userEmail === 'vip@anics.app' && isVip)
-                        ? 'rgba(245, 158, 11, 0.2)'
-                        : 'linear-gradient(135deg, rgba(245, 158, 11, 0.15), rgba(217, 119, 6, 0.1))',
-                      border: (syncConfig.userEmail === 'vip@anics.app' && isVip)
-                        ? '1px solid #f59e0b'
-                        : '1px solid rgba(245, 158, 11, 0.3)',
-                      color: '#fbbf24',
-                      opacity: (syncConfig.userEmail === 'vip@anics.app' && isVip) ? 0.9 : 1,
-                    }}
-                  >
-                    <Crown size={14} />
-                    {syncConfig.userEmail === 'vip@anics.app' && isVip ? 'Activa: VIP (vip@anics.app)' : 'Probar Cuenta VIP'}
-                  </button>
-
-                  <button
-                    type="button"
-                    disabled={isAccountSwitching || (syncConfig.userEmail === 'gratis@anics.app' && !isVip)}
-                    onClick={() => quickLoginFreeDemo()}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      padding: '8px 12px',
-                      borderRadius: 'var(--radius-md)',
-                      fontSize: 12,
-                      fontWeight: 700,
-                      cursor: (isAccountSwitching || (syncConfig.userEmail === 'gratis@anics.app' && !isVip)) ? 'default' : 'pointer',
-                      background: (syncConfig.userEmail === 'gratis@anics.app' && !isVip)
-                        ? 'rgba(100, 116, 139, 0.25)'
-                        : 'rgba(255, 255, 255, 0.05)',
-                      border: (syncConfig.userEmail === 'gratis@anics.app' && !isVip)
-                        ? '1px solid #94a3b8'
-                        : '1px solid var(--border-color)',
-                      color: 'var(--text-secondary)',
-                      opacity: (syncConfig.userEmail === 'gratis@anics.app' && !isVip) ? 0.9 : 1,
-                    }}
-                  >
-                    <User size={14} />
-                    {syncConfig.userEmail === 'gratis@anics.app' && !isVip ? 'Activa: Gratis (gratis@anics.app)' : 'Probar Cuenta Gratis'}
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setIsSyncModalOpen(true)}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      padding: '8px 12px',
-                      borderRadius: 'var(--radius-md)',
-                      fontSize: 12,
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                      background: 'rgba(255, 255, 255, 0.03)',
-                      border: '1px solid var(--border-color)',
-                      color: 'var(--text-muted)',
-                    }}
-                  >
-                    Gestionar...
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Suscripción Yumework VIP (Tarjetas de Planes / Membresía Activa) */}
-            {FEATURE_FLAGS.SHOW_SUBSCRIPTION && (
-              <div style={{ gridColumn: '1 / -1', marginTop: '6px' }}>
-                {isVip ? (
-                  /* Tarjeta de Membresía VIP Activa */
-                  <div
-                    style={{
-                      padding: '20px 24px',
-                      borderRadius: 'var(--radius-lg)',
-                      background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.18), rgba(217, 119, 6, 0.08))',
-                      border: '1px solid rgba(245, 158, 11, 0.4)',
-                      boxShadow: '0 8px 24px -6px rgba(245, 158, 11, 0.15)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      gap: '20px',
-                      flexWrap: 'wrap',
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                      <div
-                        style={{
-                          width: '50px',
-                          height: '50px',
-                          borderRadius: '14px',
-                          background: 'linear-gradient(135deg, #f59e0b, #d97706)',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          boxShadow: '0 4px 16px rgba(245, 158, 11, 0.4)',
-                          flexShrink: 0,
-                        }}
-                      >
-                        <Crown size={26} color="#ffffff" />
-                      </div>
-                      <div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <span style={{ fontSize: '16px', fontWeight: 800, color: '#ffffff' }}>
-                            Yumework VIP Pass
-                          </span>
-                          <span
-                            style={{
-                              fontSize: '10px',
-                              fontWeight: 800,
-                              padding: '3px 9px',
-                              borderRadius: '9999px',
-                              background: '#f59e0b',
-                              color: '#000',
-                              textTransform: 'uppercase',
-                              letterSpacing: '0.04em',
-                            }}
-                          >
-                            Membresía Activa
-                          </span>
-                        </div>
-                        <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#fbbf24' }}>
-                          Plan {activePlan === 'annual' ? 'Anual ($35/año)' : 'Mensual ($3.50/mes)'} con todos los beneficios desbloqueados
-                        </p>
-                        <div style={{ display: 'flex', gap: 14, marginTop: 8, fontSize: 11, color: 'var(--text-secondary)' }}>
-                          <span>✓ Sincronización en la nube</span>
-                          <span>✓ Servidores Magi y Desu</span>
-                          <span>✓ Descargas HD 1080p</span>
-                          <span>✓ Temas VIP</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={openVipModal}
-                      style={{
-                        background: 'rgba(245, 158, 11, 0.2)',
-                        border: '1px solid #f59e0b',
-                        borderRadius: 'var(--radius-md)',
-                        padding: '10px 18px',
-                        color: '#fbbf24',
-                        fontSize: '13px',
-                        fontWeight: 700,
-                        cursor: 'pointer',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      Gestionar Suscripción
-                    </button>
-                  </div>
-                ) : (
-                  /* Tarjetas de Versión de Pago (Planes de Suscripción) */
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <Crown size={18} color="#f59e0b" />
-                          <h3 style={{ fontSize: 15, fontWeight: 800, color: '#ffffff', margin: 0 }}>
-                            Planes de Suscripción Yumework VIP
-                          </h3>
-                        </div>
-                        <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '3px 0 0' }}>
-                          Elige el plan ideal para desbloquear descargas offline, servidores de alta velocidad y sincronización en la nube
-                        </p>
-                      </div>
-                    </div>
-
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>
-                      {SUBSCRIPTION_PLANS.map((plan) => {
-                        const isPopular = plan.popular;
-                        return (
-                          <div
-                            key={plan.id}
-                            style={{
-                              background: isPopular
-                                ? 'linear-gradient(135deg, rgba(245, 158, 11, 0.12), rgba(17, 19, 24, 0.95))'
-                                : 'var(--bg-surface-2, rgba(255, 255, 255, 0.03))',
-                              border: isPopular ? '1.5px solid #f59e0b' : '1px solid var(--border-subtle)',
-                              borderRadius: 'var(--radius-lg)',
-                              padding: '18px 20px',
-                              display: 'flex',
-                              flexDirection: 'column',
-                              justifyContent: 'space-between',
-                              gap: 14,
-                              position: 'relative',
-                              boxShadow: isPopular ? '0 8px 24px -4px rgba(245, 158, 11, 0.2)' : 'none',
-                            }}
-                          >
-                            {isPopular && (
-                              <div
-                                style={{
-                                  position: 'absolute',
-                                  top: -10,
-                                  right: 18,
-                                  background: 'linear-gradient(135deg, #f59e0b, #d97706)',
-                                  color: '#000',
-                                  fontSize: 10,
-                                  fontWeight: 800,
-                                  padding: '2px 10px',
-                                  borderRadius: 10,
-                                  letterSpacing: '0.03em',
-                                  textTransform: 'uppercase',
-                                  boxShadow: '0 2px 8px rgba(245, 158, 11, 0.4)',
-                                }}
-                              >
-                                Más Popular • 2 Meses Gratis
-                              </div>
-                            )}
-
-                            <div>
-                              <div style={{ fontSize: 15, fontWeight: 800, color: 'white' }}>
-                                {plan.name}
-                              </div>
-                              <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '4px 0 12px', minHeight: 32 }}>
-                                {plan.description}
-                              </p>
-
-                              <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, marginBottom: 14 }}>
-                                <span style={{ fontSize: 28, fontWeight: 900, color: isPopular ? '#fbbf24' : '#ffffff' }}>
-                                  {plan.price}
-                                </span>
-                                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                                  {plan.period}
-                                </span>
-                              </div>
-
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                                {plan.features.map((feat, fIdx) => (
-                                  <div key={fIdx} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: 'var(--text-secondary)' }}>
-                                    <Check size={13} color="#10b981" style={{ flexShrink: 0 }} />
-                                    <span>{feat}</span>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-
-                            <button
-                              type="button"
-                              onClick={openVipModal}
-                              style={{
-                                marginTop: 8,
-                                width: '100%',
-                                padding: '10px 14px',
-                                borderRadius: 'var(--radius-md)',
-                                border: 'none',
-                                background: isPopular
-                                  ? 'linear-gradient(135deg, #f59e0b, #d97706)'
-                                  : 'rgba(245, 158, 11, 0.15)',
-                                color: isPopular ? '#000' : '#fbbf24',
-                                fontSize: 13,
-                                fontWeight: 800,
-                                cursor: 'pointer',
-                                transition: 'all var(--transition-fast)',
-                              }}
-                            >
-                              Suscribirme ({plan.price})
-                            </button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
           </div>
         </div>
 
@@ -900,25 +563,16 @@ export function DesktopSettingsPage() {
           }}>
             {THEMES.map((theme) => {
               const isSelected = currentTheme === theme.id;
-              const isVipLocked = Boolean(theme.isVipOnly && FEATURE_FLAGS.SHOW_SUBSCRIPTION && !isVip);
               return (
                 <motion.div
                   key={theme.id}
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
-                  onClick={() => {
-                    if (isVipLocked) {
-                      openVipModal();
-                    } else {
-                      setTheme(theme.id);
-                    }
-                  }}
+                  onClick={() => setTheme(theme.id)}
                   style={{
                     background: theme.surfaceColor,
                     border: isSelected
                       ? `2px solid ${theme.primaryColor}`
-                      : isVipLocked
-                      ? '1px dashed rgba(245, 158, 11, 0.4)'
                       : '1px solid var(--border-moderate)',
                     borderRadius: 'var(--radius-md)',
                     padding: '12px 14px',
@@ -932,24 +586,6 @@ export function DesktopSettingsPage() {
                       <span style={{ fontSize: 13, fontWeight: 700, color: theme.isDark ? '#f8fafc' : '#0f172a' }}>
                         {theme.name}
                       </span>
-                      {theme.isVipOnly && FEATURE_FLAGS.SHOW_SUBSCRIPTION && (
-                        <span
-                          style={{
-                            fontSize: 9,
-                            fontWeight: 800,
-                            background: isVipLocked ? 'rgba(245, 158, 11, 0.15)' : 'linear-gradient(135deg, #f59e0b, #d97706)',
-                            color: isVipLocked ? '#fbbf24' : '#000',
-                            padding: '1px 5px',
-                            borderRadius: '4px',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: 2,
-                          }}
-                        >
-                          <Crown size={9} />
-                          VIP
-                        </span>
-                      )}
                     </div>
                     {isSelected ? (
                       <div style={{
@@ -958,10 +594,6 @@ export function DesktopSettingsPage() {
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                       }}>
                         <Check size={12} color={theme.isDark ? '#000' : '#fff'} />
-                      </div>
-                    ) : isVipLocked ? (
-                      <div title="Tema exclusivo VIP" style={{ color: '#fbbf24', display: 'flex', alignItems: 'center' }}>
-                        <Lock size={13} />
                       </div>
                     ) : null}
                   </div>
@@ -1212,6 +844,70 @@ export function DesktopSettingsPage() {
                   value={donghuaUrl}
                   onChange={(e) => setDonghuaUrl(e.target.value)}
                   placeholder="https://www.mundodonghua.com"
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    borderRadius: 'var(--radius-sm)',
+                    background: 'var(--bg-elevated)',
+                    border: '1px solid var(--border-moderate)',
+                    color: 'var(--text-primary)',
+                    fontSize: 12,
+                    fontFamily: 'monospace',
+                    outline: 'none',
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* Catálogo Anime-JL */}
+            <div
+              style={{
+                padding: '16px',
+                borderRadius: 'var(--radius-md)',
+                background: 'rgba(255, 255, 255, 0.03)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 12,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div
+                    style={{
+                      width: 40,
+                      height: 40,
+                      borderRadius: 10,
+                      background: 'rgba(245, 158, 11, 0.15)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#f59e0b',
+                    }}
+                  >
+                    <Layers size={20} />
+                  </div>
+                  <div>
+                    <h4 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: '#fff' }}>Catálogo Anime-JL (Alternativo)</h4>
+                    <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>
+                      Emisiones, estrenos de temporada y servidores múltiples
+                    </p>
+                  </div>
+                </div>
+                <span style={{ fontSize: 11, fontWeight: 600, color: '#34d399', background: 'rgba(16, 185, 129, 0.12)', padding: '3px 8px', borderRadius: '6px' }}>
+                  Conectado
+                </span>
+              </div>
+              <div>
+                <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4, fontWeight: 600 }}>
+                  URL Servidor / Endpoint:
+                </label>
+                <input
+                  type="text"
+                  value={animejlUrl}
+                  onChange={(e) => setAnimejlUrl(e.target.value)}
+                  placeholder="https://www.anime-jl.net"
                   style={{
                     width: '100%',
                     padding: '8px 12px',
@@ -1728,7 +1424,7 @@ export function DesktopSettingsPage() {
                 setIsResettingDb(true);
                 try {
                   await resetDatabase();
-                  await useSyncStore.getState().logout();
+                  await useSyncStore.getState().clearToken();
                   clearMemoryCache();
                   await loadDb();
                   setSaveStatus('Base de datos restablecida limpiamente');
@@ -1986,7 +1682,6 @@ export function DesktopSettingsPage() {
       <ChangelogModal isOpen={showChangelog} onClose={() => setShowChangelog(false)} />
       <ProfileSelectorModal isOpen={isProfileModalOpen} onClose={() => setIsProfileModalOpen(false)} />
       <GistSyncModal isOpen={isSyncModalOpen} onClose={() => setIsSyncModalOpen(false)} />
-      <SubscriptionModal />
 
       {/* Modal para agregar fuente o catálogo personalizado */}
       <AnimatePresence>

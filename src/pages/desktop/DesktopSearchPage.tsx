@@ -3,7 +3,8 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search, X, Loader2, SearchX,
-  RotateCcw, ChevronDown, ChevronUp, Check, SlidersHorizontal, RefreshCw, Clock
+  RotateCcw, ChevronDown, ChevronUp, Check, SlidersHorizontal, RefreshCw, Clock,
+  Sparkles, Flame, Film
 } from 'lucide-react';
 import { useAnimeStore } from '@/stores/useAnimeStore';
 import { advancedSearch } from '@/services/animeService';
@@ -389,20 +390,29 @@ export function DesktopSearchPage() {
           display: 'flex', background: 'var(--bg-surface)',
           padding: 4, borderRadius: 'var(--radius-full)',
           border: '1px solid var(--border-subtle)',
+          gap: 2,
         }}>
-          {['jkanime', 'mundodonghua'].map((src) => (
+          {[
+            { id: 'jkanime', label: 'JKAnime' },
+            { id: 'animejl', label: 'Anime-JL' },
+            { id: 'mundodonghua', label: 'Donghua' },
+          ].map((src) => (
             <button
-              key={src}
-              onClick={() => setActiveSource(src)}
+              key={src.id}
+              onClick={() => {
+                setActiveSource(src.id);
+                syncUrlParams(query, selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
+                executeSearch(query, selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
+              }}
               style={{
-                padding: '8px 18px', borderRadius: 'var(--radius-full)',
-                background: activeSource === src ? 'var(--accent-primary)' : 'transparent',
-                color: activeSource === src ? 'white' : 'var(--text-secondary)',
+                padding: '8px 16px', borderRadius: 'var(--radius-full)',
+                background: activeSource === src.id ? 'var(--accent-primary)' : 'transparent',
+                color: activeSource === src.id ? 'white' : 'var(--text-secondary)',
                 border: 'none', fontSize: 12, fontWeight: 700, cursor: 'pointer',
                 transition: 'all 0.15s ease',
               }}
             >
-              {src === 'jkanime' ? 'Anime' : 'Donghua'}
+              {src.label}
             </button>
           ))}
         </div>
@@ -455,6 +465,101 @@ export function DesktopSearchPage() {
         >
           <RefreshCw size={15} className={isSearching ? 'animate-spin' : ''} />
           <span>Actualizar</span>
+        </button>
+      </div>
+
+      {/* Barra de Acceso Rápido / Categorías y Estrenos */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 700 }}>Explorar:</span>
+        <button
+          onClick={() => {
+            setSelectedStatus('');
+            setSelectedType('');
+            syncUrlParams(query, selectedGenre, '', '', selectedOrder, 1);
+            executeSearch(query, selectedGenre, '', '', selectedOrder, 1);
+          }}
+          style={{
+            padding: '6px 14px', borderRadius: 'var(--radius-full)',
+            background: !selectedStatus && !selectedType ? 'var(--accent-primary)' : 'var(--bg-surface)',
+            color: !selectedStatus && !selectedType ? '#ffffff' : 'var(--text-secondary)',
+            border: `1px solid ${!selectedStatus && !selectedType ? 'transparent' : 'var(--border-subtle)'}`,
+            fontSize: 12, fontWeight: 700, cursor: 'pointer',
+            transition: 'all var(--transition-fast)',
+          }}
+        >
+          Todos
+        </button>
+
+        <button
+          onClick={() => {
+            const nextStatus = selectedStatus === 'estreno' ? '' : 'estreno';
+            setSelectedStatus(nextStatus);
+            syncUrlParams(query, selectedGenre, nextStatus, selectedType, selectedOrder, 1);
+            executeSearch(query, selectedGenre, nextStatus, selectedType, selectedOrder, 1);
+          }}
+          style={{
+            padding: '6px 14px', borderRadius: 'var(--radius-full)',
+            background: selectedStatus === 'estreno'
+              ? 'linear-gradient(135deg, #f59e0b, #ef4444)'
+              : 'var(--bg-surface)',
+            color: selectedStatus === 'estreno' ? '#ffffff' : 'var(--text-secondary)',
+            border: `1px solid ${selectedStatus === 'estreno' ? 'transparent' : 'var(--border-subtle)'}`,
+            fontSize: 12, fontWeight: 700, cursor: 'pointer',
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+            boxShadow: selectedStatus === 'estreno' ? '0 2px 10px rgba(245, 158, 11, 0.4)' : 'none',
+            transition: 'all var(--transition-fast)',
+          }}
+        >
+          <Sparkles size={13} />
+          <span>Estrenos</span>
+        </button>
+
+        <button
+          onClick={() => {
+            const nextStatus = selectedStatus === 'en-emision' ? '' : 'en-emision';
+            setSelectedStatus(nextStatus);
+            syncUrlParams(query, selectedGenre, nextStatus, selectedType, selectedOrder, 1);
+            executeSearch(query, selectedGenre, nextStatus, selectedType, selectedOrder, 1);
+          }}
+          style={{
+            padding: '6px 14px', borderRadius: 'var(--radius-full)',
+            background: selectedStatus === 'en-emision'
+              ? 'linear-gradient(135deg, #10b981, #059669)'
+              : 'var(--bg-surface)',
+            color: selectedStatus === 'en-emision' ? '#ffffff' : 'var(--text-secondary)',
+            border: `1px solid ${selectedStatus === 'en-emision' ? 'transparent' : 'var(--border-subtle)'}`,
+            fontSize: 12, fontWeight: 700, cursor: 'pointer',
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+            boxShadow: selectedStatus === 'en-emision' ? '0 2px 10px rgba(16, 185, 129, 0.4)' : 'none',
+            transition: 'all var(--transition-fast)',
+          }}
+        >
+          <Flame size={13} />
+          <span>En Emisión</span>
+        </button>
+
+        <button
+          onClick={() => {
+            const nextType = selectedType === 'pelicula' ? '' : 'pelicula';
+            setSelectedType(nextType);
+            syncUrlParams(query, selectedGenre, selectedStatus, nextType, selectedOrder, 1);
+            executeSearch(query, selectedGenre, selectedStatus, nextType, selectedOrder, 1);
+          }}
+          style={{
+            padding: '6px 14px', borderRadius: 'var(--radius-full)',
+            background: selectedType === 'pelicula'
+              ? 'linear-gradient(135deg, #8b5cf6, #ec4899)'
+              : 'var(--bg-surface)',
+            color: selectedType === 'pelicula' ? '#ffffff' : 'var(--text-secondary)',
+            border: `1px solid ${selectedType === 'pelicula' ? 'transparent' : 'var(--border-subtle)'}`,
+            fontSize: 12, fontWeight: 700, cursor: 'pointer',
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+            boxShadow: selectedType === 'pelicula' ? '0 2px 10px rgba(139, 92, 246, 0.4)' : 'none',
+            transition: 'all var(--transition-fast)',
+          }}
+        >
+          <Film size={13} />
+          <span>Películas</span>
         </button>
       </div>
 
@@ -553,7 +658,7 @@ export function DesktopSearchPage() {
               }}
               title="Quitar filtro de estado"
             >
-              <span>Estado: {selectedStatus === 'en-emision' ? 'En emisión' : 'Concluido'}</span>
+              <span>Estado: {selectedStatus === 'estreno' ? 'Estrenos' : selectedStatus === 'en-emision' ? 'En emisión' : 'Concluido'}</span>
               <X size={13} />
             </button>
           )}
@@ -678,7 +783,7 @@ export function DesktopSearchPage() {
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>Estado:</span>
-                {['', 'en-emision', 'concluido'].map((st) => {
+                {['', 'estreno', 'en-emision', 'concluido'].map((st) => {
                   const isSelected = selectedStatus === st || (st === '' && !selectedStatus);
                   return (
                     <button
@@ -694,7 +799,7 @@ export function DesktopSearchPage() {
                       }}
                     >
                       {st !== '' && isSelected && <Check size={12} />}
-                      {st === '' ? 'Todos' : st === 'en-emision' ? 'En emisión' : 'Concluido'}
+                      {st === '' ? 'Todos' : st === 'estreno' ? 'Estrenos' : st === 'en-emision' ? 'En emisión' : 'Concluido'}
                     </button>
                   );
                 })}

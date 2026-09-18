@@ -3,10 +3,12 @@ use scraper::{Html, Selector};
 
 use crate::core::*;
 
+pub mod animejl;
 pub mod http_client;
 pub mod jkanime;
 pub mod mundodonghua;
 
+pub use animejl::AnimeJLExtractor;
 pub use http_client::{fetch_html, HTTP_CLIENT, DOWNLOAD_CLIENT};
 pub use jkanime::JKAnimeExtractor;
 pub use mundodonghua::MundoDonghuaExtractor;
@@ -84,6 +86,7 @@ pub fn create_extractor(id: &str) -> Option<Box<dyn AnimeExtractor>> {
     match id {
         "jkanime" => Some(Box::new(JKAnimeExtractor::new())),
         "mundodonghua" => Some(Box::new(MundoDonghuaExtractor::new())),
+        "animejl" => Some(Box::new(AnimeJLExtractor::new())),
         _ => None,
     }
 }
@@ -92,6 +95,7 @@ pub fn all_extractors() -> Vec<Box<dyn AnimeExtractor>> {
     vec![
         Box::new(JKAnimeExtractor::new()),
         Box::new(MundoDonghuaExtractor::new()),
+        Box::new(AnimeJLExtractor::new()),
     ]
 }
 

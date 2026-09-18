@@ -3,14 +3,11 @@ import { NavLink } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Home, Search, Calendar, Flame, Download, Clock,
-  Heart, Settings, ChevronLeft, ChevronRight, Tv2, User, Crown
+  Heart, Settings, ChevronLeft, ChevronRight, Tv2, User
 } from 'lucide-react';
 import { useAnimeStore } from '@/stores/useAnimeStore';
 import { useProfileStore } from '@/stores/useProfileStore';
-import { useSubscriptionStore } from '@/stores/useSubscriptionStore';
-import { FEATURE_FLAGS } from '@/config/features';
 import { ProfileSelectorModal, getProfileAvatarIcon } from '@/components/ProfileSelectorModal';
-import { SubscriptionModal } from '@/components/SubscriptionModal';
 
 const navItems = [
   { to: '/',          icon: Home,       label: 'Inicio'       },
@@ -24,16 +21,18 @@ const navItems = [
 
 /** Mapea el ID interno de la fuente a un label legible corto */
 function sourceLabel(id: string): string {
-  if (id === 'jkanime') return 'Anime';
+  if (id === 'jkanime') return 'JKAnime';
+  if (id === 'animejl') return 'Anime-JL';
   if (id === 'mundodonghua') return 'Donghua';
   return id;
 }
 
-/** Letra/emoji para el icono compacto de fuente en sidebar colapsada */
+/** Letra para el icono compacto de fuente en sidebar colapsada */
 function sourceGlyph(id: string): string {
-  if (id === 'jkanime') return 'A';
-  if (id === 'mundodonghua') return 'D';
-  return id.slice(0, 1).toUpperCase();
+  if (id === 'jkanime') return 'JK';
+  if (id === 'animejl') return 'JL';
+  if (id === 'mundodonghua') return 'DH';
+  return id.slice(0, 2).toUpperCase();
 }
 
 export function DesktopSidebar() {
@@ -52,7 +51,6 @@ export function DesktopSidebar() {
 
   const { sources, activeSource, setActiveSource } = useAnimeStore();
   const { activeProfile } = useProfileStore();
-  const { isVip, openModal: openVipModal } = useSubscriptionStore();
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
 
   const ProfileIcon = activeProfile ? getProfileAvatarIcon(activeProfile.avatar) : User;
@@ -190,44 +188,6 @@ export function DesktopSidebar() {
 
         {/* Footer: Profile + Settings + Collapse toggle */}
         <div style={{ padding: '8px', borderTop: '1px solid var(--border-subtle)' }}>
-          {/* VIP Subscription CTA */}
-          {FEATURE_FLAGS.SHOW_SUBSCRIPTION && (
-            <button
-              onClick={openVipModal}
-              title={isVip ? 'Membresía Yumework VIP Activa' : 'Mejorar a Yumework VIP'}
-              style={{
-                width: '100%',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 12,
-                padding: '8px 12px',
-                borderRadius: 'var(--radius-md)',
-                background: isVip
-                  ? 'linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(217, 119, 6, 0.1))'
-                  : 'linear-gradient(135deg, rgba(245, 158, 11, 0.12), transparent)',
-                border: '1px solid rgba(245, 158, 11, 0.3)',
-                color: '#fbbf24',
-                cursor: 'pointer',
-                justifyContent: collapsed ? 'center' : 'flex-start',
-                marginBottom: 6,
-                transition: 'all var(--transition-fast)',
-              }}
-            >
-              <Crown size={18} color="#f59e0b" style={{ flexShrink: 0 }} />
-              {!collapsed && (
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: isVip ? '#fbbf24' : '#ffffff' }}>
-                    {isVip ? 'VIP Activo' : 'Yumework VIP'}
-                  </span>
-                  {!isVip && (
-                    <span style={{ fontSize: 10, fontWeight: 800, background: '#f59e0b', color: '#000', padding: '1px 5px', borderRadius: '4px' }}>
-                      PRO
-                    </span>
-                  )}
-                </div>
-              )}
-            </button>
-          )}
 
           {/* Profile Button */}
           <button
@@ -269,16 +229,6 @@ export function DesktopSidebar() {
                 <span style={{ fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {activeProfile?.name || 'Perfil'}
                 </span>
-                {FEATURE_FLAGS.SHOW_SUBSCRIPTION && isVip && (
-                  <span style={{
-                    fontSize: 9, fontWeight: 800,
-                    background: 'linear-gradient(135deg, #f59e0b, #d97706)',
-                    color: '#000', padding: '1px 5px', borderRadius: 4,
-                    display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0,
-                  }}>
-                    <Crown size={8} /> VIP
-                  </span>
-                )}
               </div>
             )}
           </button>
@@ -321,7 +271,6 @@ export function DesktopSidebar() {
         isOpen={isProfileModalOpen}
         onClose={() => setIsProfileModalOpen(false)}
       />
-      <SubscriptionModal />
     </>
   );
 }

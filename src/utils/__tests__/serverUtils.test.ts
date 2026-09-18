@@ -4,18 +4,13 @@ import type { VideoServer } from '@/types';
 
 describe('serverUtils', () => {
   describe('isVipServer', () => {
-    it('detects magi and desu servers as VIP', () => {
-      expect(isVipServer('Servidor Magi')).toBe(true);
-      expect(isVipServer('Desu 1080p')).toBe(true);
-      expect(isVipServer('Servidor Dedicado VIP')).toBe(true);
-      expect(isVipServer('VIP Server 1')).toBe(true);
-    });
-
-    it('returns false for non-VIP servers', () => {
+    it('always returns false in vanilla mode (no restricted servers)', () => {
+      expect(isVipServer('Servidor Magi')).toBe(false);
+      expect(isVipServer('Desu 1080p')).toBe(false);
+      expect(isVipServer('Servidor Dedicado')).toBe(false);
+      expect(isVipServer('VIP Server 1')).toBe(false);
       expect(isVipServer('Servidor CDN 1')).toBe(false);
       expect(isVipServer('Streamwish')).toBe(false);
-      expect(isVipServer('VOE')).toBe(false);
-      expect(isVipServer('Mediafire')).toBe(false);
     });
   });
 
@@ -56,7 +51,7 @@ describe('serverUtils', () => {
       ];
 
       const result = maskAndFilterServers(input);
-      expect(result[0].name).toBe('Servidor Dedicado VIP (1080p Ultra HD)');
+      expect(result[0].name).toBe('Servidor Dedicado (1080p Ultra HD)');
       expect(result[1].name).toBe('Servidor Alta Velocidad (1080p)');
       expect(result[2].name).toBe('Servidor Principal HLS (1080p)');
       expect(result[3].name).toBe('Servidor Espejo (MP4 Directo)');

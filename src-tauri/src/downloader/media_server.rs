@@ -5,23 +5,8 @@ use std::sync::atomic::{AtomicU16, Ordering};
 use tauri::AppHandle;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-
-use once_cell::sync::Lazy;
-use parking_lot::Mutex;
-
 static SERVER_PORT: AtomicU16 = AtomicU16::new(0);
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct AuthCallbackData {
-    pub uid: String,
-    pub email: Option<String>,
-    pub display_name: Option<String>,
-    pub photo_url: Option<String>,
-    pub id_token: Option<String>,
-    pub access_token: Option<String>,
-}
-
-static PENDING_AUTH: Lazy<Mutex<Option<AuthCallbackData>>> = Lazy::new(|| Mutex::new(None));
 
 /// Compara tokens (función de compatibilidad para evitar roturas de compilación)
 pub fn verify_token_constant_time(_expected: &[u8], _provided: &[u8]) -> bool {
@@ -128,11 +113,6 @@ Access-Control-Max-Age: 86400\r\n\
         return;
     }
 
-    // Interceptar rutas de autenticación segura vía navegador externo
-    if uri.starts_with("/auth") {
-        handle_auth_request(&mut stream, method, uri, &buffer[..n], &origin).await;
-        return;
-    }
 
     if method != "GET" && method != "HEAD" {
         let response = "HTTP/1.1 405 Method Not Allowed\r\n\r\n";
@@ -315,193 +295,6 @@ pub fn get_mime_type(path: &PathBuf) -> &'static str {
     }
 }
 
-async fn handle_auth_request(
-    stream: &mut TcpStream,
-    method: &str,
-    uri: &str,
-    buffer: &[u8],
-    _origin: &str,
-) {
-    if method == "OPTIONS" {
-        let response = "HTTP/1.1 204 No Content\r\n\
-Access-Control-Allow-Origin: *\r\n\
-Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n\
-Access-Control-Allow-Headers: Content-Type, Accept\r\n\
-Access-Control-Max-Age: 86400\r\n\r\n";
-        let _ = stream.write_all(response.as_bytes()).await;
-        return;
-    }
-
-    if uri.starts_with("/auth/login") && method == "GET" {
-        let html = r###"<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AniCS — Inicio de Sesión</title>
-  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
-    body { background: #0b0d13; color: #f1f5f9; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; }
-    .card { background: #131722; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 20px; padding: 36px 30px; max-width: 440px; width: 100%; box-shadow: 0 25px 60px rgba(0, 0, 0, 0.7); text-align: center; }
-    .badge { display: inline-block; padding: 4px 12px; border-radius: 999px; background: rgba(124, 58, 237, 0.15); border: 1px solid rgba(124, 58, 237, 0.3); color: #c084fc; font-size: 11px; font-weight: 700; text-transform: uppercase; margin-bottom: 16px; }
-    h1 { font-size: 22px; font-weight: 800; color: #ffffff; margin-bottom: 8px; }
-    p { color: #94a3b8; font-size: 13px; line-height: 1.5; margin-bottom: 24px; }
-    .google-btn { width: 100%; background: #ffffff; color: #0f172a; border: none; border-radius: 12px; padding: 13px 18px; font-size: 14px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 12px; transition: all 0.2s ease; }
-    .google-btn:hover { background: #f8fafc; transform: translateY(-1px); }
-    .error { margin-top: 14px; padding: 10px; border-radius: 8px; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); color: #f87171; font-size: 12px; display: none; }
-  </style>
-</head>
-<body>
-  <div class="card" id="card">
-    <div class="badge">AniCS Cloud Sync</div>
-    <h1>Autenticación Segura</h1>
-    <p>Inicia sesión con tu cuenta de Google en este navegador para vincularla con AniCS de forma rápida y segura.</p>
-    <button class="google-btn" id="loginBtn">
-      <svg width="18" height="18" viewBox="0 0 24 24">
-        <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17Z"/>
-        <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.33 24 12 24Z"/>
-        <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 9.98 0 12s.45 3.82 1.25 5.42l4.03-3.15Z"/>
-        <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98Z"/>
-      </svg>
-      Continuar con Google
-    </button>
-    <div class="error" id="error"></div>
-  </div>
-  <script>
-    const firebaseConfig = {
-      apiKey: "AIzaSyCiIOVKoThwjMnc1coLu4qVWy4XIw5zRg8",
-      authDomain: "anics-20677.firebaseapp.com",
-      projectId: "anics-20677",
-      storageBucket: "anics-20677.firebasestorage.app",
-      messagingSenderId: "306937777600",
-      appId: "1:306937777600:web:9905024518d1e3ba1f4c25",
-    };
-    firebase.initializeApp(firebaseConfig);
-    const btn = document.getElementById('loginBtn');
-    const errDiv = document.getElementById('error');
-    const card = document.getElementById('card');
-    btn.addEventListener('click', async () => {
-      btn.disabled = true;
-      btn.innerText = 'Conectando con Google...';
-      errDiv.style.display = 'none';
-      try {
-        const provider = new firebase.auth.GoogleAuthProvider();
-        provider.setCustomParameters({ prompt: 'select_account' });
-        const res = await firebase.auth().signInWithPopup(provider);
-        const user = res.user;
-        const idToken = await user.getIdToken();
-        const accessToken = (res.credential && res.credential.accessToken) ? res.credential.accessToken : null;
-        await fetch('/auth/callback', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            uid: user.uid,
-            email: user.email,
-            displayName: user.displayName,
-            photoURL: user.photoURL,
-            idToken: idToken,
-            accessToken: accessToken
-          })
-        });
-        card.innerHTML = `
-          <div style="padding: 10px 0;">
-            <div style="font-size: 48px; color: #10b981; margin-bottom: 12px;">✓</div>
-            <h1 style="color: #ffffff; font-size: 20px; margin-bottom: 8px;">¡Autenticación Exitosa!</h1>
-            <p style="color: #94a3b8; font-size: 13px; margin-bottom: 16px;">
-              Hola <strong>${user.displayName || user.email}</strong>, tu cuenta ha sido vinculada correctamente. Ya puedes cerrar esta pestaña y volver a AniCS.
-            </p>
-          </div>
-        `;
-        setTimeout(() => { try { window.close(); } catch(e) {} }, 3000);
-      } catch (error) {
-        btn.disabled = false;
-        btn.innerText = 'Reintentar inicio con Google';
-        errDiv.innerText = error.message || 'Error durante la autenticación.';
-        errDiv.style.display = 'block';
-      }
-    });
-  </script>
-</body>
-</html>"###;
-
-        let response = format!(
-            "HTTP/1.1 200 OK\r\n\
-Content-Type: text/html; charset=utf-8\r\n\
-Access-Control-Allow-Origin: *\r\n\
-Content-Length: {}\r\n\
-Connection: close\r\n\r\n{}",
-            html.len(),
-            html
-        );
-        let _ = stream.write_all(response.as_bytes()).await;
-        return;
-    }
-
-    if uri.starts_with("/auth/callback") && method == "POST" {
-        let req_str = String::from_utf8_lossy(buffer);
-        if let Some(pos) = req_str.find("\r\n\r\n") {
-            let body_str = &req_str[pos + 4..];
-            if let Ok(data) = serde_json::from_str::<AuthCallbackData>(body_str.trim()) {
-                *PENDING_AUTH.lock() = Some(data);
-                let res_body = r#"{"status":"success"}"#;
-                let res = format!(
-                    "HTTP/1.1 200 OK\r\n\
-Content-Type: application/json\r\n\
-Access-Control-Allow-Origin: *\r\n\
-Content-Length: {}\r\n\
-Connection: close\r\n\r\n{}",
-                    res_body.len(),
-                    res_body
-                );
-                let _ = stream.write_all(res.as_bytes()).await;
-                return;
-            }
-        }
-        let err_res = "HTTP/1.1 400 Bad Request\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n";
-        let _ = stream.write_all(err_res.as_bytes()).await;
-        return;
-    }
-
-    if uri.starts_with("/auth/status") && method == "GET" {
-        let auth_opt = PENDING_AUTH.lock().clone();
-        let body = match auth_opt {
-            Some(user) => serde_json::json!({ "authenticated": true, "user": user }).to_string(),
-            None => serde_json::json!({ "authenticated": false }).to_string(),
-        };
-        let res = format!(
-            "HTTP/1.1 200 OK\r\n\
-Content-Type: application/json\r\n\
-Access-Control-Allow-Origin: *\r\n\
-Content-Length: {}\r\n\
-Connection: close\r\n\r\n{}",
-            body.len(),
-            body
-        );
-        let _ = stream.write_all(res.as_bytes()).await;
-        return;
-    }
-
-    if uri.starts_with("/auth/clear") && (method == "POST" || method == "GET") {
-        *PENDING_AUTH.lock() = None;
-        let body = r#"{"status":"cleared"}"#;
-        let res = format!(
-            "HTTP/1.1 200 OK\r\n\
-Content-Type: application/json\r\n\
-Access-Control-Allow-Origin: *\r\n\
-Content-Length: {}\r\n\
-Connection: close\r\n\r\n{}",
-            body.len(),
-            body
-        );
-        let _ = stream.write_all(res.as_bytes()).await;
-        return;
-    }
-
-    let not_found = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
-    let _ = stream.write_all(not_found.as_bytes()).await;
-}
 
 #[cfg(test)]
 mod tests {

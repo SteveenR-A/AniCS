@@ -163,17 +163,17 @@ export interface HistoryTombstone {
   deletedAt: string;
 }
 
-export interface CloudSyncConfig {
-  userId?: string;
-  userEmail?: string;
-  userDisplayName?: string;
-  userPhotoUrl?: string;
+export interface GistSyncConfig {
+  githubToken?: string;
+  gistId?: string;
+  lastEtag?: string;
   autoSync: boolean;
   encryptionEnabled: boolean;
   lastSyncAt?: string;
+  gistUrl?: string;
 }
 
-export interface CloudSyncPayload {
+export interface GistFilesPayload {
   syncMeta: SyncMeta;
   profiles: UserProfile[];
   history: HistoryEntry[];
@@ -183,9 +183,8 @@ export interface CloudSyncPayload {
   settingsMobile?: Record<string, string>;
 }
 
-// Aliases para transición limpia
-export type GistSyncConfig = CloudSyncConfig;
-export type GistFilesPayload = CloudSyncPayload;
+export type CloudSyncConfig = GistSyncConfig;
+export type CloudSyncPayload = GistFilesPayload;
 
 export type DownloadStatus = 'queued' | 'downloading' | 'paused' | 'completed' | 'failed' | 'canceled';
 

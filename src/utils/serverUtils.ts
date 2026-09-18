@@ -15,10 +15,10 @@ const UNSUPPORTED_DOMAINS = [
 ];
 
 /**
- * Detecta si un servidor es exclusivo para el nivel VIP de la presentación.
+ * Función de compatibilidad: en la versión vanilla libre no existen servidores restringidos.
  */
-export function isVipServer(nameOrUrl: string): boolean {
-  return /magi|desu|dedicado|vip/i.test(nameOrUrl);
+export function isVipServer(_nameOrUrl: string): boolean {
+  return false;
 }
 
 /**
@@ -52,7 +52,7 @@ export function maskAndFilterServers(servers: VideoServer[]): VideoServer[] {
     let maskedName = srv.name;
 
     if (rawName.includes('magi')) {
-      maskedName = 'Servidor Dedicado VIP (1080p Ultra HD)';
+      maskedName = 'Servidor Dedicado (1080p Ultra HD)';
     } else if (rawName.includes('desu')) {
       maskedName = 'Servidor Alta Velocidad (1080p)';
     } else if (rawName.includes('asura') || rawUrl.includes('redirector.php') || rawUrl.includes('.m3u8')) {
@@ -61,6 +61,20 @@ export function maskAndFilterServers(servers: VideoServer[]): VideoServer[] {
       maskedName = 'Servidor Espejo (MP4 Directo)';
     } else if (rawName.includes('voe')) {
       maskedName = 'Servidor Rápido (720p HD)';
+    } else if (rawName.includes('gupload') || rawUrl.includes('gupload')) {
+      maskedName = 'Servidor GUpload (1080p HD)';
+    } else if (rawName.includes('byse') || rawUrl.includes('byse')) {
+      maskedName = 'Servidor Byse (720p HD)';
+    } else if (rawName.includes('morencius') || rawUrl.includes('morencius')) {
+      maskedName = 'Servidor Morencius (HD)';
+    } else if (rawName.includes('dht') || rawUrl.includes('dhtpre')) {
+      maskedName = 'Servidor DHT (HD)';
+    } else if (rawName.includes('ok.ru') || rawUrl.includes('ok.ru')) {
+      maskedName = 'Servidor Ok.ru (1080p HD)';
+    } else if (rawName.includes('yourupload') || rawUrl.includes('yourupload')) {
+      maskedName = 'Servidor YourUpload (720p)';
+    } else if (rawName.includes('mp4upload') || rawUrl.includes('mp4upload')) {
+      maskedName = 'Servidor MP4Upload (Directo HD)';
     } else if (rawName.includes('streamwish')) {
       maskedName = 'Servidor Alternativo CDN';
     } else if (rawName.includes('vidhide') || rawName.includes('fmoon')) {

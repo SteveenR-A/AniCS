@@ -1,19 +1,15 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Tv2, Heart, Settings, User, Crown } from 'lucide-react';
+import { Tv2, Heart, Settings, User } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useAnimeStore } from '@/stores/useAnimeStore';
 import { useProfileStore } from '@/stores/useProfileStore';
-import { useSubscriptionStore } from '@/stores/useSubscriptionStore';
-import { FEATURE_FLAGS } from '@/config/features';
 import { ProfileSelectorModal, getProfileAvatarIcon } from '@/components/ProfileSelectorModal';
-import { SubscriptionModal } from '@/components/SubscriptionModal';
 
 export function MobileHeader() {
   const navigate = useNavigate();
   const { activeSource, setActiveSource } = useAnimeStore();
   const { activeProfile } = useProfileStore();
-  const { isVip, openModal: openVipModal } = useSubscriptionStore();
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
 
   const ProfileIcon = activeProfile ? getProfileAvatarIcon(activeProfile.avatar) : User;
@@ -83,7 +79,7 @@ export function MobileHeader() {
             onClick={() => setActiveSource('jkanime')}
             style={{
               position: 'relative',
-              padding: '4px 12px',
+              padding: '4px 10px',
               borderRadius: 'var(--radius-full)',
               border: 'none',
               background: 'transparent',
@@ -109,14 +105,47 @@ export function MobileHeader() {
                 }}
               />
             )}
-            Anime
+            JKAnime
+          </button>
+
+          <button
+            onClick={() => setActiveSource('animejl')}
+            style={{
+              position: 'relative',
+              padding: '4px 10px',
+              borderRadius: 'var(--radius-full)',
+              border: 'none',
+              background: 'transparent',
+              color: activeSource === 'animejl' ? '#ffffff' : 'var(--text-muted)',
+              fontSize: 11,
+              fontWeight: 700,
+              cursor: 'pointer',
+              zIndex: 2,
+              transition: 'color var(--transition-fast)',
+            }}
+          >
+            {activeSource === 'animejl' && (
+              <motion.div
+                layoutId="mobile-source-pill"
+                transition={{ type: 'spring', stiffness: 450, damping: 30 }}
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  background: 'linear-gradient(135deg, #06b6d4, #3b82f6)',
+                  borderRadius: 'var(--radius-full)',
+                  zIndex: -1,
+                  boxShadow: '0 2px 8px rgba(59, 130, 246, 0.4)',
+                }}
+              />
+            )}
+            Anime-JL
           </button>
 
           <button
             onClick={() => setActiveSource('mundodonghua')}
             style={{
               position: 'relative',
-              padding: '4px 12px',
+              padding: '4px 10px',
               borderRadius: 'var(--radius-full)',
               border: 'none',
               background: 'transparent',
@@ -146,28 +175,8 @@ export function MobileHeader() {
           </button>
         </div>
 
-        {/* Acciones directas: Perfil, Favoritos, VIP y Ajustes */}
+        {/* Acciones directas: Perfil, Favoritos y Ajustes */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          {FEATURE_FLAGS.SHOW_SUBSCRIPTION && (
-            <button
-              onClick={openVipModal}
-              title={isVip ? 'Yumework VIP Activo' : 'Obtener Yumework VIP'}
-              style={{
-                background: isVip ? 'linear-gradient(135deg, #f59e0b, #d97706)' : 'rgba(245, 158, 11, 0.15)',
-                border: isVip ? 'none' : '1px solid rgba(245, 158, 11, 0.3)',
-                color: isVip ? '#ffffff' : '#fbbf24',
-                padding: '5px 7px',
-                borderRadius: 'var(--radius-full)',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                boxShadow: isVip ? '0 2px 8px rgba(245, 158, 11, 0.4)' : 'none',
-              }}
-            >
-              <Crown size={15} />
-            </button>
-          )}
 
           <button
             onClick={() => setIsProfileModalOpen(true)}
@@ -231,7 +240,6 @@ export function MobileHeader() {
         isOpen={isProfileModalOpen}
         onClose={() => setIsProfileModalOpen(false)}
       />
-      <SubscriptionModal />
     </>
   );
 }

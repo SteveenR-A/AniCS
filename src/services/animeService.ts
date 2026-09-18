@@ -12,6 +12,7 @@ import type {
 import { maskAndFilterServers } from '@/utils/serverUtils';
 export const DEFAULT_JKANIME = 'https://jkanime.net';
 export const DEFAULT_MUNDODONGHUA = 'https://www.mundodonghua.com';
+export const DEFAULT_ANIMEJL = 'https://www.anime-jl.net';
 export const DEFAULT_ANDROID_DOWNLOAD_DIR = '/storage/emulated/0/Anime';
 /** Buscar anime (en todos los extractores o en uno específico) */
 export const searchAnime = (query: string, source?: string): Promise<AnimeResult[]> =>

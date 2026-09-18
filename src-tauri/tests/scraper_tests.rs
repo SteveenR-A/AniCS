@@ -1,4 +1,4 @@
-use anics_lib::scrapers::{JKAnimeExtractor, MundoDonghuaExtractor, AnimeExtractor};
+use anics_lib::scrapers::{AnimeJLExtractor, JKAnimeExtractor, MundoDonghuaExtractor, AnimeExtractor};
 use anics_lib::core::SearchFilters;
 
 #[tokio::test]
@@ -133,3 +133,19 @@ async fn test_bandori_details_and_download() {
         }
     }
 }
+
+#[tokio::test]
+async fn test_animejl_get_latest() {
+    let extractor = AnimeJLExtractor::new();
+    let results = extractor.get_latest(1).await.expect("Failed to get latest from AnimeJL");
+    println!("AnimeJL Latest results count: {}", results.len());
+    for r in results.iter().take(5) {
+        println!(" - Title: '{}', Ep: {:?}, URL: '{}', Thumb: '{}'", r.title, r.episode, r.url, r.thumbnail_url);
+        let det = extractor.get_details(&r.url).await;
+        match det {
+            Ok(d) => println!("   -> Details OK: title='{}', thumb='{}', eps={}", d.title, d.thumbnail_url, d.episodes.len()),
+            Err(e) => println!("   -> Details ERR: {:?}", e),
+        }
+    }
+}
+

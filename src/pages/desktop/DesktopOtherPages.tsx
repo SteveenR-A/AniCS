@@ -182,7 +182,7 @@ export function DesktopHistoryPage() {
   const handleRefresh = async () => {
     setIsManualRefreshing(true);
     try {
-      if (useSyncStore.getState().config.userId && !useSyncStore.getState().isSyncPausedByLocalClear) {
+      if (useSyncStore.getState().config.githubToken && useSyncStore.getState().config.gistId && !useSyncStore.getState().isSyncPausedByLocalClear) {
         await syncNow();
       }
       await loadHistory();

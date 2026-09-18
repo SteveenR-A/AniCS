@@ -6,12 +6,6 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
 }));
 
-vi.mock('@/config/features', () => ({
-  FEATURE_FLAGS: {
-    SHOW_SUBSCRIPTION: false, // Permitir probar temas sin restricción VIP
-  },
-}));
-
 describe('useThemeStore', () => {
   beforeEach(() => {
     vi.clearAllMocks();
