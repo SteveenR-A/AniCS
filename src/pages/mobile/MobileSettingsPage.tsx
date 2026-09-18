@@ -133,6 +133,14 @@ export function MobileSettingsPage() {
         }
         if (settings.max_concurrent_downloads) setMaxConcurrent(settings.max_concurrent_downloads);
         if (settings.max_image_cache_mb) setMaxCacheMb(settings.max_image_cache_mb);
+        if (settings.custom_sources) {
+          try {
+            const parsed = JSON.parse(settings.custom_sources);
+            if (Array.isArray(parsed)) setCustomSources(parsed);
+          } catch (e) {
+            console.error('Error loading custom sources in Mobile:', e);
+          }
+        }
       } catch (e) {
         console.error('Error loading settings in Mobile', e);
       }
@@ -147,12 +155,26 @@ export function MobileSettingsPage() {
       await invoke('set_setting', { key: 'download_dir', value: downloadDir.trim() });
       await invoke('set_setting', { key: 'max_concurrent_downloads', value: maxConcurrent });
       await invoke('set_setting', { key: 'max_image_cache_mb', value: maxCacheMb });
+      await invoke('set_setting', { key: 'custom_sources', value: JSON.stringify(customSources) });
 
       setSaveStatus('Ajustes guardados');
       setTimeout(() => setSaveStatus(null), 3000);
     } catch (e) {
       console.error(e);
       setSaveStatus('Error al guardar');
+    }
+  };
+
+  const handleResetUrls = async () => {
+    setJkanimeUrl(DEFAULT_JKANIME);
+    setDonghuaUrl(DEFAULT_MUNDODONGHUA);
+    try {
+      await invoke('set_setting', { key: 'jkanime_base_url', value: DEFAULT_JKANIME });
+      await invoke('set_setting', { key: 'mundodonghua_base_url', value: DEFAULT_MUNDODONGHUA });
+      setSaveStatus('URLs de servidores restablecidas');
+      setTimeout(() => setSaveStatus(null), 3000);
+    } catch (e) {
+      console.error('Error resetting URLs in Mobile', e);
     }
   };
 
@@ -844,76 +866,154 @@ export function MobileSettingsPage() {
           background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)',
           border: '1px solid var(--border-subtle)', padding: 14,
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <Globe size={16} color="var(--accent-primary)" />
-              <h3 style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>Fuentes y Catálogos</h3>
+              <div>
+                <h3 style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>Fuentes y Catálogos</h3>
+                <p style={{ fontSize: 10, color: 'var(--text-muted)', margin: '1px 0 0' }}>
+                  Servidores y endpoints de contenido multimedia
+                </p>
+              </div>
             </div>
 
-            <button
-              type="button"
-              onClick={() => setShowAddSourceModal(true)}
-              style={{
-                background: 'rgba(99, 102, 241, 0.15)',
-                border: '1px solid rgba(99, 102, 241, 0.3)',
-                borderRadius: 'var(--radius-full)',
-                padding: '3px 10px',
-                color: 'var(--accent-primary)',
-                fontSize: 10,
-                fontWeight: 700,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 4,
-                cursor: 'pointer',
-              }}
-            >
-              <Plus size={12} /> Agregar Fuente
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <button
+                type="button"
+                onClick={handleResetUrls}
+                title="Restablecer servidores predeterminados"
+                style={{
+                  background: 'var(--bg-elevated)',
+                  border: '1px solid var(--border-moderate)',
+                  borderRadius: 'var(--radius-full)',
+                  padding: '4px 10px',
+                  color: 'var(--text-secondary)',
+                  fontSize: 10,
+                  fontWeight: 600,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  cursor: 'pointer',
+                }}
+              >
+                <Undo2 size={11} /> Restablecer
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowAddSourceModal(true)}
+                style={{
+                  background: 'rgba(99, 102, 241, 0.15)',
+                  border: '1px solid rgba(99, 102, 241, 0.3)',
+                  borderRadius: 'var(--radius-full)',
+                  padding: '4px 10px',
+                  color: 'var(--accent-primary)',
+                  fontSize: 10,
+                  fontWeight: 700,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  cursor: 'pointer',
+                }}
+              >
+                <Plus size={12} /> Agregar Fuente
+              </button>
+            </div>
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {/* Catálogo Anime */}
             <div style={{
-              padding: '10px 12px',
+              padding: '12px',
               borderRadius: 'var(--radius-md)',
               background: 'var(--bg-elevated)',
               border: '1px solid var(--border-moderate)',
               display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
+              flexDirection: 'column',
+              gap: 8,
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Layers size={16} color="var(--accent-primary)" />
-                <div>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: 'white' }}>Catálogo Anime (Principal)</div>
-                  <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>Emisiones y temporadas completas</div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Layers size={16} color="var(--accent-primary)" />
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: 'white' }}>Catálogo Anime (Principal)</div>
+                    <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>Emisiones y temporadas completas</div>
+                  </div>
                 </div>
+                <span style={{ fontSize: 9, fontWeight: 700, color: '#34d399', background: 'rgba(16, 185, 129, 0.15)', padding: '2px 6px', borderRadius: '4px' }}>
+                  Conectado
+                </span>
               </div>
-              <span style={{ fontSize: 9, fontWeight: 700, color: '#34d399', background: 'rgba(16, 185, 129, 0.15)', padding: '2px 6px', borderRadius: '4px' }}>
-                Conectado
-              </span>
+              <div>
+                <label style={{ fontSize: 10, color: 'var(--text-muted)', display: 'block', marginBottom: 4, fontWeight: 600 }}>
+                  URL Servidor / Endpoint:
+                </label>
+                <input
+                  type="text"
+                  value={jkanimeUrl}
+                  onChange={(e) => setJkanimeUrl(e.target.value)}
+                  placeholder="https://jkanime.net"
+                  style={{
+                    width: '100%',
+                    padding: '6px 10px',
+                    borderRadius: 'var(--radius-sm)',
+                    background: 'var(--bg-surface, #111318)',
+                    border: '1px solid var(--border-subtle)',
+                    color: 'var(--text-primary)',
+                    fontSize: 11,
+                    fontFamily: 'monospace',
+                    outline: 'none',
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </div>
             </div>
 
             {/* Catálogo Donghua */}
             <div style={{
-              padding: '10px 12px',
+              padding: '12px',
               borderRadius: 'var(--radius-md)',
               background: 'var(--bg-elevated)',
               border: '1px solid var(--border-moderate)',
               display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
+              flexDirection: 'column',
+              gap: 8,
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Layers size={16} color="#ec4899" />
-                <div>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: 'white' }}>Catálogo Donghua (Secundario)</div>
-                  <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>Animación y series asiáticas</div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Layers size={16} color="#ec4899" />
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: 'white' }}>Catálogo Donghua (Secundario)</div>
+                    <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>Animación y series asiáticas</div>
+                  </div>
                 </div>
+                <span style={{ fontSize: 9, fontWeight: 700, color: '#34d399', background: 'rgba(16, 185, 129, 0.15)', padding: '2px 6px', borderRadius: '4px' }}>
+                  Conectado
+                </span>
               </div>
-              <span style={{ fontSize: 9, fontWeight: 700, color: '#34d399', background: 'rgba(16, 185, 129, 0.15)', padding: '2px 6px', borderRadius: '4px' }}>
-                Conectado
-              </span>
+              <div>
+                <label style={{ fontSize: 10, color: 'var(--text-muted)', display: 'block', marginBottom: 4, fontWeight: 600 }}>
+                  URL Servidor / Endpoint:
+                </label>
+                <input
+                  type="text"
+                  value={donghuaUrl}
+                  onChange={(e) => setDonghuaUrl(e.target.value)}
+                  placeholder="https://www.mundodonghua.com"
+                  style={{
+                    width: '100%',
+                    padding: '6px 10px',
+                    borderRadius: 'var(--radius-sm)',
+                    background: 'var(--bg-surface, #111318)',
+                    border: '1px solid var(--border-subtle)',
+                    color: 'var(--text-primary)',
+                    fontSize: 11,
+                    fontFamily: 'monospace',
+                    outline: 'none',
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </div>
             </div>
 
             {/* Fuentes añadidas */}
@@ -924,23 +1024,40 @@ export function MobileSettingsPage() {
                 background: 'var(--bg-elevated)',
                 border: '1px solid var(--border-moderate)',
                 display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
+                flexDirection: 'column',
+                gap: 6,
               }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <Globe size={16} color="var(--accent-primary)" />
-                  <div>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: 'white' }}>{src.name} ({src.type})</div>
-                    <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>Fuente adicional activa</div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Globe size={16} color="var(--accent-primary)" />
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: 'white' }}>{src.name}</div>
+                      <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 4, background: 'rgba(99, 102, 241, 0.15)', color: 'var(--accent-primary)', fontWeight: 600 }}>
+                        {src.type}
+                      </span>
+                    </div>
                   </div>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const updated = customSources.filter((_, i) => i !== idx);
+                      setCustomSources(updated);
+                      try {
+                        await invoke('set_setting', { key: 'custom_sources', value: JSON.stringify(updated) });
+                        setSaveStatus('Fuente eliminada');
+                        setTimeout(() => setSaveStatus(null), 3000);
+                      } catch (e) {
+                        console.error('Error saving after deletion in Mobile:', e);
+                      }
+                    }}
+                    style={{ background: 'none', border: 'none', color: '#f87171', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}
+                  >
+                    Eliminar
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setCustomSources(customSources.filter((_, i) => i !== idx))}
-                  style={{ background: 'none', border: 'none', color: '#f87171', fontSize: 11, cursor: 'pointer' }}
-                >
-                  Eliminar
-                </button>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'monospace', wordBreak: 'break-all' }}>
+                  {src.url}
+                </div>
               </div>
             ))}
           </div>
@@ -1509,13 +1626,24 @@ export function MobileSettingsPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
+                  onClick={async () => {
                     if (newSourceName.trim() && newSourceUrl.trim()) {
-                      setCustomSources([...customSources, { name: newSourceName.trim(), url: newSourceUrl.trim(), type: newSourceType }]);
+                      let url = newSourceUrl.trim();
+                      if (!url.startsWith('http://') && !url.startsWith('https://')) {
+                        url = 'https://' + url;
+                      }
+                      const updated = [...customSources, { name: newSourceName.trim(), url, type: newSourceType }];
+                      setCustomSources(updated);
+                      try {
+                        await invoke('set_setting', { key: 'custom_sources', value: JSON.stringify(updated) });
+                        setSaveStatus('Catálogo guardado correctamente');
+                      } catch (e) {
+                        console.error('Error saving custom source in Mobile', e);
+                        setSaveStatus('Error al guardar catálogo');
+                      }
                       setNewSourceName('');
                       setNewSourceUrl('');
                       setShowAddSourceModal(false);
-                      setSaveStatus('Catálogo agregado');
                       setTimeout(() => setSaveStatus(null), 3000);
                     }
                   }}

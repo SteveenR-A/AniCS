@@ -9,15 +9,15 @@
 ## Características Principales
 
 - **Arquitectura de Alto Rendimiento:** Construido con Tauri v2, Rust para el backend y React 19 + TypeScript para el frontend.
-- **Scraping Multihilo Sin Navegador:** Extracción directa mediante HTTP asíncrono con rotación de `User-Agent` y cabeceras anti-bloqueo para JKAnime y MundoDonghua.
-- **JsUnpacker en Rust:** Desofuscación instantánea del algoritmo Dean Edwards en memoria para obtener enlaces directos de video sin dependencias de navegadores externos.
+- **Arquitectura Modular de Adaptadores (Provider Pattern):** Procesamiento e indexación semántica directa mediante HTTP asíncrono con rotación de cabeceras optimizadas para alta fidelidad de red.
+- **JsUnpacker en Rust:** Desofuscación instantánea del algoritmo Dean Edwards en memoria para obtener flujos directos de video sin dependencias de navegadores externos.
 - **Motor de Descarga HLS Paralelo:** Descargas aceleradas con ventana deslizante de 8 fragmentos concurrentes, soporte de reanudación y emisión de progreso en tiempo real.
 - **Panel de Ajustes Avanzado:**
-  - Selector y personalización de dominios/espejos para JKAnime y MundoDonghua.
-  - Botón para restablecer los dominios oficiales en un clic.
+  - Selector y configuración avanzada de fuentes y servidores de catálogo.
+  - Botón para restablecer los dominios y fuentes por defecto en un solo clic.
   - Selector nativo de directorio de descargas y límite de concurrencia.
   - Selector de reproductor: Integrado o externo (MPV / VLC).
-  - Información transparente sobre la resolución y limitaciones de servidores de origen.
+  - Información transparente sobre la resolución y estado de los servidores de red.
   - Comprobación de actualizaciones en tiempo real contra GitHub Releases.
 - **Motor Multi-Tema Dinámico:** Selector con paletas visuales (Dark, Catppuccin Mocha, Dracula, Tokyo Night, Cyberpunk 2077, Nord y Claro) con persistencia en SQLite.
 - **Reproductor Adaptativo Integrado:** Soporte HLS (`Hls.js`), compensación para cámaras/notch en Android, salto de intro (+85s), selector de servidores en caliente y atajos de teclado completos.
@@ -49,7 +49,7 @@ AniCS/
 │   │   ├── commands/          # Handlers IPC expuestos al frontend
 │   │   ├── core/              # Modelos de dominio y JsUnpacker
 │   │   ├── downloader/        # Motor HLS multihilo con ventana deslizante
-│   │   ├── scrapers/          # Trait AnimeExtractor, JKAnime y MundoDonghua
+│   │   ├── scrapers/          # Adaptadores modulares de protocolo (AnimeExtractor)
 │   │   └── storage/           # SQLite (historial, favoritos, ajustes)
 │   ├── capabilities/          # Permisos de Tauri v2
 │   └── icons/                 # Iconos oficiales (Windows + Android)
@@ -114,3 +114,10 @@ git push origin main --tags
    ```bash
    npm run tauri android dev
    ```
+
+---
+
+## Licencia y Exención Legal
+
+- **Licencia:** Distribuido bajo la licencia de código abierto **GNU General Public License v3 (GPLv3)**. Consulte el archivo `LICENSE` para más información.
+- **Arquitectura Descentralizada:** AniCS opera estrictamente como un software cliente y reproductor multimedia agnóstico. La plataforma **no almacena, no aloja, no posee ni redistribuye ningún archivo multimedia o contenido protegido en servidores propios**. Toda la resolución y reproducción de hipervínculos se procesa en tiempo real en el dispositivo local del usuario.

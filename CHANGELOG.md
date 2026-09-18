@@ -358,10 +358,10 @@ El formato está basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1
 
 ### 🚀 Novedades y Características Principales
 - **Arquitectura Moderna Multiplataforma:** Migración completa a **Tauri v2** utilizando **Rust**, **React 19**, **TypeScript** y **TailwindCSS v4**.
-- **Scraping Multihilo Sin Navegador (Zero-Browser):**
-  - Extractores asíncronos nativos para **JKAnime** y **MundoDonghua**.
-  - Emulación HTTP con rotación de User-Agents y cabeceras contra bloqueos.
-  - Implementación en Rust del desofuscador **JsUnpacker** (algoritmo Dean Edwards) para extraer URLs de streams en microsegundos sin motor JS.
+- **Motor de Adaptadores y Resolución Semántica (Zero-Browser):**
+  - Módulos adaptadores nativos asíncronos para **JKAnime** y **MundoDonghua**.
+  - Emulación HTTP con rotación de cabeceras optimizadas contra bloqueos.
+  - Implementación en Rust del desofuscador **JsUnpacker** (algoritmo Dean Edwards) para resolver URLs de streams en microsegundos sin motor JS.
 - **Motor de Descarga HLS Paralelo (`HlsEngine`):**
   - Ventana deslizante con **8 fragmentos `.ts` en vuelo concurrentes**.
   - Reanudación automática con archivos de índice `.idx`.

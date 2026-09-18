@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.2.5",
+    "date": "2026-09-18",
+    "title": "Persistencia de Servidores y URLs Móvil",
+    "type": "patch",
+    "highlights": [
+      "Persistencia completa de fuentes, catálogos y URLs personalizadas en móvil",
+      "Configuración directa y restablecimiento de endpoints de catálogo",
+      "Enmascaramiento profesional de servidores y filtrado de hosts no soportados",
+      "Licencia oficial GNU GPLv3 y aviso legal descentralizado"
+    ]
+  },
+  {
     "version": "0.2.4",
     "date": "2026-09-08",
     "title": "Multicuentas, Gestión de Suscripción VIP y Filtros Interactivos de Búsqueda",
@@ -269,7 +281,7 @@
     "type": "patch",
     "highlights": [
       "Nueva arquitectura ultrarrápida en Rust y React",
-      "Scraping nativo de JKAnime y MundoDonghua sin navegador",
+      "Indexación y resolución nativa de catálogo sin navegador",
       "Descargas HLS paralelas multihilo",
       "Panel de Ajustes con URLs personalizadas y temas visuales"
     ]

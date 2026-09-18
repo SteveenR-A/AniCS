@@ -192,6 +192,14 @@ export function DesktopSettingsPage() {
         if (settings.external_player_path) setExternalPlayerPath(settings.external_player_path);
         if (settings.github_repo) setUpdateRepo(settings.github_repo);
         if (settings.max_image_cache_mb) setMaxCacheMb(settings.max_image_cache_mb);
+        if (settings.custom_sources) {
+          try {
+            const parsed = JSON.parse(settings.custom_sources);
+            if (Array.isArray(parsed)) setCustomSources(parsed);
+          } catch (e) {
+            console.error('Error loading custom sources in Desktop:', e);
+          }
+        }
       } catch (e) {
         console.error('Error loading settings', e);
       }
@@ -209,6 +217,7 @@ export function DesktopSettingsPage() {
       await invoke('set_setting', { key: 'external_player_path', value: externalPlayerPath.trim() });
       await invoke('set_setting', { key: 'github_repo', value: updateRepo.trim() });
       await invoke('set_setting', { key: 'max_image_cache_mb', value: maxCacheMb });
+      await invoke('set_setting', { key: 'custom_sources', value: JSON.stringify(customSources) });
 
       setSaveStatus('Ajustes guardados correctamente');
       setTimeout(() => setSaveStatus(null), 3000);
@@ -218,9 +227,17 @@ export function DesktopSettingsPage() {
     }
   };
 
-  const handleResetUrls = () => {
+  const handleResetUrls = async () => {
     setJkanimeUrl(DEFAULT_JKANIME);
     setDonghuaUrl(DEFAULT_MUNDODONGHUA);
+    try {
+      await invoke('set_setting', { key: 'jkanime_base_url', value: DEFAULT_JKANIME });
+      await invoke('set_setting', { key: 'mundodonghua_base_url', value: DEFAULT_MUNDODONGHUA });
+      setSaveStatus('URLs de catálogos restauradas por defecto');
+      setTimeout(() => setSaveStatus(null), 3000);
+    } catch (e) {
+      console.error('Error resetting URLs in Desktop', e);
+    }
   };
 
   const handleSelectDownloadDir = async () => {
@@ -1091,35 +1108,60 @@ export function DesktopSettingsPage() {
                 background: 'rgba(255, 255, 255, 0.03)',
                 border: '1px solid rgba(255, 255, 255, 0.08)',
                 display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
+                flexDirection: 'column',
+                gap: 12,
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <div
-                  style={{
-                    width: 40,
-                    height: 40,
-                    borderRadius: 10,
-                    background: 'rgba(99, 102, 241, 0.15)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: 'var(--accent-primary)',
-                  }}
-                >
-                  <Layers size={20} />
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div
+                    style={{
+                      width: 40,
+                      height: 40,
+                      borderRadius: 10,
+                      background: 'rgba(99, 102, 241, 0.15)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: 'var(--accent-primary)',
+                    }}
+                  >
+                    <Layers size={20} />
+                  </div>
+                  <div>
+                    <h4 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: '#fff' }}>Catálogo Anime (Principal)</h4>
+                    <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>
+                      Emisiones de temporada, episodios recientes y catálogo general
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <h4 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: '#fff' }}>Catálogo Anime (Principal)</h4>
-                  <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>
-                    Emisiones de temporada, episodios recientes y catálogo general
-                  </p>
-                </div>
+                <span style={{ fontSize: 11, fontWeight: 600, color: '#34d399', background: 'rgba(16, 185, 129, 0.12)', padding: '3px 8px', borderRadius: '6px' }}>
+                  Conectado
+                </span>
               </div>
-              <span style={{ fontSize: 11, fontWeight: 600, color: '#34d399', background: 'rgba(16, 185, 129, 0.12)', padding: '3px 8px', borderRadius: '6px' }}>
-                Conectado
-              </span>
+              <div>
+                <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4, fontWeight: 600 }}>
+                  URL Servidor / Endpoint:
+                </label>
+                <input
+                  type="text"
+                  value={jkanimeUrl}
+                  onChange={(e) => setJkanimeUrl(e.target.value)}
+                  placeholder="https://jkanime.net"
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    borderRadius: 'var(--radius-sm)',
+                    background: 'var(--bg-elevated)',
+                    border: '1px solid var(--border-moderate)',
+                    color: 'var(--text-primary)',
+                    fontSize: 12,
+                    fontFamily: 'monospace',
+                    outline: 'none',
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </div>
             </div>
 
             {/* Catálogo Secundario */}
@@ -1130,35 +1172,60 @@ export function DesktopSettingsPage() {
                 background: 'rgba(255, 255, 255, 0.03)',
                 border: '1px solid rgba(255, 255, 255, 0.08)',
                 display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
+                flexDirection: 'column',
+                gap: 12,
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <div
-                  style={{
-                    width: 40,
-                    height: 40,
-                    borderRadius: 10,
-                    background: 'rgba(236, 72, 153, 0.15)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: '#ec4899',
-                  }}
-                >
-                  <Layers size={20} />
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div
+                    style={{
+                      width: 40,
+                      height: 40,
+                      borderRadius: 10,
+                      background: 'rgba(236, 72, 153, 0.15)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#ec4899',
+                    }}
+                  >
+                    <Layers size={20} />
+                  </div>
+                  <div>
+                    <h4 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: '#fff' }}>Catálogo Donghua (Secundario)</h4>
+                    <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>
+                      Animación asiática, donghuas y series alternativas
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <h4 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: '#fff' }}>Catálogo Donghua (Secundario)</h4>
-                  <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>
-                    Animación asiática, donghuas y series alternativas
-                  </p>
-                </div>
+                <span style={{ fontSize: 11, fontWeight: 600, color: '#34d399', background: 'rgba(16, 185, 129, 0.12)', padding: '3px 8px', borderRadius: '6px' }}>
+                  Conectado
+                </span>
               </div>
-              <span style={{ fontSize: 11, fontWeight: 600, color: '#34d399', background: 'rgba(16, 185, 129, 0.12)', padding: '3px 8px', borderRadius: '6px' }}>
-                Conectado
-              </span>
+              <div>
+                <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4, fontWeight: 600 }}>
+                  URL Servidor / Endpoint:
+                </label>
+                <input
+                  type="text"
+                  value={donghuaUrl}
+                  onChange={(e) => setDonghuaUrl(e.target.value)}
+                  placeholder="https://www.mundodonghua.com"
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    borderRadius: 'var(--radius-sm)',
+                    background: 'var(--bg-elevated)',
+                    border: '1px solid var(--border-moderate)',
+                    color: 'var(--text-primary)',
+                    fontSize: 12,
+                    fontFamily: 'monospace',
+                    outline: 'none',
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </div>
             </div>
 
             {/* Fuentes personalizadas añadidas */}
@@ -1180,12 +1247,22 @@ export function DesktopSettingsPage() {
                   <Globe size={18} color="var(--accent-primary)" />
                   <div>
                     <h4 style={{ margin: 0, fontSize: 13, fontWeight: 700, color: '#fff' }}>{src.name} ({src.type})</h4>
-                    <p style={{ margin: '2px 0 0', fontSize: 11, color: 'var(--text-muted)' }}>Fuente adicional activa</p>
+                    <p style={{ margin: '2px 0 0', fontSize: 11, color: 'var(--text-muted)', fontFamily: 'monospace' }}>{src.url}</p>
                   </div>
                 </div>
                 <button
                   type="button"
-                  onClick={() => setCustomSources(customSources.filter((_, i) => i !== idx))}
+                  onClick={async () => {
+                    const updated = customSources.filter((_, i) => i !== idx);
+                    setCustomSources(updated);
+                    try {
+                      await invoke('set_setting', { key: 'custom_sources', value: JSON.stringify(updated) });
+                      setSaveStatus('Catálogo eliminado');
+                      setTimeout(() => setSaveStatus(null), 3000);
+                    } catch (e) {
+                      console.error('Error saving custom sources after deletion', e);
+                    }
+                  }}
                   style={{
                     background: 'transparent',
                     border: 'none',
@@ -2041,13 +2118,24 @@ export function DesktopSettingsPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
+                  onClick={async () => {
                     if (newSourceName.trim() && newSourceUrl.trim()) {
-                      setCustomSources([...customSources, { name: newSourceName.trim(), url: newSourceUrl.trim(), type: newSourceType }]);
+                      let url = newSourceUrl.trim();
+                      if (!url.startsWith('http://') && !url.startsWith('https://')) {
+                        url = 'https://' + url;
+                      }
+                      const updated = [...customSources, { name: newSourceName.trim(), url, type: newSourceType }];
+                      setCustomSources(updated);
+                      try {
+                        await invoke('set_setting', { key: 'custom_sources', value: JSON.stringify(updated) });
+                        setSaveStatus('Catálogo personalizado guardado');
+                      } catch (e) {
+                        console.error('Error saving custom source in Desktop', e);
+                        setSaveStatus('Error al guardar catálogo');
+                      }
                       setNewSourceName('');
                       setNewSourceUrl('');
                       setShowAddSourceModal(false);
-                      setSaveStatus('Catálogo personalizado agregado');
                       setTimeout(() => setSaveStatus(null), 3000);
                     }
                   }}
