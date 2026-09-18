@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Globe, Download, Tv, RefreshCw, Check, Undo2,
   FolderOpen, ExternalLink, Sparkles, ShieldCheck, Palette, HardDrive, Trash2, Database, Activity, Cloud, User,
-  Film, Clock, Crown, Plus, Layers, Lock, ArrowRightLeft
+  Film, Clock, Crown, Plus, Layers, Lock, ArrowRightLeft, ShieldAlert
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -1883,6 +1883,26 @@ export function DesktopSettingsPage() {
           >
             <Sparkles size={15} color="var(--accent-primary)" /> Notas de Parche
           </button>
+        </div>
+
+        {/* Aviso de Arquitectura Descentralizada y Exención Legal */}
+        <div style={{
+          marginTop: 12,
+          background: 'rgba(255,255,255,0.02)',
+          border: '1px solid var(--border-subtle)',
+          borderRadius: 'var(--radius-lg)',
+          padding: '16px 20px',
+          display: 'flex',
+          alignItems: 'flex-start',
+          gap: 14,
+        }}>
+          <ShieldAlert size={20} color="var(--accent-primary)" style={{ flexShrink: 0, marginTop: 2 }} />
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+            <strong style={{ color: 'var(--text-primary)', fontSize: 13, display: 'block', marginBottom: 4 }}>
+              Arquitectura Cliente Descentralizada & Licencia Libre (GNU GPLv3)
+            </strong>
+            AniCS opera estrictamente como un cliente y reproductor multimedia local agnóstico. La plataforma <strong>no almacena, no aloja ni distribuye ningún archivo o video en servidores propios</strong>. Toda la resolución de flujos e hipervínculos se procesa en tiempo real en el dispositivo del usuario, garantizando total transparencia, respeto a la privacidad y bajo consumo de recursos del sistema.
+          </div>
         </div>
       </div>
 

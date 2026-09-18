@@ -9,6 +9,7 @@ import type {
   Source,
   GenreItem,
 } from '@/types';
+import { maskAndFilterServers } from '@/utils/serverUtils';
 export const DEFAULT_JKANIME = 'https://jkanime.net';
 export const DEFAULT_MUNDODONGHUA = 'https://www.mundodonghua.com';
 export const DEFAULT_ANDROID_DOWNLOAD_DIR = '/storage/emulated/0/Anime';
@@ -45,8 +46,10 @@ export const getSources = (): Promise<Source[]> =>
   invoke('get_sources');
 
 /** Obtener servidores de video de un episodio */
-export const getServers = (episodeUrl: string, source: string): Promise<VideoServer[]> =>
-  invoke('get_servers', { episodeUrl, source });
+export const getServers = async (episodeUrl: string, source: string): Promise<VideoServer[]> => {
+  const rawServers: VideoServer[] = await invoke('get_servers', { episodeUrl, source });
+  return maskAndFilterServers(rawServers);
+};
 
 /** Resolver un servidor a URL directa */
 export const resolveStream = (server: VideoServer, source: string): Promise<ResolvedMedia> =>

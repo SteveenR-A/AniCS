@@ -21,6 +21,7 @@ import { upsertHistory, getEpisodeProgress } from '@/services/storageService';
 import { getLocalMediaUrl, setKeepScreenOn, setNativeFullscreen, setNativeScreenOrientation } from '@/services/downloadService';
 import { useResponsive } from '@/hooks/useResponsive';
 import { rewriteDeadCdnUrl, createRobustHlsLoader } from '@/utils/hlsLoader';
+import { isVipServer } from '@/utils/serverUtils';
 import type { VideoServer } from '@/types';
 
 function formatTime(s: number) {
@@ -421,12 +422,10 @@ export function PlayerPage() {
           setServers(srvs);
 
           const isUserVip = !FEATURE_FLAGS.SHOW_SUBSCRIPTION || isVip;
-          const isVipServer = (name: string) => /magi|desu/i.test(name);
 
           let preferred: VideoServer | undefined;
           if (isUserVip) {
-            preferred = srvs.find(s => s.name.toLowerCase().includes('magi'))
-              ?? srvs.find(s => s.name.toLowerCase().includes('desu'))
+            preferred = srvs.find(s => isVipServer(s.name))
               ?? srvs.find(s => s.isDirect)
               ?? srvs[0];
           } else {
@@ -471,8 +470,8 @@ export function PlayerPage() {
   const tryFallbackServerRef = useRef<() => void>(() => {});
 
   const handleSelectServer = async (server: VideoServer) => {
-    const isVipServer = /magi|desu/i.test(server.name);
-    if (isVipServer && FEATURE_FLAGS.SHOW_SUBSCRIPTION && !isVip) {
+    const isTargetVip = isVipServer(server.name);
+    if (isTargetVip && FEATURE_FLAGS.SHOW_SUBSCRIPTION && !isVip) {
       showToast({
         icon: 'vip',
         text: `El servidor ${server.name} es exclusivo para miembros VIP`,
@@ -496,7 +495,7 @@ export function PlayerPage() {
   const tryFallbackServer = useCallback(() => {
     if (!servers.length || !selectedServer) return;
     const isUserVip = !FEATURE_FLAGS.SHOW_SUBSCRIPTION || isVip;
-    const allowed = isUserVip ? servers : servers.filter(s => !/magi|desu/i.test(s.name));
+    const allowed = isUserVip ? servers : servers.filter(s => !isVipServer(s.name));
     if (!allowed.length) return;
 
     const currentIndex = allowed.findIndex(s => s.url === selectedServer.url);
@@ -1328,7 +1327,7 @@ export function PlayerPage() {
                     }}
                   >
                     <span>{selectedServer?.name || '1080p'}</span>
-                    {selectedServer && /magi|desu/i.test(selectedServer.name) && (
+                    {selectedServer && isVipServer(selectedServer.name) && (
                       <Crown size={11} color="#fbbf24" style={{ flexShrink: 0 }} />
                     )}
                   </button>
@@ -1352,8 +1351,8 @@ export function PlayerPage() {
                         </span>
                         {servers.map((srv, idx) => {
                           const isSelected = selectedServer?.url === srv.url;
-                          const isVipServer = /magi|desu/i.test(srv.name);
-                          const isLocked = isVipServer && FEATURE_FLAGS.SHOW_SUBSCRIPTION && !isVip;
+                          const isTargetVip = isVipServer(srv.name);
+                          const isLocked = isTargetVip && FEATURE_FLAGS.SHOW_SUBSCRIPTION && !isVip;
 
                           return (
                             <button
@@ -1387,7 +1386,7 @@ export function PlayerPage() {
                               <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                                 {srv.name}
                               </span>
-                              {isVipServer && (
+                              {isTargetVip && (
                                 <span
                                   style={{
                                     display: 'inline-flex',
