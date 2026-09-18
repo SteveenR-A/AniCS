@@ -70,6 +70,15 @@ for (const p of [
   }
 }
 
+// 4.1 sonar-project.properties
+const sonarPath = path.join(ROOT, 'sonar-project.properties');
+if (fs.existsSync(sonarPath)) {
+  let sonar = fs.readFileSync(sonarPath, 'utf8');
+  sonar = sonar.replace(/^sonar\.projectVersion=.*$/m, `sonar.projectVersion=${targetVersion}`);
+  fs.writeFileSync(sonarPath, sonar, 'utf8');
+  console.log('  ✓ sonar-project.properties actualizado');
+}
+
 
 // 5. src/data/changelog.json
 const changelogPath = path.join(ROOT, 'src', 'data', 'changelog.json');
