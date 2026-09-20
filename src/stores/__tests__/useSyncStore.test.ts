@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { useSyncStore } from '../useSyncStore';
 import * as storageService from '@/services/storageService';
 import * as profileService from '@/services/profileService';
-import * as syncService from '@/services/syncService';
 import type { HistoryEntry, AnimeResult, UserProfile } from '@/types';
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -43,25 +42,15 @@ vi.mock('@/services/storageService', async (importOriginal) => {
   };
 });
 
-vi.mock('@/services/syncService', async (importOriginal) => {
-  const actual = await importOriginal<typeof syncService>();
-  return {
-    ...actual,
-    fetchGistData: vi.fn(),
-    createOrUpdateGist: vi.fn(),
-    findExistingGist: vi.fn(),
-  };
-});
-
-describe('useSyncStore - GitHub Gist Cloud Sync Integration', () => {
+describe('useSyncStore - Copia de Seguridad JSON & Exportar / Importar', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     useSyncStore.setState({
       config: {
-        githubToken: 'ghp_test_token_123',
-        gistId: 'test_gist_id_123',
+        githubToken: '',
+        gistId: '',
         lastSyncAt: '',
-        autoSync: true,
+        autoSync: false,
         encryptionEnabled: false,
       },
       isSyncing: false,
@@ -75,8 +64,7 @@ describe('useSyncStore - GitHub Gist Cloud Sync Integration', () => {
     vi.restoreAllMocks();
   });
 
-  it('descarga datos de Gist y los fusiona exitosamente con los datos locales existentes', async () => {
-    // 1. Datos locales en este dispositivo (ej. vio Naruto episodio 1)
+  it('exportBackupFile recupera datos locales y genera el blob descargable de respaldo', async () => {
     const localProfiles: UserProfile[] = [
       { id: 'default', name: 'Principal', avatar: 'sparkles', color: '#3b82f6', isActive: true, createdAt: '2026-01-01' },
     ];
@@ -102,142 +90,78 @@ describe('useSyncStore - GitHub Gist Cloud Sync Integration', () => {
     vi.mocked(storageService.getAllHistory).mockResolvedValue(localHistory);
     vi.mocked(storageService.getAllFavoritesForSync).mockResolvedValue(localFavorites);
     vi.mocked(profileService.getTombstones).mockResolvedValue([]);
-    vi.mocked(storageService.getAllSettings).mockResolvedValue({});
-    vi.mocked(profileService.getSyncConfig).mockResolvedValue('');
+    vi.mocked(storageService.getAllSettings).mockResolvedValue({ theme: 'dark' });
 
-    // 2. Datos remotos en GitHub Gist
-    const remoteSyncMeta = {
-      schemaVersion: 2,
-      appVersion: '0.2.2',
-      lastModifiedAt: '2026-09-02T12:00:00Z',
-      lastModifiedDevice: 'android',
-      fileHashes: { profiles: 'h1', history: 'h2', favorites: 'h3', settings: 'h4' },
-      deletedFavorites: [],
-      deletedProfiles: [],
-      deletedHistory: [],
-    };
-    const remoteHistory = [
-      {
-        id: 'onepiece-100-default',
-        animeTitle: 'One Piece',
-        animeUrl: 'https://jkanime.net/one-piece/',
-        thumbnailUrl: '',
-        episodeNumber: 100,
-        episodeUrl: 'https://jkanime.net/one-piece/100/',
-        watchProgress: 0.9,
-        watchedAt: '2026-09-02T11:00:00Z',
-        source: 'jkanime',
-        profileId: 'default',
-      },
-    ];
-    const remoteFavorites = [
-      { title: 'One Piece', url: 'https://jkanime.net/one-piece/', thumbnailUrl: '', source: 'jkanime', profileId: 'default' },
-    ];
+    // Mock URL.createObjectURL y elementos DOM
+    const createObjectURLMock = vi.fn().mockReturnValue('blob:mock-url');
+    const revokeObjectURLMock = vi.fn();
+    window.URL.createObjectURL = createObjectURLMock;
+    window.URL.revokeObjectURL = revokeObjectURLMock;
 
-    vi.mocked(syncService.fetchGistData).mockResolvedValueOnce({
-      notModified: false,
-      etag: '"etag-1"',
-      payload: {
-        syncMeta: remoteSyncMeta as any,
-        profiles: localProfiles,
-        history: remoteHistory,
-        favorites: remoteFavorites,
-        settings: {},
-        settingsDesktop: {},
-        settingsMobile: {},
+    const realAnchor = document.createElement('a');
+    const clickSpy = vi.spyOn(realAnchor, 'click').mockImplementation(() => {});
+    const createElementSpy = vi.spyOn(document, 'createElement').mockReturnValue(realAnchor);
+
+    await useSyncStore.getState().exportBackupFile();
+
+    expect(profileService.getAllProfiles).toHaveBeenCalledTimes(1);
+    expect(storageService.getAllHistory).toHaveBeenCalledTimes(1);
+    expect(storageService.getAllFavoritesForSync).toHaveBeenCalledTimes(1);
+    expect(createObjectURLMock).toHaveBeenCalledTimes(1);
+    expect(clickSpy).toHaveBeenCalledTimes(1);
+
+    createElementSpy.mockRestore();
+  });
+
+  it('importBackupFile procesa un JSON válido y restaura perfiles, historial y favoritos', async () => {
+    const backupJson = JSON.stringify({
+      syncMeta: {
+        schemaVersion: 2,
+        appVersion: '0.2.5',
+        lastModifiedAt: '2026-09-20T10:00:00Z',
       },
+      profiles: [
+        { id: 'p1', name: 'Otaku', avatar: 'star', color: '#ec4899', isActive: true, createdAt: '2026-02-01' },
+      ],
+      history: [
+        {
+          id: 'bleach-1-p1',
+          animeTitle: 'Bleach',
+          animeUrl: 'https://jkanime.net/bleach/',
+          thumbnailUrl: '',
+          episodeNumber: 1,
+          episodeUrl: 'https://jkanime.net/bleach/1/',
+          watchProgress: 1.0,
+          watchedAt: '2026-09-02T10:00:00Z',
+          source: 'jkanime',
+          profileId: 'p1',
+        },
+      ],
+      favorites: [
+        { title: 'Bleach', url: 'https://jkanime.net/bleach/', thumbnailUrl: '', source: 'jkanime', profileId: 'p1' },
+      ],
+      settings: {},
     });
 
-    vi.mocked(syncService.createOrUpdateGist).mockResolvedValueOnce({
-      etag: '"etag-2"',
-      gistId: 'test_gist_id_123',
-      gistUrl: 'https://gist.github.com/test_gist_id_123',
-      hashes: { profiles: 'h1', history: 'h2', favorites: 'h3', settings: 'h4' },
+    const result = await useSyncStore.getState().importBackupFile(backupJson);
+
+    expect(profileService.upsertProfile).toHaveBeenCalledWith(expect.objectContaining({ id: 'p1', name: 'Otaku' }));
+    expect(storageService.upsertHistory).toHaveBeenCalledWith(expect.objectContaining({ id: 'bleach-1-p1', episodeNumber: 1 }));
+    expect(storageService.addFavorite).toHaveBeenCalledWith(expect.objectContaining({ title: 'Bleach' }), 'p1');
+
+    expect(result).toEqual({
+      profilesCount: 1,
+      historyCount: 1,
+      favoritesCount: 1,
     });
 
-    // 3. Ejecutar sincronización
-    await useSyncStore.getState().syncNow();
-
-    // 4. Verificar que se persistió en SQLite la fusión de ambos conjuntos de datos
-    expect(storageService.batchUpsertHistory).toHaveBeenCalled();
-    const historyCallArg = vi.mocked(storageService.batchUpsertHistory).mock.calls[0][0];
-    const animeTitlesInHistory = historyCallArg.map((h) => h.animeTitle).sort();
-    expect(animeTitlesInHistory).toEqual(['Naruto', 'One Piece']);
-
-    expect(storageService.batchAddFavorites).toHaveBeenCalled();
-    const favoritesCallArg = vi.mocked(storageService.batchAddFavorites).mock.calls[0][0];
-    const titlesInFavorites = favoritesCallArg.map((f) => f.title).sort();
-    expect(titlesInFavorites).toEqual(['Naruto', 'One Piece']);
-
-    // 5. Verificar que se subió la versión fusionada de vuelta a Gist
-    expect(syncService.createOrUpdateGist).toHaveBeenCalledTimes(1);
-
-    // 6. Estado final exitoso
     expect(useSyncStore.getState().syncStatus).toBe('success');
     expect(useSyncStore.getState().isSyncing).toBe(false);
   });
 
-  it('descarga e importa automáticamente datos de Gist en un dispositivo nuevo con base de datos local vacía (0 subidas)', async () => {
-    // 1. Base local vacía (instalación limpia)
-    vi.mocked(profileService.getAllProfiles).mockResolvedValue([
-      { id: 'default', name: 'Principal', avatar: 'sparkles', color: '#3b82f6', isActive: true, createdAt: '2026-01-01' },
-    ]);
-    vi.mocked(storageService.getAllHistory).mockResolvedValue([]);
-    vi.mocked(storageService.getAllFavoritesForSync).mockResolvedValue([]);
-    vi.mocked(profileService.getTombstones).mockResolvedValue([]);
-    vi.mocked(storageService.getAllSettings).mockResolvedValue({});
-    vi.mocked(profileService.getSyncConfig).mockResolvedValue('');
-
-    // 2. Datos remotos en Gist
-    const remoteHistory = [
-      {
-        id: 'bleach-1-default',
-        animeTitle: 'Bleach',
-        animeUrl: 'https://jkanime.net/bleach/',
-        thumbnailUrl: '',
-        episodeNumber: 1,
-        episodeUrl: 'https://jkanime.net/bleach/1/',
-        watchProgress: 1.0,
-        watchedAt: '2026-09-02T10:00:00Z',
-        source: 'jkanime',
-        profileId: 'default',
-      },
-    ];
-    const remoteFavorites = [
-      { title: 'Bleach', url: 'https://jkanime.net/bleach/', thumbnailUrl: '', source: 'jkanime', profileId: 'default' },
-    ];
-
-    vi.mocked(syncService.fetchGistData).mockResolvedValueOnce({
-      notModified: false,
-      etag: '"etag-1"',
-      payload: {
-        syncMeta: {
-          schemaVersion: 2,
-          appVersion: '0.2.2',
-          lastModifiedAt: '2026-09-02T12:00:00Z',
-          lastModifiedDevice: 'android',
-          fileHashes: { profiles: 'h1', history: 'h2', favorites: 'h3', settings: 'h4' },
-          deletedFavorites: [],
-          deletedProfiles: [],
-          deletedHistory: [],
-        },
-        profiles: [],
-        history: remoteHistory,
-        favorites: remoteFavorites,
-        settings: {},
-        settingsDesktop: {},
-        settingsMobile: {},
-      },
-    });
-
-    // 3. Ejecutar sincronización en dispositivo nuevo
-    await useSyncStore.getState().syncNow();
-
-    // 4. Se importaron los datos a la base local sin llamar a createOrUpdateGist (0 escrituras en Gist)
-    expect(storageService.batchUpsertHistory).toHaveBeenCalledWith(remoteHistory);
-    expect(storageService.batchAddFavorites).toHaveBeenCalledWith(remoteFavorites);
-    expect(syncService.createOrUpdateGist).not.toHaveBeenCalled();
-
-    expect(useSyncStore.getState().syncStatus).toBe('success');
+  it('triggerDebouncedSync no produce errores ni llamadas de red', () => {
+    expect(() => {
+      useSyncStore.getState().triggerDebouncedSync();
+    }).not.toThrow();
   });
 });

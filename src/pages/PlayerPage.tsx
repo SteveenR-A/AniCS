@@ -1356,12 +1356,16 @@ export function PlayerPage() {
                   <ChevronLeft size={16} /> <span style={{ display: isPortrait && isMobile ? 'none' : 'inline' }}>Volver</span>
                 </button>
 
-                <h2 style={{
-                  fontSize: isPortrait ? 12 : (isMobile ? 13 : 15),
-                  fontWeight: 700, color: 'white', margin: 0,
-                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                  maxWidth: isPortrait ? '180px' : 'auto',
-                }}>
+                <h2
+                  className="selectable-text"
+                  style={{
+                    fontSize: isPortrait ? 12 : (isMobile ? 13 : 15),
+                    fontWeight: 700, color: 'white', margin: 0,
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                    maxWidth: isPortrait ? '180px' : 'auto',
+                    userSelect: 'text', WebkitUserSelect: 'text', cursor: 'text',
+                  }}
+                >
                   {currentAnime.title} {isPortrait ? `E${currentEpisode.number}` : `— Episodio ${currentEpisode.number}`}
                 </h2>
               </div>

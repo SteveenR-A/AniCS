@@ -182,9 +182,6 @@ export function DesktopHistoryPage() {
   const handleRefresh = async () => {
     setIsManualRefreshing(true);
     try {
-      if (useSyncStore.getState().config.githubToken && useSyncStore.getState().config.gistId && !useSyncStore.getState().isSyncPausedByLocalClear) {
-        await syncNow();
-      }
       await loadHistory();
     } catch (err) {
       console.error('Error al actualizar historial:', err);
@@ -198,22 +195,10 @@ export function DesktopHistoryPage() {
       return;
     }
 
-    const clearCloudToo = confirm(
-      '¿Deseas eliminar este historial también en tus otros dispositivos y en la nube?\n\n' +
-      '• Aceptar: Borrar en todos los dispositivos sincronizados (nube y local).\n' +
-      '• Cancelar: Borrar SOLO en este dispositivo (pausará la sincronización en este equipo para proteger la nube).'
-    );
-
     await clearHistory(activeProfile?.id);
     setEntries([]);
     setSelectedIds(new Set());
     setIsSelecting(false);
-
-    if (clearCloudToo) {
-      triggerDebouncedSync();
-    } else {
-      await useSyncStore.getState().pauseSyncByLocalClear();
-    }
   };
 
   const handleDeleteEntry = async (id: string, e: React.MouseEvent) => {

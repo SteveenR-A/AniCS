@@ -547,3 +547,16 @@ nav, header, [data-tauri-drag-region] {
   will-change: transform, opacity;
 }
 
+/* Selección de texto y copiado amigable */
+.selectable-text,
+[data-selectable="true"] {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  cursor: text;
+}
+
+::selection {
+  background: var(--accent-primary);
+  color: #ffffff;
+}
+

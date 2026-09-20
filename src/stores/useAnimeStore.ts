@@ -9,6 +9,7 @@ export interface SearchSession {
   genre: string;
   status: string;
   animeType: string;
+  year?: string;
   orderBy: string;
   results: AnimeResult[];
   currentPage: number;

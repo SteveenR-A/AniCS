@@ -38,6 +38,47 @@ async fn test_jkanime_search() {
 }
 
 #[tokio::test]
+async fn test_jkanime_advanced_search_filters() {
+    let extractor = JKAnimeExtractor::new();
+
+    // 1. Probar filtro Estrenos
+    let estrenos = extractor.advanced_search(&SearchFilters {
+        status: Some("estreno".to_string()),
+        page: 1,
+        ..Default::default()
+    }).await.expect("Failed advanced search estrenos");
+    println!("JKAnime estrenos count: {}", estrenos.results.len());
+    assert!(!estrenos.results.is_empty(), "Estrenos filter returned empty");
+
+    // 2. Probar filtro En Emisión
+    let emision = extractor.advanced_search(&SearchFilters {
+        status: Some("en-emision".to_string()),
+        page: 1,
+        ..Default::default()
+    }).await.expect("Failed advanced search emision");
+    println!("JKAnime emision count: {}", emision.results.len());
+    assert!(!emision.results.is_empty(), "En emisión filter returned empty");
+
+    // 3. Probar filtro Películas
+    let peliculas = extractor.advanced_search(&SearchFilters {
+        anime_type: Some("pelicula".to_string()),
+        page: 1,
+        ..Default::default()
+    }).await.expect("Failed advanced search pelicula");
+    println!("JKAnime peliculas count: {}", peliculas.results.len());
+    assert!(!peliculas.results.is_empty(), "Peliculas filter returned empty");
+
+    // 4. Probar filtro Año
+    let year_2024 = extractor.advanced_search(&SearchFilters {
+        year: Some("2024".to_string()),
+        page: 1,
+        ..Default::default()
+    }).await.expect("Failed advanced search year 2024");
+    println!("JKAnime year 2024 count: {}", year_2024.results.len());
+    assert!(!year_2024.results.is_empty(), "Year 2024 filter returned empty");
+}
+
+#[tokio::test]
 async fn test_jkanime_details_and_servers() {
     let extractor = JKAnimeExtractor::new();
     // Probar detalles de una serie conocida

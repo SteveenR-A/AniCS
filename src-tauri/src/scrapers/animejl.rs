@@ -1048,7 +1048,7 @@ impl AnimeExtractor for AnimeJLExtractor {
             match s_lower.as_str() {
                 "estreno" | "estrenos" | "2" => query_params.push("estado[]=2".to_string()),
                 "en-emision" | "emision" | "en emisión" | "0" => query_params.push("estado[]=0".to_string()),
-                "finalizado" | "1" => query_params.push("estado[]=1".to_string()),
+                "finalizado" | "concluido" | "finalizados" | "1" => query_params.push("estado[]=1".to_string()),
                 _ => {}
             }
         }
@@ -1056,9 +1056,9 @@ impl AnimeExtractor for AnimeJLExtractor {
         if let Some(t) = &filters.anime_type {
             let t_lower = t.trim().to_lowercase();
             match t_lower.as_str() {
-                "anime" | "1" => query_params.push("tipo[]=1".to_string()),
-                "ova" | "2" => query_params.push("tipo[]=2".to_string()),
-                "pelicula" | "movie" | "película" | "3" => query_params.push("tipo[]=3".to_string()),
+                "anime" | "serie" | "series" | "animes" | "1" => query_params.push("tipo[]=1".to_string()),
+                "ova" | "ovas" | "2" => query_params.push("tipo[]=2".to_string()),
+                "pelicula" | "movie" | "película" | "peliculas" | "3" => query_params.push("tipo[]=3".to_string()),
                 "donghua" | "7" => query_params.push("tipo[]=7".to_string()),
                 _ => {}
             }

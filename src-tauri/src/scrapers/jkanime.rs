@@ -389,12 +389,40 @@ impl AnimeExtractor for JKAnimeExtractor {
             params.push(format!("genero={}", g_slug));
         }
         if let Some(ref status) = filters.status {
-            let st = if status.to_lowercase().contains("emisi") { "en-emision" } else if status.to_lowercase().contains("conclu") || status.to_lowercase().contains("final") { "concluido" } else { status };
+            let s_lower = status.to_lowercase();
+            let st = if s_lower.contains("emisi") {
+                "emision"
+            } else if s_lower.contains("conclu") || s_lower.contains("final") {
+                "finalizados"
+            } else if s_lower.contains("estreno") {
+                "estrenos"
+            } else {
+                status.as_str()
+            };
             params.push(format!("estado={}", st));
         }
         if let Some(ref t) = filters.anime_type {
-            let ty = if t.to_lowercase().contains("serie") { "serie" } else if t.to_lowercase().contains("pel") { "pelicula" } else if t.to_lowercase().contains("ova") { "ova" } else { t };
+            let t_lower = t.to_lowercase();
+            let ty = if t_lower.contains("serie") || t_lower.contains("anime") {
+                "animes"
+            } else if t_lower.contains("pel") || t_lower.contains("movie") {
+                "peliculas"
+            } else if t_lower.contains("ova") {
+                "ovas"
+            } else if t_lower.contains("ona") {
+                "onas"
+            } else if t_lower.contains("especial") {
+                "especiales"
+            } else {
+                t.as_str()
+            };
             params.push(format!("tipo={}", ty));
+        }
+        if let Some(ref y) = filters.year {
+            let y_trimmed = y.trim();
+            if !y_trimmed.is_empty() && y_trimmed != "todos" {
+                params.push(format!("fecha={}", urlencoding::encode(y_trimmed)));
+            }
         }
         if let Some(ref order) = filters.order_by {
             params.push(format!("orden={}", order));

@@ -5,7 +5,7 @@ import { convertFileSrc } from '@tauri-apps/api/core';
 import {
   ArrowLeft, Play, Download, Heart,
   ChevronDown, ChevronUp, Check, HardDrive, CheckCircle2,
-  Calendar, Layers, Tag, Tv, Globe, Sparkles, Clock, DownloadCloud
+  Calendar, Layers, Tag, Tv, Globe, Sparkles, Clock, DownloadCloud, Copy
 } from 'lucide-react';
 import { getDetails, getServers, resolveStream } from '@/services/animeService';
 import { addFavorite, removeFavorite, isFavorite as checkFavorite, getHistory, getFavorites, updateFavoriteStatus } from '@/services/storageService';
@@ -59,6 +59,14 @@ export function DesktopDetailsPage() {
   const [showAllEps, setShowAllEps] = useState(false);
   const [epSearch, setEpSearch] = useState('');
   const [loadingEpisode, setLoadingEpisode] = useState<number | null>(null);
+  const [copiedTitle, setCopiedTitle] = useState(false);
+
+  const handleCopyTitle = () => {
+    if (!details?.title) return;
+    navigator.clipboard.writeText(details.title);
+    setCopiedTitle(true);
+    setTimeout(() => setCopiedTitle(false), 2000);
+  };
 
   // Sincronización con Descargas Locales e Historial de Visualización
   const [localEpisodesMap, setLocalEpisodesMap] = useState<Map<number, LocalEpisodeItem>>(new Map());
@@ -509,10 +517,10 @@ export function DesktopDetailsPage() {
       {/* Hero Banner Desktop */}
       <div style={{
         position: 'relative',
-        minHeight: 280,
+        minHeight: 295,
         display: 'flex',
         alignItems: 'flex-end',
-        padding: '36px 36px 28px',
+        padding: '52px 36px 28px',
         overflow: 'hidden',
         background: 'var(--bg-surface)',
         borderBottom: '1px solid var(--border-subtle)',
@@ -534,20 +542,26 @@ export function DesktopDetailsPage() {
         }} />
 
         {/* Botón Volver */}
-        <button
+        <motion.button
+          whileHover={{ scale: 1.08 }}
+          whileTap={{ scale: 0.95 }}
           onClick={() => navigate(-1)}
+          title="Volver"
           style={{
-            position: 'absolute', top: 20, left: 24, zIndex: 10,
-            background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(8px)',
-            border: '1px solid rgba(255,255,255,0.1)',
+            position: 'absolute', top: 14, left: 16, zIndex: 10,
+            background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(12px)',
+            WebkitBackdropFilter: 'blur(12px)',
+            border: '1px solid rgba(255,255,255,0.15)',
             borderRadius: 'var(--radius-full)',
-            width: 38, height: 38,
+            width: 36, height: 36,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             color: 'white', cursor: 'pointer',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+            transition: 'background 0.2s, border-color 0.2s',
           }}
         >
           <ArrowLeft size={18} />
-        </button>
+        </motion.button>
 
         {/* Contenido del Banner */}
         <div style={{
@@ -620,13 +634,47 @@ export function DesktopDetailsPage() {
               </span>
             </div>
 
-            <h1 style={{
-              fontSize: 28, fontWeight: 800, letterSpacing: '-0.02em',
-              color: 'white', lineHeight: 1.25, marginBottom: 12,
-              textShadow: '0 2px 10px rgba(0,0,0,0.6)',
-            }}>
-              {details.title}
-            </h1>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
+              <h1
+                className="selectable-text"
+                style={{
+                  fontSize: 28, fontWeight: 800, letterSpacing: '-0.02em',
+                  color: 'white', lineHeight: 1.25, margin: 0,
+                  textShadow: '0 2px 10px rgba(0,0,0,0.6)',
+                  userSelect: 'text',
+                  WebkitUserSelect: 'text',
+                  cursor: 'text',
+                }}
+              >
+                {details.title}
+              </h1>
+
+              <motion.button
+                whileHover={{ scale: 1.08 }}
+                whileTap={{ scale: 0.94 }}
+                onClick={handleCopyTitle}
+                title={copiedTitle ? '¡Nombre copiado!' : 'Copiar nombre del anime'}
+                style={{
+                  background: copiedTitle ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255, 255, 255, 0.08)',
+                  border: `1px solid ${copiedTitle ? 'rgba(16, 185, 129, 0.5)' : 'rgba(255, 255, 255, 0.16)'}`,
+                  borderRadius: 'var(--radius-full)',
+                  padding: '5px 12px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  color: copiedTitle ? '#34d399' : 'rgba(255, 255, 255, 0.85)',
+                  cursor: 'pointer',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  backdropFilter: 'blur(8px)',
+                  transition: 'all 0.2s ease',
+                  userSelect: 'none',
+                }}
+              >
+                {copiedTitle ? <Check size={13} color="#34d399" /> : <Copy size={13} />}
+                <span>{copiedTitle ? 'Copiado' : 'Copiar'}</span>
+              </motion.button>
+            </div>
 
             {/* Chips de Géneros */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
@@ -848,10 +896,14 @@ export function DesktopDetailsPage() {
             }}>
               Sinopsis
             </h2>
-            <p style={{
-              fontSize: 14, lineHeight: 1.8, color: 'var(--text-secondary)',
-              margin: 0, whiteSpace: 'pre-line',
-            }}>
+            <p
+              className="selectable-text"
+              style={{
+                fontSize: 14, lineHeight: 1.8, color: 'var(--text-secondary)',
+                margin: 0, whiteSpace: 'pre-line',
+                userSelect: 'text', WebkitUserSelect: 'text', cursor: 'text',
+              }}
+            >
               {details.synopsis}
             </p>
           </div>

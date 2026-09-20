@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import {
   ArrowLeft, Play, Download, Heart,
-  ChevronDown, ChevronUp, Check, HardDrive, CheckCircle2, Loader2, Calendar, DownloadCloud
+  ChevronDown, ChevronUp, Check, HardDrive, CheckCircle2, Loader2, Calendar, DownloadCloud, Copy
 } from 'lucide-react';
 import { getDetails, getServers, resolveStream } from '@/services/animeService';
 import { addFavorite, removeFavorite, isFavorite as checkFavorite, getHistory, getFavorites, updateFavoriteStatus } from '@/services/storageService';
@@ -58,6 +58,14 @@ export function MobileDetailsPage() {
   const [showAllEps, setShowAllEps] = useState(false);
   const [epSearch, setEpSearch] = useState('');
   const [loadingEpisode, setLoadingEpisode] = useState<number | null>(null);
+  const [copiedTitle, setCopiedTitle] = useState(false);
+
+  const handleCopyTitle = () => {
+    if (!details?.title) return;
+    navigator.clipboard.writeText(details.title);
+    setCopiedTitle(true);
+    setTimeout(() => setCopiedTitle(false), 2000);
+  };
 
   // Sincronización con Descargas Locales e Historial de Visualización en Móvil
   const [localEpisodesMap, setLocalEpisodesMap] = useState<Map<number, LocalEpisodeItem>>(new Map());
@@ -581,14 +589,44 @@ export function MobileDetailsPage() {
               )}
             </div>
 
-            <h1 style={{
-              fontSize: 16, fontWeight: 800, letterSpacing: '-0.02em',
-              color: 'white', lineHeight: 1.2, margin: '0 0 6px',
-              textShadow: '0 2px 8px rgba(0,0,0,0.6)',
-              overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
-            }}>
-              {details.title}
-            </h1>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '0 0 6px' }}>
+              <h1
+                className="selectable-text"
+                style={{
+                  fontSize: 16, fontWeight: 800, letterSpacing: '-0.02em',
+                  color: 'white', lineHeight: 1.2, margin: 0,
+                  textShadow: '0 2px 8px rgba(0,0,0,0.6)',
+                  overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+                  userSelect: 'text', WebkitUserSelect: 'text', cursor: 'text',
+                  flex: 1, minWidth: 0,
+                }}
+              >
+                {details.title}
+              </h1>
+              <button
+                onClick={handleCopyTitle}
+                title={copiedTitle ? '¡Copiado!' : 'Copiar nombre'}
+                style={{
+                  background: copiedTitle ? 'rgba(16, 185, 129, 0.25)' : 'rgba(255, 255, 255, 0.1)',
+                  border: `1px solid ${copiedTitle ? 'rgba(16, 185, 129, 0.5)' : 'rgba(255, 255, 255, 0.2)'}`,
+                  borderRadius: 'var(--radius-full)',
+                  padding: '4px 8px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  color: copiedTitle ? '#34d399' : 'white',
+                  cursor: 'pointer',
+                  fontSize: 10,
+                  fontWeight: 700,
+                  flexShrink: 0,
+                  backdropFilter: 'blur(8px)',
+                  userSelect: 'none',
+                }}
+              >
+                {copiedTitle ? <Check size={11} color="#34d399" /> : <Copy size={11} />}
+                <span>{copiedTitle ? 'Copiado' : 'Copiar'}</span>
+              </button>
+            </div>
 
             {/* Chips de Géneros */}
             <div style={{
@@ -694,10 +732,14 @@ export function MobileDetailsPage() {
             }}>
               Sinopsis
             </span>
-            <p style={{
-              fontSize: 13, lineHeight: 1.6, color: 'var(--text-secondary)',
-              margin: 0, whiteSpace: 'pre-line',
-            }}>
+            <p
+              className="selectable-text"
+              style={{
+                fontSize: 13, lineHeight: 1.6, color: 'var(--text-secondary)',
+                margin: 0, whiteSpace: 'pre-line',
+                userSelect: 'text', WebkitUserSelect: 'text', cursor: 'text',
+              }}
+            >
               {details.synopsis}
             </p>
           </div>

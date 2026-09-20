@@ -5,7 +5,7 @@ import {
   Clock, Trash2, Film, HeartOff, Inbox, History,
   ArrowDownCircle, Play, Folder, Search, X, CheckSquare, Square, RefreshCw,
   ChevronDown, ChevronUp, Check, Eye, EyeOff, Pause, RotateCcw, Loader2, AlertCircle, Heart, AlertTriangle,
-  CheckCircle2, Cloud, CloudOff
+  CheckCircle2, Cloud
 } from 'lucide-react';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import {
@@ -181,9 +181,6 @@ export function MobileHistoryPage() {
   const handleRefresh = async () => {
     setIsManualRefreshing(true);
     try {
-      if (useSyncStore.getState().config.githubToken && useSyncStore.getState().config.gistId && !useSyncStore.getState().isSyncPausedByLocalClear) {
-        await syncNow();
-      }
       await loadHistory();
     } catch (err) {
       console.error('Error al actualizar historial en móvil:', err);
@@ -196,18 +193,12 @@ export function MobileHistoryPage() {
     setShowClearModal(true);
   };
 
-  const handleConfirmClear = async (clearCloudToo: boolean) => {
+  const handleConfirmClear = async () => {
     setShowClearModal(false);
     await clearHistory(activeProfile?.id);
     setEntries([]);
     setSelectedIds(new Set());
     setIsSelecting(false);
-
-    if (clearCloudToo) {
-      triggerDebouncedSync();
-    } else {
-      await useSyncStore.getState().pauseSyncByLocalClear();
-    }
   };
 
   const handleDeleteEntry = async (id: string, e: React.MouseEvent) => {
@@ -829,91 +820,9 @@ export function MobileHistoryPage() {
 
               {/* Body */}
               <div style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: 0, lineHeight: 1.5 }}>
-                  Elige cómo deseas vaciar los episodios reproducidos:
+                <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: 0, lineHeight: 1.5 }}>
+                  ¿Estás seguro de que deseas vaciar el historial de reproducción de este perfil? Esta acción eliminará permanentemente los episodios registrados de forma local.
                 </p>
-
-                {/* Opción 1: Solo en este móvil */}
-                <button
-                  onClick={() => handleConfirmClear(false)}
-                  style={{
-                    background: 'var(--bg-elevated)',
-                    border: '1px solid var(--border-subtle)',
-                    borderRadius: 'var(--radius-lg)',
-                    padding: '12px 14px',
-                    textAlign: 'left',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    gap: 12,
-                    transition: 'border-color 0.15s ease',
-                  }}
-                >
-                  <div
-                    style={{
-                      width: 32,
-                      height: 32,
-                      borderRadius: 'var(--radius-md)',
-                      background: 'rgba(59, 130, 246, 0.15)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: 'var(--accent-primary)',
-                      flexShrink: 0,
-                    }}
-                  >
-                    <CloudOff size={16} />
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 2 }}>
-                      Borrar solo en este móvil
-                    </div>
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.4 }}>
-                      Pausa la sincronización y protege tu historial en la nube y en la PC.
-                    </div>
-                  </div>
-                </button>
-
-                {/* Opción 2: En todos lados y la nube */}
-                <button
-                  onClick={() => handleConfirmClear(true)}
-                  style={{
-                    background: 'rgba(239, 68, 68, 0.06)',
-                    border: '1px solid rgba(239, 68, 68, 0.25)',
-                    borderRadius: 'var(--radius-lg)',
-                    padding: '12px 14px',
-                    textAlign: 'left',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    gap: 12,
-                    transition: 'background 0.15s ease',
-                  }}
-                >
-                  <div
-                    style={{
-                      width: 32,
-                      height: 32,
-                      borderRadius: 'var(--radius-md)',
-                      background: 'rgba(239, 68, 68, 0.15)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: 'var(--accent-error)',
-                      flexShrink: 0,
-                    }}
-                  >
-                    <Cloud size={16} />
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--accent-error)', marginBottom: 2 }}>
-                      Borrar en todos los dispositivos y nube
-                    </div>
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.4 }}>
-                      Elimina el historial aquí y propaga la eliminación a GitHub Gist y PC.
-                    </div>
-                  </div>
-                </button>
               </div>
 
               {/* Footer */}
@@ -923,6 +832,7 @@ export function MobileHistoryPage() {
                   borderTop: '1px solid var(--border-subtle)',
                   display: 'flex',
                   justifyContent: 'flex-end',
+                  gap: 10,
                 }}
               >
                 <button
@@ -939,6 +849,21 @@ export function MobileHistoryPage() {
                   }}
                 >
                   Cancelar
+                </button>
+                <button
+                  onClick={handleConfirmClear}
+                  style={{
+                    background: 'var(--accent-error)',
+                    border: 'none',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '8px 16px',
+                    fontSize: 12,
+                    fontWeight: 700,
+                    color: 'white',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Vaciar Historial
                 </button>
               </div>
             </motion.div>

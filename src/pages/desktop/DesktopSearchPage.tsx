@@ -95,6 +95,9 @@ function ResultCard({ anime, onClick }: { anime: AnimeResult; onClick: () => voi
   );
 }
 
+const CURRENT_YEAR = new Date().getFullYear();
+const AVAILABLE_YEARS = Array.from({ length: CURRENT_YEAR - 1980 + 1 }, (_, i) => String(CURRENT_YEAR - i));
+
 export function DesktopSearchPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -110,21 +113,23 @@ export function DesktopSearchPage() {
   const urlGenre = searchParams.get('genre') ?? '';
   const urlStatus = searchParams.get('status') ?? '';
   const urlType = searchParams.get('type') ?? '';
+  const urlYear = searchParams.get('year') ?? '';
   const urlOrder = searchParams.get('order') ?? '';
 
   const [query, setQuery] = useState(urlQ);
   const [selectedGenre, setSelectedGenre] = useState<string>(urlGenre);
   const [selectedStatus, setSelectedStatus] = useState<string>(urlStatus);
   const [selectedType, setSelectedType] = useState<string>(urlType);
+  const [selectedYear, setSelectedYear] = useState<string>(urlYear);
   const [selectedOrder, setSelectedOrder] = useState<string>(urlOrder);
   const [currentPage, setCurrentPage] = useState<number>(urlPage);
   const [totalPages, setTotalPages] = useState<number | undefined>(undefined);
   const [hasNextPage, setHasNextPage] = useState(false);
-  const [showFilters, setShowFilters] = useState(Boolean(urlGenre || urlStatus || urlType));
+  const [showFilters, setShowFilters] = useState(Boolean(urlGenre || urlStatus || urlType || urlYear));
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const isInitialMount = useRef(true);
-  const activeFilterCount = (selectedGenre ? 1 : 0) + (selectedStatus ? 1 : 0) + (selectedType ? 1 : 0) + (selectedOrder ? 1 : 0);
+  const activeFilterCount = (selectedGenre ? 1 : 0) + (selectedStatus ? 1 : 0) + (selectedType ? 1 : 0) + (selectedYear ? 1 : 0) + (selectedOrder ? 1 : 0);
 
   // Sincronizar fuente si está en los parámetros de la URL
   useEffect(() => {
@@ -144,6 +149,7 @@ export function DesktopSearchPage() {
     newGenre: string,
     newStatus: string,
     newType: string,
+    newYear: string,
     newOrder: string,
     newPage: number
   ) => {
@@ -152,6 +158,7 @@ export function DesktopSearchPage() {
     if (newGenre) params.set('genre', newGenre);
     if (newStatus) params.set('status', newStatus);
     if (newType) params.set('type', newType);
+    if (newYear) params.set('year', newYear);
     if (newOrder) params.set('order', newOrder);
     if (newPage > 1) params.set('p', String(newPage));
     if (activeSource) params.set('source', activeSource);
@@ -165,6 +172,7 @@ export function DesktopSearchPage() {
     genre: string,
     status: string,
     type: string,
+    year: string,
     order: string,
     page: number = 1
   ) => {
@@ -177,6 +185,7 @@ export function DesktopSearchPage() {
         genre: genre || undefined,
         status: status || undefined,
         animeType: type || undefined,
+        year: year || undefined,
         orderBy: order || undefined,
         page,
       };
@@ -199,6 +208,7 @@ export function DesktopSearchPage() {
         genre,
         status,
         animeType: type,
+        year,
         orderBy: order,
         results: sanitized,
         currentPage: page,
@@ -227,7 +237,7 @@ export function DesktopSearchPage() {
 
   // Restaurar o ejecutar búsqueda inicial al cambiar fuente, filtros o URL
   useEffect(() => {
-    const currentKey = `${activeSource}:${urlQ}:${urlGenre}:${urlStatus}:${urlType}:${urlOrder}:${urlPage}`;
+    const currentKey = `${activeSource}:${urlQ}:${urlGenre}:${urlStatus}:${urlType}:${urlYear}:${urlOrder}:${urlPage}`;
     if (lastExecutedKey.current === currentKey) {
       return;
     }
@@ -237,19 +247,20 @@ export function DesktopSearchPage() {
     if (isInitialMount.current) {
       isInitialMount.current = false;
       const session = getSearchSession(activeSource);
-      const hasParams = Boolean(urlQ || urlGenre || urlStatus || urlType || urlOrder || urlPage > 1);
+      const hasParams = Boolean(urlQ || urlGenre || urlStatus || urlType || urlYear || urlOrder || urlPage > 1);
 
       if (!hasParams && session && session.results.length > 0) {
         setQuery(session.query);
         setSelectedGenre(session.genre);
         setSelectedStatus(session.status);
         setSelectedType(session.animeType);
+        setSelectedYear(session.year || '');
         setSelectedOrder(session.orderBy);
         setCurrentPage(session.currentPage);
         setTotalPages(session.totalPages);
         setHasNextPage(session.hasNextPage);
         setSearchResults(session.results, session.query, activeSource);
-        syncUrlParams(session.query, session.genre, session.status, session.animeType, session.orderBy, session.currentPage);
+        syncUrlParams(session.query, session.genre, session.status, session.animeType, session.year || '', session.orderBy, session.currentPage);
         return;
       }
     }
@@ -258,18 +269,19 @@ export function DesktopSearchPage() {
     setSelectedGenre(urlGenre);
     setSelectedStatus(urlStatus);
     setSelectedType(urlType);
+    setSelectedYear(urlYear);
     setSelectedOrder(urlOrder);
     setCurrentPage(urlPage);
 
-    executeSearch(urlQ, urlGenre, urlStatus, urlType, urlOrder, urlPage);
-  }, [activeSource, urlQ, urlGenre, urlStatus, urlType, urlOrder, urlPage, getSearchSession, setSearchResults, syncUrlParams, executeSearch]);
+    executeSearch(urlQ, urlGenre, urlStatus, urlType, urlYear, urlOrder, urlPage);
+  }, [activeSource, urlQ, urlGenre, urlStatus, urlType, urlYear, urlOrder, urlPage, getSearchSession, setSearchResults, syncUrlParams, executeSearch]);
 
   const handleInput = (val: string) => {
     setQuery(val);
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
-      syncUrlParams(val, selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
-      executeSearch(val, selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
+      syncUrlParams(val, selectedGenre, selectedStatus, selectedType, selectedYear, selectedOrder, 1);
+      executeSearch(val, selectedGenre, selectedStatus, selectedType, selectedYear, selectedOrder, 1);
     }, 400);
   };
 
@@ -279,39 +291,48 @@ export function DesktopSearchPage() {
       (name ? selectedGenre.toLowerCase() === name.toLowerCase() : false);
     const nextGenre = isCurrentlySelected ? '' : slug;
     setSelectedGenre(nextGenre);
-    const key = `${activeSource}:${query}:${nextGenre}:${selectedStatus}:${selectedType}:${selectedOrder}:1`;
+    const key = `${activeSource}:${query}:${nextGenre}:${selectedStatus}:${selectedType}:${selectedYear}:${selectedOrder}:1`;
     lastExecutedKey.current = key;
-    syncUrlParams(query, nextGenre, selectedStatus, selectedType, selectedOrder, 1);
-    executeSearch(query, nextGenre, selectedStatus, selectedType, selectedOrder, 1);
+    syncUrlParams(query, nextGenre, selectedStatus, selectedType, selectedYear, selectedOrder, 1);
+    executeSearch(query, nextGenre, selectedStatus, selectedType, selectedYear, selectedOrder, 1);
   };
 
   const handleTypeSelect = (t: string) => {
     // Si ya está seleccionado ese tipo o se hace clic en 'Todos' (''), se desactiva
     const nextType = (selectedType === t || t === '') ? '' : t;
     setSelectedType(nextType);
-    const key = `${activeSource}:${query}:${selectedGenre}:${selectedStatus}:${nextType}:${selectedOrder}:1`;
+    const key = `${activeSource}:${query}:${selectedGenre}:${selectedStatus}:${nextType}:${selectedYear}:${selectedOrder}:1`;
     lastExecutedKey.current = key;
-    syncUrlParams(query, selectedGenre, selectedStatus, nextType, selectedOrder, 1);
-    executeSearch(query, selectedGenre, selectedStatus, nextType, selectedOrder, 1);
+    syncUrlParams(query, selectedGenre, selectedStatus, nextType, selectedYear, selectedOrder, 1);
+    executeSearch(query, selectedGenre, selectedStatus, nextType, selectedYear, selectedOrder, 1);
   };
 
   const handleStatusSelect = (st: string) => {
     // Si ya está seleccionado ese estado o se hace clic en 'Todos' (''), se desactiva
     const nextStatus = (selectedStatus === st || st === '') ? '' : st;
     setSelectedStatus(nextStatus);
-    const key = `${activeSource}:${query}:${selectedGenre}:${nextStatus}:${selectedType}:${selectedOrder}:1`;
+    const key = `${activeSource}:${query}:${selectedGenre}:${nextStatus}:${selectedType}:${selectedYear}:${selectedOrder}:1`;
     lastExecutedKey.current = key;
-    syncUrlParams(query, selectedGenre, nextStatus, selectedType, selectedOrder, 1);
-    executeSearch(query, selectedGenre, nextStatus, selectedType, selectedOrder, 1);
+    syncUrlParams(query, selectedGenre, nextStatus, selectedType, selectedYear, selectedOrder, 1);
+    executeSearch(query, selectedGenre, nextStatus, selectedType, selectedYear, selectedOrder, 1);
+  };
+
+  const handleYearChange = (yr: string) => {
+    const nextYear = selectedYear === yr ? '' : yr;
+    setSelectedYear(nextYear);
+    const key = `${activeSource}:${query}:${selectedGenre}:${selectedStatus}:${selectedType}:${nextYear}:${selectedOrder}:1`;
+    lastExecutedKey.current = key;
+    syncUrlParams(query, selectedGenre, selectedStatus, selectedType, nextYear, selectedOrder, 1);
+    executeSearch(query, selectedGenre, selectedStatus, selectedType, nextYear, selectedOrder, 1);
   };
 
   const handleOrderChange = (ord: string) => {
     const nextOrder = selectedOrder === ord ? '' : ord;
     setSelectedOrder(nextOrder);
-    const key = `${activeSource}:${query}:${selectedGenre}:${selectedStatus}:${selectedType}:${nextOrder}:1`;
+    const key = `${activeSource}:${query}:${selectedGenre}:${selectedStatus}:${selectedType}:${selectedYear}:${nextOrder}:1`;
     lastExecutedKey.current = key;
-    syncUrlParams(query, selectedGenre, selectedStatus, selectedType, nextOrder, 1);
-    executeSearch(query, selectedGenre, selectedStatus, selectedType, nextOrder, 1);
+    syncUrlParams(query, selectedGenre, selectedStatus, selectedType, selectedYear, nextOrder, 1);
+    executeSearch(query, selectedGenre, selectedStatus, selectedType, selectedYear, nextOrder, 1);
   };
 
   const handleResetFilters = () => {
@@ -320,29 +341,31 @@ export function DesktopSearchPage() {
     setSelectedGenre('');
     setSelectedStatus('');
     setSelectedType('');
+    setSelectedYear('');
     setSelectedOrder('');
     setCurrentPage(1);
-    const key = `${activeSource}::::::1`;
+    const key = `${activeSource}:::::::1`;
     lastExecutedKey.current = key;
-    syncUrlParams('', '', '', '', '', 1);
+    syncUrlParams('', '', '', '', '', '', 1);
     saveSearchSession(activeSource, {
       query: '',
       genre: '',
       status: '',
       animeType: '',
+      year: '',
       orderBy: '',
       results: [],
       currentPage: 1,
       totalPages: undefined,
       hasNextPage: false,
     });
-    executeSearch('', '', '', '', '', 1);
+    executeSearch('', '', '', '', '', '', 1);
   };
 
   const handlePageChange = (newPage: number) => {
     setCurrentPage(newPage);
-    syncUrlParams(query, selectedGenre, selectedStatus, selectedType, selectedOrder, newPage);
-    executeSearch(query, selectedGenre, selectedStatus, selectedType, selectedOrder, newPage);
+    syncUrlParams(query, selectedGenre, selectedStatus, selectedType, selectedYear, selectedOrder, newPage);
+    executeSearch(query, selectedGenre, selectedStatus, selectedType, selectedYear, selectedOrder, newPage);
     window.scrollTo({ top: 0, behavior: 'smooth' });
     const mainEl = document.querySelector('main > div');
     if (mainEl) {
@@ -375,8 +398,8 @@ export function DesktopSearchPage() {
             <button
               onClick={() => {
                 setQuery('');
-                syncUrlParams('', selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
-                executeSearch('', selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
+                syncUrlParams('', selectedGenre, selectedStatus, selectedType, selectedYear, selectedOrder, 1);
+                executeSearch('', selectedGenre, selectedStatus, selectedType, selectedYear, selectedOrder, 1);
               }}
               style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
             >
@@ -401,8 +424,8 @@ export function DesktopSearchPage() {
               key={src.id}
               onClick={() => {
                 setActiveSource(src.id);
-                syncUrlParams(query, selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
-                executeSearch(query, selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
+                syncUrlParams(query, selectedGenre, selectedStatus, selectedType, selectedYear, selectedOrder, 1);
+                executeSearch(query, selectedGenre, selectedStatus, selectedType, selectedYear, selectedOrder, 1);
               }}
               style={{
                 padding: '8px 16px', borderRadius: 'var(--radius-full)',
@@ -451,7 +474,7 @@ export function DesktopSearchPage() {
         <button
           onClick={() => {
             loadGenres(activeSource);
-            executeSearch(query, selectedGenre, selectedStatus, selectedType, selectedOrder, currentPage);
+            executeSearch(query, selectedGenre, selectedStatus, selectedType, selectedYear, selectedOrder, currentPage);
           }}
           disabled={isSearching}
           title="Actualizar catálogo y recargar resultados"
@@ -475,14 +498,15 @@ export function DesktopSearchPage() {
           onClick={() => {
             setSelectedStatus('');
             setSelectedType('');
-            syncUrlParams(query, selectedGenre, '', '', selectedOrder, 1);
-            executeSearch(query, selectedGenre, '', '', selectedOrder, 1);
+            setSelectedYear('');
+            syncUrlParams(query, selectedGenre, '', '', '', selectedOrder, 1);
+            executeSearch(query, selectedGenre, '', '', '', selectedOrder, 1);
           }}
           style={{
             padding: '6px 14px', borderRadius: 'var(--radius-full)',
-            background: !selectedStatus && !selectedType ? 'var(--accent-primary)' : 'var(--bg-surface)',
-            color: !selectedStatus && !selectedType ? '#ffffff' : 'var(--text-secondary)',
-            border: `1px solid ${!selectedStatus && !selectedType ? 'transparent' : 'var(--border-subtle)'}`,
+            background: !selectedStatus && !selectedType && !selectedYear ? 'var(--accent-primary)' : 'var(--bg-surface)',
+            color: !selectedStatus && !selectedType && !selectedYear ? '#ffffff' : 'var(--text-secondary)',
+            border: `1px solid ${!selectedStatus && !selectedType && !selectedYear ? 'transparent' : 'var(--border-subtle)'}`,
             fontSize: 12, fontWeight: 700, cursor: 'pointer',
             transition: 'all var(--transition-fast)',
           }}
@@ -494,8 +518,8 @@ export function DesktopSearchPage() {
           onClick={() => {
             const nextStatus = selectedStatus === 'estreno' ? '' : 'estreno';
             setSelectedStatus(nextStatus);
-            syncUrlParams(query, selectedGenre, nextStatus, selectedType, selectedOrder, 1);
-            executeSearch(query, selectedGenre, nextStatus, selectedType, selectedOrder, 1);
+            syncUrlParams(query, selectedGenre, nextStatus, selectedType, selectedYear, selectedOrder, 1);
+            executeSearch(query, selectedGenre, nextStatus, selectedType, selectedYear, selectedOrder, 1);
           }}
           style={{
             padding: '6px 14px', borderRadius: 'var(--radius-full)',
@@ -518,8 +542,8 @@ export function DesktopSearchPage() {
           onClick={() => {
             const nextStatus = selectedStatus === 'en-emision' ? '' : 'en-emision';
             setSelectedStatus(nextStatus);
-            syncUrlParams(query, selectedGenre, nextStatus, selectedType, selectedOrder, 1);
-            executeSearch(query, selectedGenre, nextStatus, selectedType, selectedOrder, 1);
+            syncUrlParams(query, selectedGenre, nextStatus, selectedType, selectedYear, selectedOrder, 1);
+            executeSearch(query, selectedGenre, nextStatus, selectedType, selectedYear, selectedOrder, 1);
           }}
           style={{
             padding: '6px 14px', borderRadius: 'var(--radius-full)',
@@ -542,8 +566,8 @@ export function DesktopSearchPage() {
           onClick={() => {
             const nextType = selectedType === 'pelicula' ? '' : 'pelicula';
             setSelectedType(nextType);
-            syncUrlParams(query, selectedGenre, selectedStatus, nextType, selectedOrder, 1);
-            executeSearch(query, selectedGenre, selectedStatus, nextType, selectedOrder, 1);
+            syncUrlParams(query, selectedGenre, selectedStatus, nextType, selectedYear, selectedOrder, 1);
+            executeSearch(query, selectedGenre, selectedStatus, nextType, selectedYear, selectedOrder, 1);
           }}
           style={{
             padding: '6px 14px', borderRadius: 'var(--radius-full)',
@@ -583,8 +607,8 @@ export function DesktopSearchPage() {
               <span
                 onClick={() => {
                   setQuery(term);
-                  syncUrlParams(term, selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
-                  executeSearch(term, selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
+                  syncUrlParams(term, selectedGenre, selectedStatus, selectedType, selectedYear, selectedOrder, 1);
+                  executeSearch(term, selectedGenre, selectedStatus, selectedType, selectedYear, selectedOrder, 1);
                 }}
                 style={{ cursor: 'pointer', fontWeight: 600 }}
               >
@@ -659,6 +683,22 @@ export function DesktopSearchPage() {
               title="Quitar filtro de estado"
             >
               <span>Estado: {selectedStatus === 'estreno' ? 'Estrenos' : selectedStatus === 'en-emision' ? 'En emisión' : 'Concluido'}</span>
+              <X size={13} />
+            </button>
+          )}
+          {selectedYear && (
+            <button
+              type="button"
+              onClick={() => handleYearChange('')}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                background: 'rgba(99, 102, 241, 0.15)', border: '1px solid rgba(99, 102, 241, 0.35)',
+                borderRadius: 'var(--radius-full)', padding: '4px 10px',
+                color: 'var(--accent-primary)', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+              }}
+              title="Quitar filtro de año"
+            >
+              <span>Año: {selectedYear}</span>
               <X size={13} />
             </button>
           )}
@@ -803,6 +843,25 @@ export function DesktopSearchPage() {
                     </button>
                   );
                 })}
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>Año:</span>
+                <select
+                  value={selectedYear}
+                  onChange={(e) => handleYearChange(e.target.value)}
+                  style={{
+                    background: 'var(--bg-elevated)', border: `1px solid ${selectedYear ? 'var(--accent-primary)' : 'var(--border-subtle)'}`,
+                    borderRadius: 'var(--radius-md)', padding: '5px 12px',
+                    color: selectedYear ? 'var(--accent-primary)' : 'var(--text-primary)',
+                    fontSize: 12, fontWeight: 600, outline: 'none', cursor: 'pointer',
+                  }}
+                >
+                  <option value="">Todos los años</option>
+                  {AVAILABLE_YEARS.map((y) => (
+                    <option key={y} value={y}>{y}</option>
+                  ))}
+                </select>
               </div>
 
               <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>

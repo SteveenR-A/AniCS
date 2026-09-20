@@ -87,7 +87,7 @@ interface SyncState {
   syncNow: () => Promise<void>;
   triggerDebouncedSync: () => void;
   exportBackupFile: () => Promise<void>;
-  importBackupFile: (jsonString: string) => Promise<void>;
+  importBackupFile: (jsonString: string) => Promise<{ profilesCount: number; historyCount: number; favoritesCount: number }>;
   enableEncryption: (pin: string) => Promise<void>;
   disableEncryption: () => Promise<void>;
 }
@@ -98,24 +98,11 @@ let cachedRemoteSettingsDesktop: Record<string, string> = {};
 let cachedRemoteSettingsMobile: Record<string, string> = {};
 let cachedRemoteDevices: Record<string, { lastSyncAt: string; appVersion: string }> = {};
 
-function setupPeriodicSync(get: () => SyncState) {
+function setupPeriodicSync(_get: () => SyncState) {
   if (periodicSyncInterval) {
     clearInterval(periodicSyncInterval);
     periodicSyncInterval = null;
   }
-  const { config } = get();
-  // Si no hay token, no hay gist o la sincronización automática está desmarcada, no se programa ningún intervalo
-  if (!config.autoSync || !config.githubToken || !config.gistId) {
-    return;
-  }
-
-  // Sincronizar automáticamente cada 15 minutos en background (solo comprueba ETag 304 ligero)
-  periodicSyncInterval = setInterval(() => {
-    const state = get();
-    if (state.config.autoSync && state.config.githubToken && state.config.gistId && !state.isSyncing && !state.isSyncPausedByLocalClear) {
-      state.syncNow().catch(e => console.warn('Background periodic sync skipped:', e));
-    }
-  }, 15 * 60 * 1000);
 }
 
 async function applyDeletedHistoryTombstonesLocally(
@@ -226,13 +213,6 @@ export const useSyncStore = create<SyncState>((set, get) => ({
         },
         isSyncPausedByLocalClear: isPaused,
       });
-
-      setupPeriodicSync(get);
-
-      // Si autoSync está habilitado y hay token + gistId (y no está en pausa), hacer verificación inicial
-      if (token && gistId && autoSync && !isPaused) {
-        get().syncNow().catch(e => console.warn('Background initial sync skipped:', e));
-      }
     } catch (e) {
       console.warn('Error inicializando sync config:', e);
     }
@@ -729,16 +709,7 @@ export const useSyncStore = create<SyncState>((set, get) => ({
   },
 
   triggerDebouncedSync: () => {
-    const { config } = get();
-    if (!config.autoSync || !config.githubToken || !config.gistId) return;
-
-    if (autoSyncTimeout) {
-      clearTimeout(autoSyncTimeout);
-    }
-
-    autoSyncTimeout = setTimeout(() => {
-      get().syncNow().catch(e => console.warn('Debounced AutoSync failed:', e));
-    }, 30_000); // 30 segundos de debounce
+    // Sincronización en la nube desactivada; no-op seguro para llamadas heredadas.
   },
 
   exportBackupFile: async () => {
@@ -788,13 +759,13 @@ export const useSyncStore = create<SyncState>((set, get) => ({
     try {
       const imported = importPayloadFromJsonString(jsonString);
 
-      for (const p of imported.profiles) {
+      for (const p of (imported.profiles || [])) {
         await upsertProfile(p);
       }
-      for (const h of imported.history) {
+      for (const h of (imported.history || [])) {
         await upsertHistory(h);
       }
-      for (const f of imported.favorites) {
+      for (const f of (imported.favorites || [])) {
         await addFavorite(f, f.profileId);
       }
 
@@ -809,6 +780,11 @@ export const useSyncStore = create<SyncState>((set, get) => ({
       }
 
       set({ isSyncing: false, syncStatus: 'success' });
+      return {
+        profilesCount: imported.profiles?.length || 0,
+        historyCount: imported.history?.length || 0,
+        favoritesCount: imported.favorites?.length || 0,
+      };
     } catch (e: any) {
       set({ isSyncing: false, syncStatus: 'error', lastError: e?.message || 'Archivo de respaldo inválido' });
       throw e;

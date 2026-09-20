@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Globe, Download, Tv, RefreshCw, Check, Undo2,
+  Globe, Download, Upload, Tv, RefreshCw, Check, Undo2,
   FolderOpen, ExternalLink, Sparkles, ShieldCheck, Palette, HardDrive, Trash2, Database, Activity, Cloud, User,
   Film, Clock, Plus, Layers, ShieldAlert
 } from 'lucide-react';
@@ -11,7 +11,6 @@ import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { openUrl, openPath } from '@tauri-apps/plugin-opener';
 import { ChangelogModal } from '@/components/ChangelogModal';
 import { ProfileSelectorModal, getProfileAvatarIcon } from '@/components/ProfileSelectorModal';
-import { GistSyncModal } from '@/components/GistSyncModal';
 import { useThemeStore, THEMES } from '@/stores/useThemeStore';
 import { useProfileStore } from '@/stores/useProfileStore';
 import { useSyncStore } from '@/stores/useSyncStore';
@@ -281,13 +280,56 @@ export function DesktopSettingsPage() {
     return cleanRemote !== cleanCurrent;
   };
 
-  // Perfiles y Sincronización en la Nube
+  // Perfiles y Copia de Seguridad JSON
   const { profiles, activeProfile } = useProfileStore();
-  const { config: syncConfig } = useSyncStore();
-  const isGistLinked = Boolean(syncConfig.githubToken && syncConfig.gistId);
+  const { exportBackupFile, importBackupFile } = useSyncStore();
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
-  const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
+  const [isExportingBackup, setIsExportingBackup] = useState(false);
+  const [isImportingBackup, setIsImportingBackup] = useState(false);
+  const backupFileInputRef = useRef<HTMLInputElement>(null);
   const [activeProfileStats, setActiveProfileStats] = useState<ProfileStats | null>(null);
+
+  const handleExportBackup = async () => {
+    setIsExportingBackup(true);
+    try {
+      await exportBackupFile();
+      setSaveStatus('Copia de seguridad (.json) exportada exitosamente');
+      setTimeout(() => setSaveStatus(null), 4000);
+    } catch (e: any) {
+      alert(`Error al exportar copia de seguridad: ${e?.message || 'Error desconocido'}`);
+    } finally {
+      setIsExportingBackup(false);
+    }
+  };
+
+  const handleImportBackupFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const text = event.target?.result as string;
+      if (text) {
+        setIsImportingBackup(true);
+        try {
+          const res = await importBackupFile(text);
+          await loadDb();
+          const st = await getProfileStats(activeProfile?.id);
+          setActiveProfileStats(st);
+          setSaveStatus(
+            `Respaldo restaurado con éxito: ${res.profilesCount} perfiles, ${res.historyCount} episodios y ${res.favoritesCount} favoritos`
+          );
+          setTimeout(() => setSaveStatus(null), 5000);
+        } catch (err: any) {
+          alert(`Error al importar respaldo JSON: ${err?.message || 'Archivo no válido'}`);
+        } finally {
+          setIsImportingBackup(false);
+        }
+      }
+    };
+    reader.readAsText(file);
+    if (backupFileInputRef.current) backupFileInputRef.current.value = '';
+  };
 
   useEffect(() => {
     const loadStats = async () => {
@@ -349,19 +391,19 @@ export function DesktopSettingsPage() {
       </AnimatePresence>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-        {/* Perfiles de Usuario y Sincronización en la Nube */}
+        {/* Perfiles de Usuario y Copia de Seguridad JSON */}
         <div style={{
           background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)',
           border: '1px solid var(--border-subtle)', padding: 22,
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18 }}>
             <div style={{ padding: 8, borderRadius: 'var(--radius-md)', background: 'rgba(59, 130, 246, 0.15)' }}>
-              <Cloud size={20} color="var(--accent-primary)" />
+              <HardDrive size={20} color="var(--accent-primary)" />
             </div>
             <div>
-              <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Cuentas y Sincronización en la Nube</h2>
+              <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Perfiles de Usuario y Copia de Seguridad</h2>
               <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '2px 0 0' }}>
-                Perfiles locales multi-usuario y sincronización en la nube con GitHub Gist
+                Perfiles locales multi-usuario y respaldo/restauración de datos en formato JSON
               </p>
             </div>
           </div>
@@ -476,7 +518,7 @@ export function DesktopSettingsPage() {
               </button>
             </div>
 
-            {/* Cloud Sync Status */}
+            {/* Copia de Seguridad y Restauración JSON */}
             <div style={{
               background: 'rgba(255, 255, 255, 0.03)',
               borderRadius: 'var(--radius-md)',
@@ -485,56 +527,92 @@ export function DesktopSettingsPage() {
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
+              gap: 14,
+              flexWrap: 'wrap',
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 220, flex: 1 }}>
                 <div
                   style={{
                     width: 44,
                     height: 44,
                     borderRadius: '12px',
-                    background: isGistLinked ? 'rgba(16, 185, 129, 0.15)' : 'rgba(59, 130, 246, 0.15)',
-                    border: isGistLinked ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(59, 130, 246, 0.3)',
+                    background: 'rgba(59, 130, 246, 0.15)',
+                    border: '1px solid rgba(59, 130, 246, 0.3)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    color: isGistLinked ? '#10b981' : 'var(--accent-primary)',
+                    color: 'var(--accent-primary)',
+                    flexShrink: 0,
                   }}
                 >
-                  <Cloud size={22} />
+                  <Database size={22} />
                 </div>
                 <div>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: 'white', display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span>Sincronización en la Nube (Gist)</span>
-                    {isGistLinked && (
-                      <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: '8px', background: 'rgba(16,185,129,0.2)', color: '#10b981' }}>
-                        Conectado
-                      </span>
-                    )}
+                  <div style={{ fontSize: 14, fontWeight: 700, color: 'white' }}>
+                    Copia de Seguridad (JSON)
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                    {isGistLinked
-                      ? (syncConfig.lastSyncAt ? `Última sinc: ${new Date(syncConfig.lastSyncAt).toLocaleDateString()}` : 'Conectado a Gist')
-                      : 'Historial y favoritos multi-dispositivo con GitHub Gist'}
+                    Exporta o restaura historial, favoritos y perfiles en un archivo offline
                   </div>
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setIsSyncModalOpen(true)}
-                style={{
-                  background: 'var(--accent-primary)',
-                  border: 'none',
-                  borderRadius: 'var(--radius-md)',
-                  padding: '8px 14px',
-                  color: 'white',
-                  fontSize: 12,
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                }}
-              >
-                {isGistLinked ? 'Gestionar Gist' : 'Configurar Gist'}
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                {/* Input oculto para importar JSON */}
+                <input
+                  type="file"
+                  ref={backupFileInputRef}
+                  accept=".json,application/json"
+                  style={{ display: 'none' }}
+                  onChange={handleImportBackupFile}
+                />
+
+                <motion.button
+                  whileHover={{ scale: 1.04 }}
+                  whileTap={{ scale: 0.96 }}
+                  type="button"
+                  onClick={handleExportBackup}
+                  disabled={isExportingBackup}
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.08)',
+                    border: '1px solid rgba(255, 255, 255, 0.18)',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '8px 14px',
+                    color: 'white',
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: isExportingBackup ? 'wait' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                  }}
+                >
+                  <Download size={14} /> {isExportingBackup ? 'Exportando...' : 'Exportar JSON'}
+                </motion.button>
+
+                <motion.button
+                  whileHover={{ scale: 1.04 }}
+                  whileTap={{ scale: 0.96 }}
+                  type="button"
+                  onClick={() => backupFileInputRef.current?.click()}
+                  disabled={isImportingBackup}
+                  style={{
+                    background: 'var(--accent-primary)',
+                    border: 'none',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '8px 14px',
+                    color: 'white',
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: isImportingBackup ? 'wait' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                  }}
+                >
+                  <Upload size={14} /> {isImportingBackup ? 'Restaurando...' : 'Importar JSON'}
+                </motion.button>
+              </div>
             </div>
           </div>
         </div>
@@ -1384,26 +1462,14 @@ export function DesktopSettingsPage() {
 
             <button
               onClick={async () => {
-                const proceed = window.confirm('¿Seguro que deseas vaciar el historial de episodios vistos?');
+                const proceed = window.confirm('¿Estás seguro de que deseas vaciar todo el historial de episodios vistos?');
                 if (!proceed) return;
-
-                const clearCloudToo = window.confirm(
-                  '¿Deseas eliminar este historial también en tus otros dispositivos y en la nube?\n\n' +
-                  '• Aceptar: Borrar en todos los dispositivos (nube y local).\n' +
-                  '• Cancelar: Borrar SOLO en este equipo (la sincronización se pausará para proteger la nube).'
-                );
 
                 try {
                   await clearHistory();
                   await loadDb();
-                  if (clearCloudToo) {
-                    useSyncStore.getState().triggerDebouncedSync();
-                    setSaveStatus('Historial de reproducción vaciado (nube y local)');
-                  } else {
-                    await useSyncStore.getState().pauseSyncByLocalClear();
-                    setSaveStatus('Historial vaciado en este equipo (sincronización pausada)');
-                  }
-                  setTimeout(() => setSaveStatus(null), 4000);
+                  setSaveStatus('Historial de reproducción vaciado correctamente');
+                  setTimeout(() => setSaveStatus(null), 3000);
                 } catch (e) {
                   console.error(e);
                 }
@@ -1420,11 +1486,10 @@ export function DesktopSettingsPage() {
 
             <button
               onClick={async () => {
-                if (!window.confirm('¿Estás seguro de restablecer la base de datos completa? Se limpiará el historial y favoritos de forma local y se desvincularán las credenciales de sincronización.')) return;
+                if (!window.confirm('¿Estás seguro de restablecer la base de datos completa? Se limpiará el historial y los favoritos locales.')) return;
                 setIsResettingDb(true);
                 try {
                   await resetDatabase();
-                  await useSyncStore.getState().clearToken();
                   clearMemoryCache();
                   await loadDb();
                   setSaveStatus('Base de datos restablecida limpiamente');
@@ -1681,7 +1746,6 @@ export function DesktopSettingsPage() {
 
       <ChangelogModal isOpen={showChangelog} onClose={() => setShowChangelog(false)} />
       <ProfileSelectorModal isOpen={isProfileModalOpen} onClose={() => setIsProfileModalOpen(false)} />
-      <GistSyncModal isOpen={isSyncModalOpen} onClose={() => setIsSyncModalOpen(false)} />
 
       {/* Modal para agregar fuente o catálogo personalizado */}
       <AnimatePresence>

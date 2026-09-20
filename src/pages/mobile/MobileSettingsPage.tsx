@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Globe, Download, RefreshCw, Check, Undo2,
+  Globe, Download, Upload, RefreshCw, Check, Undo2,
   Sparkles, ShieldCheck, Palette, HardDrive, Trash2, Database, Activity, Folder, Cloud, User,
   Film, Clock, Tv, Plus, Layers, ShieldAlert
 } from 'lucide-react';
@@ -10,7 +10,6 @@ import { listen } from '@tauri-apps/api/event';
 import { openUrl, openPath } from '@tauri-apps/plugin-opener';
 import { ChangelogModal } from '@/components/ChangelogModal';
 import { ProfileSelectorModal, getProfileAvatarIcon } from '@/components/ProfileSelectorModal';
-import { GistSyncModal } from '@/components/GistSyncModal';
 import { useThemeStore, THEMES } from '@/stores/useThemeStore';
 import { useProfileStore } from '@/stores/useProfileStore';
 import { useSyncStore } from '@/stores/useSyncStore';
@@ -196,13 +195,54 @@ export function MobileSettingsPage() {
     }
   };
 
-  // Perfiles y Sincronización en la Nube
+  // Perfiles y Copia de Seguridad JSON
   const { profiles, activeProfile } = useProfileStore();
-  const { config: syncConfig } = useSyncStore();
-  const isGistLinked = Boolean(syncConfig.githubToken && syncConfig.gistId);
+  const { exportBackupFile, importBackupFile } = useSyncStore();
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
-  const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
+  const [isExportingBackup, setIsExportingBackup] = useState(false);
+  const [isImportingBackup, setIsImportingBackup] = useState(false);
+  const backupFileInputRef = useRef<HTMLInputElement>(null);
   const [activeProfileStats, setActiveProfileStats] = useState<ProfileStats | null>(null);
+
+  const handleExportBackup = async () => {
+    setIsExportingBackup(true);
+    try {
+      await exportBackupFile();
+      setSaveStatus('Copia de seguridad (.json) exportada');
+      setTimeout(() => setSaveStatus(null), 3000);
+    } catch (e: any) {
+      alert(`Error al exportar: ${e?.message || 'Error desconocido'}`);
+    } finally {
+      setIsExportingBackup(false);
+    }
+  };
+
+  const handleImportBackupFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const text = event.target?.result as string;
+      if (text) {
+        setIsImportingBackup(true);
+        try {
+          const res = await importBackupFile(text);
+          await loadDb();
+          const st = await getProfileStats(activeProfile?.id);
+          setActiveProfileStats(st);
+          setSaveStatus(`Restaurados: ${res.profilesCount} perf, ${res.historyCount} hist, ${res.favoritesCount} fav`);
+          setTimeout(() => setSaveStatus(null), 4000);
+        } catch (err: any) {
+          alert(`Error al importar respaldo: ${err?.message || 'Archivo no válido'}`);
+        } finally {
+          setIsImportingBackup(false);
+        }
+      }
+    };
+    reader.readAsText(file);
+    if (backupFileInputRef.current) backupFileInputRef.current.value = '';
+  };
 
   useEffect(() => {
     const loadStats = async () => {
@@ -261,15 +301,14 @@ export function MobileSettingsPage() {
         )}
       </AnimatePresence>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        {/* Perfiles de Usuario y Sincronización Móvil */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>        {/* Perfiles de Usuario y Copia de Seguridad Móvil */}
         <div style={{
           background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)',
           border: '1px solid var(--border-subtle)', padding: 14,
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-            <Cloud size={16} color="var(--accent-primary)" />
-            <h3 style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>Cuentas y Sincronización</h3>
+            <HardDrive size={16} color="var(--accent-primary)" />
+            <h3 style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>Perfiles y Copia de Seguridad</h3>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -294,6 +333,7 @@ export function MobileSettingsPage() {
                     alignItems: 'center',
                     justifyContent: 'center',
                     color: 'white',
+                    boxShadow: `0 2px 8px ${(activeProfile?.color || '#3b82f6')}55`,
                   }}
                 >
                   <ActiveProfileIcon size={18} />
@@ -381,7 +421,7 @@ export function MobileSettingsPage() {
               </button>
             </div>
 
-            {/* Cloud Sync Status */}
+            {/* Copia de Seguridad JSON Móvil */}
             <div style={{
               background: 'rgba(255, 255, 255, 0.03)',
               borderRadius: 'var(--radius-md)',
@@ -390,55 +430,87 @@ export function MobileSettingsPage() {
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
+              gap: 8,
+              flexWrap: 'wrap',
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 160, flex: 1 }}>
                 <div
                   style={{
                     width: 36,
                     height: 36,
                     borderRadius: '10px',
-                    background: isGistLinked ? 'rgba(16, 185, 129, 0.15)' : 'rgba(59, 130, 246, 0.15)',
+                    background: 'rgba(59, 130, 246, 0.15)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    color: isGistLinked ? '#10b981' : 'var(--accent-primary)',
+                    color: 'var(--accent-primary)',
+                    flexShrink: 0,
                   }}
                 >
-                  <Cloud size={18} />
+                  <Database size={18} />
                 </div>
                 <div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: 'white', display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span>Sincronización en la Nube (Gist)</span>
-                    {isGistLinked && (
-                      <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: '4px', background: 'rgba(16,185,129,0.2)', color: '#10b981' }}>
-                        Conectado
-                      </span>
-                    )}
+                  <div style={{ fontSize: 13, fontWeight: 700, color: 'white' }}>
+                    Copia de Seguridad (JSON)
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                    {isGistLinked
-                      ? (syncConfig.lastSyncAt ? `Última sinc: ${new Date(syncConfig.lastSyncAt).toLocaleDateString()}` : 'Conectado a Gist')
-                      : 'Historial y favoritos multi-dispositivo con GitHub Gist'}
+                    Exporta o importa tu historial y favoritos offline
                   </div>
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setIsSyncModalOpen(true)}
-                style={{
-                  background: 'var(--accent-primary)',
-                  border: 'none',
-                  borderRadius: 'var(--radius-md)',
-                  padding: '6px 12px',
-                  color: 'white',
-                  fontSize: 11,
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                }}
-              >
-                {isGistLinked ? 'Gestionar' : 'Conectar'}
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {/* Input oculto para importar JSON */}
+                <input
+                  type="file"
+                  ref={backupFileInputRef}
+                  accept=".json,application/json"
+                  style={{ display: 'none' }}
+                  onChange={handleImportBackupFile}
+                />
+
+                <button
+                  type="button"
+                  onClick={handleExportBackup}
+                  disabled={isExportingBackup}
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.08)',
+                    border: '1px solid rgba(255, 255, 255, 0.18)',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '6px 10px',
+                    color: 'white',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    cursor: isExportingBackup ? 'wait' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                  }}
+                >
+                  <Download size={12} /> {isExportingBackup ? '...' : 'Exportar'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => backupFileInputRef.current?.click()}
+                  disabled={isImportingBackup}
+                  style={{
+                    background: 'var(--accent-primary)',
+                    border: 'none',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '6px 10px',
+                    color: 'white',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    cursor: isImportingBackup ? 'wait' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                  }}
+                >
+                  <Upload size={12} /> {isImportingBackup ? '...' : 'Importar'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -943,25 +1015,13 @@ export function MobileSettingsPage() {
             <div style={{ display: 'flex', gap: 8 }}>
               <button
                 onClick={async () => {
-                  const proceed = window.confirm('¿Vaciar historial de reproducción en este perfil?');
+                  const proceed = window.confirm('¿Estás seguro de vaciar el historial de reproducción?');
                   if (!proceed) return;
-
-                  const clearCloudToo = window.confirm(
-                    '¿Deseas eliminar este historial también en tus otros dispositivos y en la nube?\n\n' +
-                    '• Aceptar: Borrar en todos los dispositivos (nube y móvil).\n' +
-                    '• Cancelar: Borrar SOLO en este móvil (la sincronización se pausará para proteger la nube).'
-                  );
 
                   try {
                     await clearHistory();
                     await loadDb();
-                    if (clearCloudToo) {
-                      useSyncStore.getState().triggerDebouncedSync();
-                      setSaveStatus('Historial vaciado (nube y local)');
-                    } else {
-                      await useSyncStore.getState().pauseSyncByLocalClear();
-                      setSaveStatus('Historial vaciado (sincronización pausada)');
-                    }
+                    setSaveStatus('Historial vaciado');
                     setTimeout(() => setSaveStatus(null), 3000);
                   } catch (e) {
                     console.error(e);
@@ -979,11 +1039,10 @@ export function MobileSettingsPage() {
 
               <button
                 onClick={async () => {
-                  if (!window.confirm('¿Restablecer toda la base de datos limpia? Se limpiará el historial y favoritos de forma local y se desvincularán las credenciales.')) return;
+                  if (!window.confirm('¿Restablecer toda la base de datos? Se limpiará el historial y favoritos locales.')) return;
                   setIsResettingDb(true);
                   try {
                     await resetDatabase();
-                    await useSyncStore.getState().clearToken();
                     clearMemoryCache();
                     await loadDb();
                     setSaveStatus('Base de datos restablecida');
@@ -1250,7 +1309,6 @@ export function MobileSettingsPage() {
 
       <ChangelogModal isOpen={showChangelog} onClose={() => setShowChangelog(false)} />
       <ProfileSelectorModal isOpen={isProfileModalOpen} onClose={() => setIsProfileModalOpen(false)} />
-      <GistSyncModal isOpen={isSyncModalOpen} onClose={() => setIsSyncModalOpen(false)} />
 
       {/* Modal para agregar fuente o catálogo personalizado en móvil */}
       <AnimatePresence>
