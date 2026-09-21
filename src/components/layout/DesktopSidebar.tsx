@@ -26,7 +26,7 @@ const navItems = [
 function sourceLabel(id: string): string {
   if (id === 'jkanime') return 'Anime';
   if (id === 'mundodonghua') return 'Donghua';
-  if (id === 'otakustv') return 'OtakusTV';
+  if (id === 'otakustv') return 'Anime (Respaldo)';
   return id;
 }
 

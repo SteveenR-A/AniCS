@@ -10,7 +10,7 @@ export const FEATURE_FLAGS = {
    * - true: Muestra botones "AniCS VIP", planes de $3.50/mes y modal de pago simulado.
    * - false: Oculta por completo cualquier rastro comercial, dejando la app 100% gratuita y personal.
    */
-  SHOW_SUBSCRIPTION: false,
+  SHOW_SUBSCRIPTION: true,
 
   /**
    * Nombre de la marca corporativa para la presentación académica.

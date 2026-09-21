@@ -63,8 +63,10 @@ export function maskAndFilterServers(servers: VideoServer[]): VideoServer[] {
       maskedName = 'Servidor Rápido (720p HD)';
     } else if (rawName.includes('streamwish')) {
       maskedName = 'Servidor Alternativo CDN';
-    } else if (rawName.includes('vidhide') || rawName.includes('fmoon')) {
+    } else if (rawName.includes('vidhide') || rawName.includes('filemoon') || rawName.includes('fmoon')) {
       maskedName = 'Servidor Respaldo CDN';
+    } else if (rawName.includes('descarga') || rawName.includes('direct')) {
+      maskedName = 'Servidor Descarga Directa (1080p)';
     } else {
       maskedName = `Servidor CDN ${cdnCounter++}`;
     }

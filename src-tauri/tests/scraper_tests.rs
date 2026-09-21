@@ -132,7 +132,7 @@ async fn test_bandori_details_and_download() {
             }
         }
     }
-
+}
 
 #[tokio::test]
 async fn test_mundodonghua_full_flow() {
