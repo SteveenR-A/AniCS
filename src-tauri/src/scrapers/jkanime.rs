@@ -9,7 +9,13 @@ use reqwest::header;
 use crate::core::*;
 use crate::scrapers::{fetch_html, AnimeExtractor, HTTP_CLIENT};
 
-const DEFAULT_JKANIME_URL: &str = "https://jkanime.net";
+pub const JKANIME_DOMAINS: &[&str] = &[
+    "https://jkanime.org",
+    "https://jkanime.bz",
+    "https://jkanime.net",
+];
+
+const DEFAULT_JKANIME_URL: &str = "https://jkanime.org";
 
 static IFRAME_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r#"<iframe[^>]+src=["']([^"']+)["']"#).unwrap()
@@ -28,7 +34,7 @@ static EPISODE_ID_RE: Lazy<Regex> = Lazy::new(|| {
 });
 
 static UEP_EP_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"href=["']https?://jkanime\.net/[^/]+/(\d+)/?["'][^>]*id=["']uep["']|id=["']uep["'][^>]*href=["']https?://jkanime\.net/[^/]+/(\d+)/?["']"#).unwrap()
+    Regex::new(r#"href=["']https?://jkanime\.[a-z]+/[^/]+/(\d+)/?["'][^>]*id=["']uep["']|id=["']uep["'][^>]*href=["']https?://jkanime\.[a-z]+/[^/]+/(\d+)/?["']"#).unwrap()
 });
 
 static ULTIMO_EP_RE: Lazy<Regex> = Lazy::new(|| {
@@ -73,7 +79,55 @@ impl JKAnimeExtractor {
     }
 
     fn url(&self, path: &str) -> String {
-        format!("{}{}", self.base_url.trim_end_matches('/'), path)
+        let p = if path.starts_with('/') { path.to_string() } else { format!("/{}", path) };
+        format!("{}{}", self.base_url.trim_end_matches('/'), p)
+    }
+
+    /// Descarga HTML con conmutación automática por error entre dominios espejo
+    pub async fn fetch_page(&self, path_or_url: &str) -> AppResult<String> {
+        let path = if let Ok(parsed) = url::Url::parse(path_or_url) {
+            if parsed.host_str().map(|h| h.contains("jkanime.")).unwrap_or(false) {
+                match parsed.query() {
+                    Some(q) => format!("{}?{}", parsed.path(), q),
+                    None => parsed.path().to_string(),
+                }
+            } else {
+                path_or_url.to_string()
+            }
+        } else {
+            path_or_url.to_string()
+        };
+
+        if path_or_url.starts_with("http") && !path_or_url.contains("jkanime.") {
+            return fetch_html(path_or_url, Some(&self.base_url))
+                .await
+                .map_err(AppError::Network);
+        }
+
+        let p = if path.starts_with('/') { path } else { format!("/{}", path) };
+
+        // 1. Intentar primero con el dominio base configurado
+        let primary_url = format!("{}{}", self.base_url.trim_end_matches('/'), p);
+        if let Ok(html) = fetch_html(&primary_url, Some(&self.base_url)).await {
+            if !html.is_empty() {
+                return Ok(html);
+            }
+        }
+
+        // 2. Conmutación por error (fallback) con dominios alternativos
+        for &domain in JKANIME_DOMAINS {
+            if domain == self.base_url {
+                continue;
+            }
+            let alt_url = format!("{}{}", domain.trim_end_matches('/'), p);
+            if let Ok(html) = fetch_html(&alt_url, Some(domain)).await {
+                if !html.is_empty() {
+                    return Ok(html);
+                }
+            }
+        }
+
+        Ok(String::new())
     }
 }
 
@@ -85,9 +139,7 @@ impl AnimeExtractor for JKAnimeExtractor {
 
     // Búsqueda simple
     async fn search(&self, query: &str) -> AppResult<Vec<AnimeResult>> {
-        let url = self.url(&format!("/buscar/{}/", urlencoding::encode(query)));
-        let html = fetch_html(&url, Some(&self.base_url)).await
-            .map_err(AppError::Network)?;
+        let html = self.fetch_page(&format!("/buscar/{}/", urlencoding::encode(query))).await?;
 
         if html.is_empty() { return Ok(vec![]); }
 
@@ -123,8 +175,7 @@ impl AnimeExtractor for JKAnimeExtractor {
 
     // Últimos episodios
     async fn get_latest(&self, _page: u32) -> AppResult<Vec<AnimeResult>> {
-        let html = fetch_html(&self.base_url, Some(&self.base_url)).await
-            .map_err(AppError::Network)?;
+        let html = self.fetch_page("/").await?;
         if html.is_empty() { return Ok(vec![]); }
 
         let doc = Html::parse_document(&html);
@@ -193,9 +244,7 @@ impl AnimeExtractor for JKAnimeExtractor {
 
     // Horario estructurado agrupado por días de la semana
     async fn get_schedule_days(&self) -> AppResult<Vec<ScheduleDay>> {
-        let url = self.url("/horario/");
-        let html = fetch_html(&url, Some(&self.base_url)).await
-            .map_err(AppError::Network)?;
+        let html = self.fetch_page("/horario/").await?;
         if html.is_empty() { return Ok(vec![]); }
 
         let doc = Html::parse_document(&html);
@@ -233,7 +282,7 @@ impl AnimeExtractor for JKAnimeExtractor {
                     String::new()
                 };
 
-                if href.is_empty() || !href.contains("jkanime.net/") {
+                if href.is_empty() || !href.contains("jkanime.") {
                     continue;
                 }
 
@@ -292,9 +341,7 @@ impl AnimeExtractor for JKAnimeExtractor {
 
     // Top y Ranking de animes más populares
     async fn get_top(&self) -> AppResult<Vec<AnimeResult>> {
-        let url = self.url("/top/");
-        let html = fetch_html(&url, Some(&self.base_url)).await
-            .map_err(AppError::Network)?;
+        let html = self.fetch_page("/top/").await?;
         if html.is_empty() { return Ok(vec![]); }
 
         let doc = Html::parse_document(&html);
@@ -401,8 +448,7 @@ impl AnimeExtractor for JKAnimeExtractor {
         }
         let target_url = self.url(&format!("/directorio/?{}", params.join("&")));
 
-        let html = fetch_html(&target_url, Some(&self.base_url)).await
-            .map_err(AppError::Network)?;
+        let html = self.fetch_page(&target_url).await?;
         if html.is_empty() {
             return Ok(SearchResultPage {
                 results: vec![],
@@ -506,8 +552,7 @@ impl AnimeExtractor for JKAnimeExtractor {
     // Detalles enriquecidos de la serie
     async fn get_details(&self, url: &str) -> AppResult<AnimeDetails> {
         let clean_url = normalize_series_url(url);
-        let html = fetch_html(&clean_url, Some(&self.base_url)).await
-            .map_err(AppError::Network)?;
+        let html = self.fetch_page(&clean_url).await?;
         if html.is_empty() {
             return Err(AppError::NotFound(format!("No content at {clean_url}")));
         }
@@ -680,8 +725,7 @@ impl AnimeExtractor for JKAnimeExtractor {
 
     // Servidores de video dinámicos y ordenados por compatibilidad
     async fn get_servers(&self, episode_url: &str) -> AppResult<Vec<VideoServer>> {
-        let html = fetch_html(episode_url, Some(&self.base_url)).await
-            .map_err(AppError::Network)?;
+        let html = self.fetch_page(episode_url).await?;
         if html.is_empty() { return Ok(vec![]); }
 
         let mut servers = vec![];
@@ -804,7 +848,7 @@ impl AnimeExtractor for JKAnimeExtractor {
 
         // 2. JKPlayer Embebed (Magi / Desu / c1 / c2)
         if url.contains("/jkplayer") || url.contains("desu.php") || url.contains("magi")
-            || url.contains("c1.php") || url.contains("c2.php") || url.contains("jkanime.net")
+            || url.contains("c1.php") || url.contains("c2.php") || url.contains("jkanime.")
         {
             let html = fetch_html(url, server.referer.as_deref()).await
                 .map_err(AppError::Network)?;
@@ -878,8 +922,7 @@ impl AnimeExtractor for JKAnimeExtractor {
 
     // Lista dinámica de géneros
     async fn get_genres(&self) -> AppResult<Vec<GenreItem>> {
-        let url = self.url("/directorio");
-        if let Ok(html) = fetch_html(&url, Some(&self.base_url)).await {
+        if let Ok(html) = self.fetch_page("/buscar/").await {
             if !html.is_empty() {
                 let doc = Html::parse_document(&html);
                 let opt_sel = Selector::parse("select[name='genero'] option").unwrap();

@@ -26,14 +26,16 @@ const navItems = [
 function sourceLabel(id: string): string {
   if (id === 'jkanime') return 'Anime';
   if (id === 'mundodonghua') return 'Donghua';
+  if (id === 'otakustv') return 'OtakusTV';
   return id;
 }
 
 /** Letra/emoji para el icono compacto de fuente en sidebar colapsada */
 function sourceGlyph(id: string): string {
-  if (id === 'jkanime') return 'A';
-  if (id === 'mundodonghua') return 'D';
-  return id.slice(0, 1).toUpperCase();
+  if (id === 'jkanime') return 'JK';
+  if (id === 'mundodonghua') return 'DH';
+  if (id === 'otakustv') return 'OT';
+  return id.slice(0, 2).toUpperCase();
 }
 
 export function DesktopSidebar() {

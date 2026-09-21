@@ -1,4 +1,4 @@
-use anics_lib::scrapers::{JKAnimeExtractor, MundoDonghuaExtractor, AnimeExtractor};
+use anics_lib::scrapers::{JKAnimeExtractor, MundoDonghuaExtractor, OtakusTVExtractor, AnimeExtractor};
 use anics_lib::core::SearchFilters;
 
 #[tokio::test]
@@ -132,4 +132,91 @@ async fn test_bandori_details_and_download() {
             }
         }
     }
+
+
+#[tokio::test]
+async fn test_mundodonghua_full_flow() {
+    let extractor = MundoDonghuaExtractor::new();
+    let schedule = extractor.get_schedule().await.expect("Failed schedule");
+    println!("MundoDonghua Schedule items count: {}", schedule.len());
+    for s in schedule.iter().take(5) {
+        println!(" - Title: '{}', URL: '{}', Thumb: '{}'", s.title, s.url, s.thumbnail_url);
+        // Verify URL is absolute
+        assert!(s.url.starts_with("http"), "Schedule URL must be absolute: {}", s.url);
+    }
+
+    // Probar Against the Gods 2
+    let atg2_url = "https://www.mundodonghua.com/donghua/against-the-gods-2";
+    let details = extractor.get_details(atg2_url).await.expect("Failed details for Against the Gods 2");
+    println!("Against the Gods 2: title='{}', thumb='{}', eps count={}, status={:?}, total_eps={:?}, synopsis='{}'",
+        details.title, details.thumbnail_url, details.episodes.len(), details.status, details.total_episodes, details.synopsis);
+    
+    if let Some(first_ep) = details.episodes.first() {
+        println!("First Ep in list: number={}, url='{}'", first_ep.number, first_ep.url);
+        assert_eq!(first_ep.number, 1);
+        assert!(first_ep.url.ends_with("/1"));
+
+        let servers = extractor.get_servers(&first_ep.url).await.expect("Failed servers");
+        println!("Servers count: {}", servers.len());
+        assert!(!servers.is_empty());
+        assert!(servers[0].name.contains("Vidhide"), "Expected Vidhide to be ranked first: {}", servers[0].name);
+
+        let res = extractor.resolve_stream(&servers[0]).await.expect("Failed to resolve Vidhide");
+        assert_eq!(res.media_type, anics_lib::core::MediaType::Hls);
+        assert!(!res.direct_url.is_empty());
+    }
 }
+
+#[tokio::test]
+async fn test_otakustv_hex_decoding() {
+    let hex = "68747470733a2f2f6279736573756b696f722e636f6d2f652f71326d69316b766b75397a61";
+    let decoded = OtakusTVExtractor::decode_hex(hex).expect("Failed to decode hex string");
+    assert_eq!(decoded, "https://bysesukior.com/e/q2mi1kvku9za");
+}
+
+#[tokio::test]
+async fn test_otakustv_get_latest() {
+    let extractor = OtakusTVExtractor::new();
+    let results = extractor.get_latest(1).await.expect("Failed to get latest from OtakusTV");
+    println!("OtakusTV Latest results count: {}", results.len());
+    for r in results.iter().take(5) {
+        println!(" - Title: '{}', Ep: {:?}, URL: '{}'", r.title, r.episode, r.url);
+        assert!(r.url.starts_with("http"), "URL must be absolute: {}", r.url);
+    }
+    assert!(!results.is_empty(), "OtakusTV get_latest returned empty results");
+}
+
+#[tokio::test]
+async fn test_otakustv_search() {
+    let extractor = OtakusTVExtractor::new();
+    let results = extractor.search("naruto").await.expect("Failed to search on OtakusTV");
+    println!("OtakusTV Search results count: {}", results.len());
+    for r in results.iter().take(3) {
+        println!(" - Title: '{}', URL: '{}', Thumb: '{}'", r.title, r.url, r.thumbnail_url);
+        assert!(r.url.starts_with("http"), "Search URL must be absolute: {}", r.url);
+    }
+    assert!(!results.is_empty(), "OtakusTV search returned empty results");
+}
+
+#[tokio::test]
+async fn test_otakustv_details_and_servers() {
+    let extractor = OtakusTVExtractor::new();
+    let details = extractor.get_details("https://www.otakustv.net/anime/naruto-shippuden-the-movie-bonds").await
+        .expect("Failed to get anime details from OtakusTV");
+    println!("OtakusTV Details: title='{}', episodes_count={}, status='{:?}', genres={:?}",
+        details.title, details.episodes.len(), details.status, details.genres);
+    assert!(!details.title.is_empty());
+    assert!(!details.episodes.is_empty());
+
+    let servers = extractor.get_servers("https://www.otakustv.net/ver/naruto-shippuden-the-movie-bonds-1").await
+        .expect("Failed to get servers from OtakusTV");
+    println!("OtakusTV Servers count: {}", servers.len());
+    for s in servers.iter() {
+        println!(" - Server: '{}', URL: '{}', Direct: {}", s.name, s.url, s.is_direct);
+        assert!(s.url.starts_with("http"), "Server URL must be absolute: {}", s.url);
+    }
+    assert!(!servers.is_empty(), "OtakusTV should return video servers");
+}
+
+
+
