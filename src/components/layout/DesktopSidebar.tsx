@@ -24,6 +24,7 @@ function sourceLabel(id: string): string {
   if (id === 'jkanime') return 'JKAnime';
   if (id === 'animejl') return 'Anime-JL';
   if (id === 'mundodonghua') return 'Donghua';
+  if (id === 'otakustv') return 'OtakusTV';
   return id;
 }
 
@@ -32,6 +33,7 @@ function sourceGlyph(id: string): string {
   if (id === 'jkanime') return 'JK';
   if (id === 'animejl') return 'JL';
   if (id === 'mundodonghua') return 'DH';
+  if (id === 'otakustv') return 'OT';
   return id.slice(0, 2).toUpperCase();
 }
 

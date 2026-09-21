@@ -173,6 +173,39 @@ export function MobileHeader() {
             )}
             Donghua
           </button>
+
+          <button
+            onClick={() => setActiveSource('otakustv')}
+            style={{
+              position: 'relative',
+              padding: '4px 10px',
+              borderRadius: 'var(--radius-full)',
+              border: 'none',
+              background: 'transparent',
+              color: activeSource === 'otakustv' ? '#ffffff' : 'var(--text-muted)',
+              fontSize: 11,
+              fontWeight: 700,
+              cursor: 'pointer',
+              zIndex: 2,
+              transition: 'color var(--transition-fast)',
+            }}
+          >
+            {activeSource === 'otakustv' && (
+              <motion.div
+                layoutId="mobile-source-pill"
+                transition={{ type: 'spring', stiffness: 450, damping: 30 }}
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  background: 'linear-gradient(135deg, #10b981, #059669)',
+                  borderRadius: 'var(--radius-full)',
+                  zIndex: -1,
+                  boxShadow: '0 2px 8px rgba(16, 185, 129, 0.4)',
+                }}
+              />
+            )}
+            OtakusTV
+          </button>
         </div>
 
         {/* Acciones directas: Perfil, Favoritos y Ajustes */}

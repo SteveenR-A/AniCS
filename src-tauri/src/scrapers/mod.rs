@@ -7,11 +7,13 @@ pub mod animejl;
 pub mod http_client;
 pub mod jkanime;
 pub mod mundodonghua;
+pub mod otakustv;
 
 pub use animejl::AnimeJLExtractor;
 pub use http_client::{fetch_html, HTTP_CLIENT, DOWNLOAD_CLIENT};
 pub use jkanime::JKAnimeExtractor;
 pub use mundodonghua::MundoDonghuaExtractor;
+pub use otakustv::OtakusTVExtractor;
 
 // ──────────────────────────────────────────
 // Trait principal de extractor
@@ -87,6 +89,7 @@ pub fn create_extractor(id: &str) -> Option<Box<dyn AnimeExtractor>> {
         "jkanime" => Some(Box::new(JKAnimeExtractor::new())),
         "mundodonghua" => Some(Box::new(MundoDonghuaExtractor::new())),
         "animejl" => Some(Box::new(AnimeJLExtractor::new())),
+        "otakustv" => Some(Box::new(OtakusTVExtractor::new())),
         _ => None,
     }
 }
@@ -96,6 +99,7 @@ pub fn all_extractors() -> Vec<Box<dyn AnimeExtractor>> {
         Box::new(JKAnimeExtractor::new()),
         Box::new(MundoDonghuaExtractor::new()),
         Box::new(AnimeJLExtractor::new()),
+        Box::new(OtakusTVExtractor::new()),
     ]
 }
 
