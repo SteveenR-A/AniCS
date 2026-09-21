@@ -1,13 +1,13 @@
-# AniCS v0.2.5 — Persistencia de Servidores y URLs Móvil
+# AniCS v0.2.6 — Actualización de Fuentes y Resiliencia de Streaming
 
-**Fecha de lanzamiento:** 2026-09-18
+**Fecha de lanzamiento:** 2026-09-21
 
 ### 🚀 Novedades y Correcciones
 
-- Persistencia completa de fuentes, catálogos y URLs personalizadas en móvil
-- Configuración directa y restablecimiento de endpoints de catálogo
-- Enmascaramiento profesional de servidores y filtrado de hosts no soportados
-- Licencia oficial GNU GPLv3 y aviso legal descentralizado
+- Conmutación por error automática para JKAnime entre dominios espejo
+- Nueva fuente de respaldo integrada
+- Enmascaramiento profesional de servidores para presentación
+- Autenticación con Google y funciones VIP preservadas
 
 ---
 *Para ver el historial acumulativo completo de todas las versiones, consulta [CHANGELOG.md](./CHANGELOG.md).*
