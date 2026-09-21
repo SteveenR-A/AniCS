@@ -5,7 +5,7 @@ import { convertFileSrc } from '@tauri-apps/api/core';
 import {
   ArrowLeft, Play, Download, Heart,
   ChevronDown, ChevronUp, Check, HardDrive, CheckCircle2,
-  Calendar, Layers, Tag, Tv, Globe, Sparkles, Clock, DownloadCloud, Crown, Lock
+  Calendar, Layers, Tag, Tv, Globe, Sparkles, Clock, DownloadCloud, Crown, Lock, Copy
 } from 'lucide-react';
 import { getDetails, getServers, resolveStream } from '@/services/animeService';
 import { addFavorite, removeFavorite, isFavorite as checkFavorite, getHistory, getFavorites, updateFavoriteStatus } from '@/services/storageService';
@@ -20,6 +20,7 @@ import { FEATURE_FLAGS } from '@/config/features';
 import { CachedImage } from '@/components/CachedImage';
 import { BatchDownloadModal } from '@/components/BatchDownloadModal';
 import { FavoriteStatusDropdown } from '@/components/FavoriteStatusDropdown';
+import { ImageLightboxModal } from '@/components/ImageLightboxModal';
 import type { AnimeDetails, Episode, VideoServer, LocalEpisodeItem, FavoriteStatus } from '@/types';
 
 export function DesktopDetailsPage() {
@@ -37,13 +38,14 @@ export function DesktopDetailsPage() {
   const [details, setDetails] = useState<AnimeDetails | null>(() => {
     if (cached) return cached;
     if (passedAnime) {
+      const isUnreleased = passedAnime.status?.toLowerCase().includes('estren') || passedAnime.status?.toLowerCase() === 'notyet';
       return {
         title: passedAnime.title,
         url: passedAnime.url,
         thumbnailUrl: passedAnime.thumbnailUrl,
-        synopsis: passedAnime.synopsis || 'Cargando información del anime...',
+        synopsis: passedAnime.synopsis || (isUnreleased ? 'Esta producción está anunciada para su estreno. Los episodios estarán disponibles al comenzar su emisión oficial.' : 'Cargando información del anime...'),
         genres: passedAnime.genres || [],
-        status: passedAnime.status,
+        status: isUnreleased ? 'Por estrenar' : (passedAnime.status || undefined),
         animeType: passedAnime.animeType,
         episodes: passedAnime.episodes || [],
         source: passedAnime.source || source,
@@ -52,15 +54,28 @@ export function DesktopDetailsPage() {
     return null;
   });
 
-  const [isLoading, setIsLoading] = useState(!cached && (!passedAnime || !passedAnime.episodes?.length));
+  const [isLoading, setIsLoading] = useState(!cached && !passedAnime);
   const [isFavorite, setIsFavorite] = useState(false);
   const [favoriteStatus, setFavoriteStatus] = useState<FavoriteStatus>('favorite');
   const [showBatchModal, setShowBatchModal] = useState(false);
   const [showAllEps, setShowAllEps] = useState(false);
   const [epSearch, setEpSearch] = useState('');
   const [loadingEpisode, setLoadingEpisode] = useState<number | null>(null);
+  const [showCoverZoom, setShowCoverZoom] = useState(false);
+  const [copiedTitle, setCopiedTitle] = useState(false);
 
   const { isVip, openModal: openVipModal } = useSubscriptionStore();
+
+  const handleCopyTitle = async () => {
+    if (!details?.title) return;
+    try {
+      await navigator.clipboard.writeText(details.title);
+      setCopiedTitle(true);
+      setTimeout(() => setCopiedTitle(false), 2000);
+    } catch {
+      // fallback
+    }
+  };
 
   // Sincronización con Descargas Locales e Historial de Visualización
   const [localEpisodesMap, setLocalEpisodesMap] = useState<Map<number, LocalEpisodeItem>>(new Map());
@@ -80,47 +95,92 @@ export function DesktopDetailsPage() {
   const { activeProfile } = useProfileStore();
 
   useEffect(() => {
+    let isCancelled = false;
+
     const load = async () => {
-      if (cached && cached.episodes && cached.episodes.length > 0) {
-        setDetails(cached);
-        setIsLoading(false);
-        checkFavorite(decodedUrl, activeProfile?.id).then(fav => {
-          setIsFavorite(fav);
-          if (fav) {
-            getFavorites(activeProfile?.id).then(list => {
-              const found = list.find(f => f.url === decodedUrl);
-              if (found?.status) setFavoriteStatus(found.status as FavoriteStatus);
-            }).catch(() => {});
-          }
-        }).catch(() => {});
-        return;
+      // Si tenemos una entrada completa en caché para esta URL, usarla de inmediato
+      if (cached && cached.title && cached.url === decodedUrl) {
+        const hasTempThumbnail = cached.thumbnailUrl && cached.thumbnailUrl.includes('episodes_tumbl');
+        if (!hasTempThumbnail) {
+          setDetails(cached);
+          setIsLoading(false);
+          checkFavorite(decodedUrl, activeProfile?.id).then(fav => {
+            if (isCancelled) return;
+            setIsFavorite(fav);
+            if (fav) {
+              getFavorites(activeProfile?.id).then(list => {
+                if (isCancelled) return;
+                const found = list.find(f => f.url === decodedUrl);
+                if (found?.status) setFavoriteStatus(found.status as FavoriteStatus);
+              }).catch(() => {});
+            }
+          }).catch(() => {});
+          return;
+        }
       }
 
-      if (!passedAnime || !passedAnime.episodes?.length) {
+      if (!cached && !passedAnime) {
         setIsLoading(true);
       }
       try {
+        const timeoutPromise = new Promise<AnimeDetails>((_, reject) =>
+          setTimeout(() => reject(new Error('Timeout loading details')), 8000)
+        );
         const [det, fav] = await Promise.all([
-          getDetails(decodedUrl, source),
+          Promise.race([getDetails(decodedUrl, source), timeoutPromise]),
           checkFavorite(decodedUrl, activeProfile?.id),
         ]);
+        if (isCancelled) return;
         setDetails(det);
         cacheDetails(det);
         setIsFavorite(fav);
         if (fav) {
           getFavorites(activeProfile?.id).then(list => {
+            if (isCancelled) return;
             const found = list.find(f => f.url === decodedUrl);
             if (found?.status) setFavoriteStatus(found.status as FavoriteStatus);
           }).catch(() => {});
         }
       } catch (e) {
-        console.error(e);
+        console.error('Failed to load anime details:', e);
+        if (!isCancelled) {
+          setDetails(prev => {
+            if (prev) {
+              return {
+                ...prev,
+                synopsis: prev.synopsis === 'Cargando información del anime...'
+                  ? 'Esta producción está anunciada para su estreno. Los episodios se publicarán automáticamente cuando comience su emisión oficial.'
+                  : prev.synopsis,
+              };
+            }
+            if (passedAnime) {
+              return {
+                title: passedAnime.title,
+                url: passedAnime.url,
+                thumbnailUrl: passedAnime.thumbnailUrl,
+                synopsis: 'Esta producción está anunciada para su estreno. Los episodios se publicarán automáticamente cuando comience su emisión oficial.',
+                genres: passedAnime.genres || [],
+                status: 'Por estrenar',
+                animeType: passedAnime.animeType,
+                episodes: [],
+                source: passedAnime.source || source,
+              };
+            }
+            return null;
+          });
+        }
       } finally {
-        setIsLoading(false);
+        if (!isCancelled) {
+          setIsLoading(false);
+        }
       }
     };
     load();
-  }, [decodedUrl, source, cached, cacheDetails, activeProfile?.id]);
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [decodedUrl, source, activeProfile?.id]);
 
   // Normalizador de títulos ultra-tolerante (ignora tildes, guiones, espacios y puntuación)
   const normalizeTitle = (str: string): string => {
@@ -429,7 +489,7 @@ export function DesktopDetailsPage() {
     ? filteredEps
     : filteredEps.slice(0, 48);
 
-  if (isLoading) {
+  if (isLoading && !details) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '80vh' }}>
         <div style={{
@@ -539,12 +599,17 @@ export function DesktopDetailsPage() {
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
+            whileHover={{ scale: 1.025 }}
+            onClick={() => setShowCoverZoom(true)}
+            title="Haz clic para ampliar la portada"
             style={{
               width: 150, height: 215, borderRadius: 'var(--radius-lg)',
               overflow: 'hidden', flexShrink: 0,
               border: '2px solid var(--border-moderate)',
               boxShadow: '0 12px 32px rgba(0,0,0,0.6)',
               background: 'var(--bg-elevated)',
+              cursor: 'zoom-in',
+              position: 'relative',
             }}
           >
             <CachedImage
@@ -572,36 +637,76 @@ export function DesktopDetailsPage() {
                   {details.animeType}
                 </span>
               )}
-              {details.status && (
-                <span style={{
-                  background: details.status.toLowerCase().includes('concluido') || details.status.toLowerCase().includes('finaliz')
-                    ? 'rgba(147, 51, 234, 0.25)'
-                    : 'rgba(16, 185, 129, 0.25)',
-                  color: details.status.toLowerCase().includes('concluido') || details.status.toLowerCase().includes('finaliz')
-                    ? '#c084fc'
-                    : '#34d399',
-                  border: `1px solid ${details.status.toLowerCase().includes('concluido') || details.status.toLowerCase().includes('finaliz') ? 'rgba(147, 51, 234, 0.4)' : 'rgba(16, 185, 129, 0.4)'}`,
-                  fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 'var(--radius-full)',
-                }}>
-                  ● {details.status}
-                </span>
-              )}
+              {details.status && (() => {
+                const lower = details.status.toLowerCase().trim();
+                const isUnreleased = lower === 'notyet' || lower.includes('estren');
+                const isConcluded = lower.includes('concluido') || lower.includes('finaliz');
+                const isAir = lower.includes('emision') || lower.includes('emisión');
+                const label = isUnreleased ? 'Por estrenar' : isConcluded ? 'Concluido' : isAir ? 'En emisión' : details.status;
+                const bg = isUnreleased ? 'rgba(245, 158, 11, 0.2)' : isConcluded ? 'rgba(147, 51, 234, 0.2)' : 'rgba(16, 185, 129, 0.2)';
+                const color = isUnreleased ? '#fbbf24' : isConcluded ? '#c084fc' : '#34d399';
+                const border = isUnreleased ? 'rgba(245, 158, 11, 0.4)' : isConcluded ? 'rgba(147, 51, 234, 0.4)' : 'rgba(16, 185, 129, 0.4)';
+                return (
+                  <span style={{
+                    background: bg, color: color, border: `1px solid ${border}`,
+                    fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 'var(--radius-full)',
+                    display: 'inline-flex', alignItems: 'center', gap: 5,
+                  }}>
+                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: color }} />
+                    {label}
+                  </span>
+                );
+              })()}
               <span style={{
                 background: 'var(--bg-surface-2)', border: '1px solid var(--border-subtle)',
                 color: 'var(--text-muted)', fontSize: 11, fontWeight: 600,
                 padding: '3px 9px', borderRadius: 'var(--radius-full)',
               }}>
-                {details.source === 'jkanime' ? 'Catálogo Anime' : 'Catálogo Donghua'}
+                {details.source === 'jkanime' ? 'Catálogo Anime' : details.source === 'otakustv' ? 'Catálogo Respaldo' : 'Catálogo Donghua'}
               </span>
             </div>
 
-            <h1 style={{
-              fontSize: 28, fontWeight: 800, letterSpacing: '-0.02em',
-              color: 'white', lineHeight: 1.25, marginBottom: 12,
-              textShadow: '0 2px 10px rgba(0,0,0,0.6)',
-            }}>
-              {details.title}
-            </h1>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
+              <h1
+                className="selectable-text"
+                style={{
+                  fontSize: 28, fontWeight: 800, letterSpacing: '-0.02em',
+                  color: 'white', lineHeight: 1.25, margin: 0,
+                  textShadow: '0 2px 10px rgba(0,0,0,0.6)',
+                  userSelect: 'text',
+                  WebkitUserSelect: 'text',
+                  cursor: 'text',
+                }}
+              >
+                {details.title}
+              </h1>
+
+              <motion.button
+                whileHover={{ scale: 1.08 }}
+                whileTap={{ scale: 0.94 }}
+                onClick={handleCopyTitle}
+                title={copiedTitle ? '¡Nombre copiado!' : 'Copiar nombre del anime'}
+                style={{
+                  background: copiedTitle ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255, 255, 255, 0.08)',
+                  border: `1px solid ${copiedTitle ? 'rgba(16, 185, 129, 0.5)' : 'rgba(255, 255, 255, 0.16)'}`,
+                  borderRadius: 'var(--radius-full)',
+                  padding: '5px 12px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  color: copiedTitle ? '#34d399' : 'rgba(255, 255, 255, 0.85)',
+                  cursor: 'pointer',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  backdropFilter: 'blur(8px)',
+                  transition: 'all 0.2s ease',
+                  userSelect: 'none',
+                }}
+              >
+                {copiedTitle ? <Check size={13} color="#34d399" /> : <Copy size={13} />}
+                <span>{copiedTitle ? 'Copiado' : 'Copiar'}</span>
+              </motion.button>
+            </div>
 
             {/* Chips de Géneros */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
@@ -729,7 +834,7 @@ export function DesktopDetailsPage() {
             <div>
               <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Total Episodios</div>
               <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', marginTop: 2 }}>
-                {details.totalEpisodes || details.episodes.length} episodios
+                {details.totalEpisodes && details.totalEpisodes !== '0' ? `${details.totalEpisodes} episodios` : 'Por estrenar'}
               </div>
             </div>
           </div>
@@ -853,7 +958,7 @@ export function DesktopDetailsPage() {
             justifyContent: 'space-between', gap: 12, marginBottom: 18,
           }}>
             <h2 style={{ fontSize: 20, fontWeight: 800, color: 'var(--text-primary)', margin: 0 }}>
-              Episodios ({details.episodes.length})
+              {details.episodes.length > 0 ? `Episodios (${details.episodes.length})` : 'Próximo Estreno'}
             </h2>
 
             {details.episodes.length > 12 && (
@@ -1217,6 +1322,16 @@ export function DesktopDetailsPage() {
             setDownloadSuccessToast(msg);
             setTimeout(() => setDownloadSuccessToast(null), 4000);
           }}
+        />
+      )}
+
+      {/* Visor de Portada Ampliada */}
+      {details && (
+        <ImageLightboxModal
+          isOpen={showCoverZoom}
+          onClose={() => setShowCoverZoom(false)}
+          imageUrl={details.thumbnailUrl}
+          title={details.title}
         />
       )}
     </div>

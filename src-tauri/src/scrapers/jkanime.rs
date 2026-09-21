@@ -436,12 +436,40 @@ impl AnimeExtractor for JKAnimeExtractor {
             params.push(format!("genero={}", g_slug));
         }
         if let Some(ref status) = filters.status {
-            let st = if status.to_lowercase().contains("emisi") { "en-emision" } else if status.to_lowercase().contains("conclu") || status.to_lowercase().contains("final") { "concluido" } else { status };
+            let s_lower = status.to_lowercase();
+            let st = if s_lower.contains("emisi") {
+                "emision"
+            } else if s_lower.contains("conclu") || s_lower.contains("final") {
+                "finalizados"
+            } else if s_lower.contains("estreno") {
+                "estrenos"
+            } else {
+                status.as_str()
+            };
             params.push(format!("estado={}", st));
         }
         if let Some(ref t) = filters.anime_type {
-            let ty = if t.to_lowercase().contains("serie") { "serie" } else if t.to_lowercase().contains("pel") { "pelicula" } else if t.to_lowercase().contains("ova") { "ova" } else { t };
+            let t_lower = t.to_lowercase();
+            let ty = if t_lower.contains("serie") || t_lower.contains("anime") {
+                "animes"
+            } else if t_lower.contains("pel") || t_lower.contains("movie") {
+                "peliculas"
+            } else if t_lower.contains("ova") {
+                "ovas"
+            } else if t_lower.contains("ona") {
+                "onas"
+            } else if t_lower.contains("especial") {
+                "especiales"
+            } else {
+                t.as_str()
+            };
             params.push(format!("tipo={}", ty));
+        }
+        if let Some(ref y) = filters.year {
+            let y_trimmed = y.trim();
+            if !y_trimmed.is_empty() && y_trimmed != "todos" {
+                params.push(format!("fecha={}", urlencoding::encode(y_trimmed)));
+            }
         }
         if let Some(ref order) = filters.order_by {
             params.push(format!("orden={}", order));
@@ -483,7 +511,14 @@ impl AnimeExtractor for JKAnimeExtractor {
                                 .map(|i| i.to_string())
                                 .unwrap_or_else(|| format!("https://cdn.jkdesa.com/assets/images/animes/image/{}.jpg", slug));
                             let anime_type = item["tipo"].as_str().or_else(|| item["type"].as_str()).map(|s| s.to_string());
-                            let status = item["estado"].as_str().or_else(|| item["status"].as_str()).map(|s| s.to_string());
+                            let raw_status = item["estado"].as_str().or_else(|| item["status"].as_str()).unwrap_or("");
+                            let status = match raw_status.trim().to_lowercase().as_str() {
+                                "notyet" | "estreno" | "estrenos" => Some("Por estrenar".to_string()),
+                                "1" | "emision" | "en emision" | "en emisión" => Some("En emisión".to_string()),
+                                "2" | "concluido" | "finalizado" | "finalizados" => Some("Concluido".to_string()),
+                                s if !s.is_empty() => Some(raw_status.to_string()),
+                                _ => None,
+                            };
 
                             if !title.is_empty() {
                                 results.push(AnimeResult {
@@ -652,7 +687,15 @@ impl AnimeExtractor for JKAnimeExtractor {
                     if !val.is_empty() { total_ep_str = Some(val); }
                 } else if lower.contains("estado") {
                     let val = clean_field_value(&full_text, &["Estado:"]);
-                    if !val.is_empty() { status = Some(val); }
+                    if !val.is_empty() {
+                        let norm = match val.trim().to_lowercase().as_str() {
+                            "notyet" | "estreno" | "estrenos" => "Por estrenar".to_string(),
+                            "1" | "emision" | "en emision" | "en emisión" => "En emisión".to_string(),
+                            "2" | "concluido" | "finalizado" | "finalizados" => "Concluido".to_string(),
+                            _ => val,
+                        };
+                        status = Some(norm);
+                    }
                 }
             }
 
@@ -700,6 +743,17 @@ impl AnimeExtractor for JKAnimeExtractor {
             self.generate_episodes_list(&clean_url, tot)
         } else {
             vec![]
+        };
+
+        let status = if episodes.is_empty() {
+            match status.as_deref() {
+                Some("Concluido") => status,
+                Some("En emisión") if total_ep_hint.unwrap_or(0) == 0 => Some("Por estrenar".to_string()),
+                None => Some("Por estrenar".to_string()),
+                _ => status,
+            }
+        } else {
+            status
         };
 
         Ok(AnimeDetails {

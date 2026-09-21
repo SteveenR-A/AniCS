@@ -36,6 +36,39 @@ async fn test_jkanime_search() {
 }
 
 #[tokio::test]
+async fn test_jkanime_search_filters() {
+    let extractor = JKAnimeExtractor::new();
+    // Test concluido
+    let res_concluido = extractor.advanced_search(&SearchFilters {
+        status: Some("concluido".to_string()),
+        page: 1,
+        ..Default::default()
+    }).await.expect("Failed to search concluido");
+    println!("JKAnime 'concluido' results count: {}", res_concluido.results.len());
+    assert!(!res_concluido.results.is_empty(), "JKAnime 'concluido' should return results");
+
+    // Test en-emision
+    let res_emision = extractor.advanced_search(&SearchFilters {
+        status: Some("en-emision".to_string()),
+        page: 1,
+        ..Default::default()
+    }).await.expect("Failed to search en-emision");
+    println!("JKAnime 'en-emision' results count: {}", res_emision.results.len());
+    assert!(!res_emision.results.is_empty(), "JKAnime 'en-emision' should return results");
+}
+
+#[tokio::test]
+async fn test_unreleased_details() {
+    let extractor = JKAnimeExtractor::new();
+    let res = extractor.get_details("https://jkanime.net/black-clover-2nd-season/").await;
+    println!("Unreleased result: {:?}", res);
+    assert!(res.is_ok(), "get_details on unreleased anime should succeed");
+    let det = res.unwrap();
+    println!("Title: '{}', Episodes: {}, Status: {:?}", det.title, det.episodes.len(), det.status);
+    assert_eq!(det.episodes.len(), 0);
+}
+
+#[tokio::test]
 async fn test_jkanime_details_and_servers() {
     let extractor = JKAnimeExtractor::new();
     // Probar detalles de una serie conocida

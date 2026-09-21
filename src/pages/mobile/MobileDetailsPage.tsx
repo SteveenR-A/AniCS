@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import {
   ArrowLeft, Play, Download, Heart,
-  ChevronDown, ChevronUp, Check, HardDrive, CheckCircle2, Loader2, Calendar, DownloadCloud, Crown, Lock
+  ChevronDown, ChevronUp, Check, HardDrive, CheckCircle2, Loader2, Calendar, DownloadCloud, Crown, Lock, Copy
 } from 'lucide-react';
 import { getDetails, getServers, resolveStream } from '@/services/animeService';
 import { addFavorite, removeFavorite, isFavorite as checkFavorite, getHistory, getFavorites, updateFavoriteStatus } from '@/services/storageService';
@@ -19,6 +19,7 @@ import { FEATURE_FLAGS } from '@/config/features';
 import { CachedImage } from '@/components/CachedImage';
 import { BatchDownloadModal } from '@/components/BatchDownloadModal';
 import { FavoriteStatusDropdown } from '@/components/FavoriteStatusDropdown';
+import { ImageLightboxModal } from '@/components/ImageLightboxModal';
 import type { AnimeDetails, Episode, VideoServer, LocalEpisodeItem, FavoriteStatus } from '@/types';
 
 export function MobileDetailsPage() {
@@ -36,13 +37,14 @@ export function MobileDetailsPage() {
   const [details, setDetails] = useState<AnimeDetails | null>(() => {
     if (cached) return cached;
     if (passedAnime) {
+      const isUnreleased = passedAnime.status?.toLowerCase().includes('estren') || passedAnime.status?.toLowerCase() === 'notyet';
       return {
         title: passedAnime.title,
         url: passedAnime.url,
         thumbnailUrl: passedAnime.thumbnailUrl,
-        synopsis: passedAnime.synopsis || 'Cargando información del anime...',
+        synopsis: passedAnime.synopsis || (isUnreleased ? 'Esta producción está anunciada para su estreno. Los episodios estarán disponibles al comenzar su emisión oficial.' : 'Cargando información del anime...'),
         genres: passedAnime.genres || [],
-        status: passedAnime.status,
+        status: isUnreleased ? 'Por estrenar' : (passedAnime.status || undefined),
         animeType: passedAnime.animeType,
         episodes: passedAnime.episodes || [],
         source: passedAnime.source || source,
@@ -51,15 +53,28 @@ export function MobileDetailsPage() {
     return null;
   });
 
-  const [isLoading, setIsLoading] = useState(!cached && (!passedAnime || !passedAnime.episodes?.length));
+  const [isLoading, setIsLoading] = useState(!cached && !passedAnime);
   const [isFavorite, setIsFavorite] = useState(false);
   const [favoriteStatus, setFavoriteStatus] = useState<FavoriteStatus>('favorite');
   const [showBatchModal, setShowBatchModal] = useState(false);
   const [showAllEps, setShowAllEps] = useState(false);
   const [epSearch, setEpSearch] = useState('');
   const [loadingEpisode, setLoadingEpisode] = useState<number | null>(null);
+  const [showCoverZoom, setShowCoverZoom] = useState(false);
+  const [copiedTitle, setCopiedTitle] = useState(false);
 
   const { isVip, openModal: openVipModal } = useSubscriptionStore();
+
+  const handleCopyTitle = async () => {
+    if (!details?.title) return;
+    try {
+      await navigator.clipboard.writeText(details.title);
+      setCopiedTitle(true);
+      setTimeout(() => setCopiedTitle(false), 2000);
+    } catch {
+      // fallback
+    }
+  };
 
   // Sincronización con Descargas Locales e Historial de Visualización en Móvil
   const [localEpisodesMap, setLocalEpisodesMap] = useState<Map<number, LocalEpisodeItem>>(new Map());
@@ -79,47 +94,93 @@ export function MobileDetailsPage() {
   const { activeProfile } = useProfileStore();
 
   useEffect(() => {
+    let isCancelled = false;
+
     const load = async () => {
-      if (cached && cached.episodes && cached.episodes.length > 0) {
-        setDetails(cached);
-        setIsLoading(false);
-        checkFavorite(decodedUrl, activeProfile?.id).then(fav => {
-          setIsFavorite(fav);
-          if (fav) {
-            getFavorites(activeProfile?.id).then(list => {
-              const found = list.find(f => f.url === decodedUrl);
-              if (found?.status) setFavoriteStatus(found.status as FavoriteStatus);
-            }).catch(() => {});
-          }
-        }).catch(() => {});
-        return;
+      // Si tenemos una entrada completa en caché para esta URL, usarla de inmediato
+      if (cached && cached.title && cached.url === decodedUrl) {
+        const hasTempThumbnail = cached.thumbnailUrl && cached.thumbnailUrl.includes('episodes_tumbl');
+        if (!hasTempThumbnail) {
+          setDetails(cached);
+          setIsLoading(false);
+          checkFavorite(decodedUrl, activeProfile?.id).then(fav => {
+            if (isCancelled) return;
+            setIsFavorite(fav);
+            if (fav) {
+              getFavorites(activeProfile?.id).then(list => {
+                if (isCancelled) return;
+                const found = list.find(f => f.url === decodedUrl);
+                if (found?.status) setFavoriteStatus(found.status as FavoriteStatus);
+              }).catch(() => {});
+            }
+          }).catch(() => {});
+          return;
+        }
       }
 
-      if (!passedAnime || !passedAnime.episodes?.length) {
+      if (!cached && !passedAnime) {
         setIsLoading(true);
       }
       try {
+        const timeoutPromise = new Promise<AnimeDetails>((_, reject) =>
+          setTimeout(() => reject(new Error('Timeout loading details')), 8000)
+        );
         const [det, fav] = await Promise.all([
-          getDetails(decodedUrl, source),
+          Promise.race([getDetails(decodedUrl, source), timeoutPromise]),
           checkFavorite(decodedUrl, activeProfile?.id),
         ]);
+        if (isCancelled) return;
         setDetails(det);
         cacheDetails(det);
         setIsFavorite(fav);
         if (fav) {
           getFavorites(activeProfile?.id).then(list => {
+            if (isCancelled) return;
             const found = list.find(f => f.url === decodedUrl);
             if (found?.status) setFavoriteStatus(found.status as FavoriteStatus);
           }).catch(() => {});
         }
       } catch (e) {
-        console.error(e);
+        console.error('Failed to load anime details:', e);
+        if (!isCancelled) {
+          setDetails(prev => {
+            if (prev) {
+              return {
+                ...prev,
+                synopsis: prev.synopsis === 'Cargando información del anime...'
+                  ? 'Esta producción está anunciada para su estreno. Los episodios se publicarán automáticamente cuando comience su emisión oficial.'
+                  : prev.synopsis,
+              };
+            }
+            if (passedAnime) {
+              return {
+                title: passedAnime.title,
+                url: passedAnime.url,
+                thumbnailUrl: passedAnime.thumbnailUrl,
+                synopsis: 'Esta producción está anunciada para su estreno. Los episodios se publicarán automáticamente cuando comience su emisión oficial.',
+                genres: passedAnime.genres || [],
+                status: 'Por estrenar',
+                animeType: passedAnime.animeType,
+                episodes: [],
+                source: passedAnime.source || source,
+              };
+            }
+            return null;
+          });
+        }
       } finally {
-        setIsLoading(false);
+        if (!isCancelled) {
+          setIsLoading(false);
+        }
       }
     };
+
     load();
-  }, [decodedUrl, source, cached, cacheDetails, activeProfile?.id]);
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [decodedUrl, source, activeProfile?.id]);
 
   // Normalizador de títulos ultra-tolerante (ignora tildes, guiones, espacios y puntuación)
   const normalizeTitle = (str: string): string => {
@@ -428,7 +489,7 @@ export function MobileDetailsPage() {
     ? filteredEps
     : filteredEps.slice(0, 36);
 
-  if (isLoading) {
+  if (isLoading && !details) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '70vh' }}>
         <div style={{
@@ -515,13 +576,17 @@ export function MobileDetailsPage() {
           position: 'absolute', bottom: 10, left: 14, right: 14,
           display: 'flex', gap: 12, alignItems: 'flex-end',
         }}>
-          <div style={{
-            width: 80, height: 115, borderRadius: 'var(--radius-md)',
-            overflow: 'hidden', flexShrink: 0,
-            border: '2px solid var(--border-moderate)',
-            boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
-            background: 'var(--bg-elevated)',
-          }}>
+          <div
+            onClick={() => setShowCoverZoom(true)}
+            style={{
+              width: 80, height: 115, borderRadius: 'var(--radius-md)',
+              overflow: 'hidden', flexShrink: 0,
+              border: '2px solid var(--border-moderate)',
+              boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+              background: 'var(--bg-elevated)',
+              cursor: 'pointer',
+            }}
+          >
             <CachedImage
               src={details.thumbnailUrl}
               alt={details.title}
@@ -542,29 +607,66 @@ export function MobileDetailsPage() {
                   {details.animeType}
                 </span>
               )}
-              {details.status && (
-                <span style={{
-                  background: details.status.toLowerCase().includes('concluido') || details.status.toLowerCase().includes('finaliz')
-                    ? 'rgba(147, 51, 234, 0.25)'
-                    : 'rgba(16, 185, 129, 0.25)',
-                  color: details.status.toLowerCase().includes('concluido') || details.status.toLowerCase().includes('finaliz')
-                    ? '#c084fc'
-                    : '#34d399',
-                  fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 'var(--radius-full)',
-                }}>
-                  ● {details.status}
-                </span>
-              )}
+              {details.status && (() => {
+                const lower = details.status.toLowerCase().trim();
+                const isUnreleased = lower === 'notyet' || lower.includes('estren');
+                const isConcluded = lower.includes('concluido') || lower.includes('finaliz');
+                const isAir = lower.includes('emision') || lower.includes('emisión');
+                const label = isUnreleased ? 'Por estrenar' : isConcluded ? 'Concluido' : isAir ? 'En emisión' : details.status;
+                const bg = isUnreleased ? 'rgba(245, 158, 11, 0.2)' : isConcluded ? 'rgba(147, 51, 234, 0.2)' : 'rgba(16, 185, 129, 0.2)';
+                const color = isUnreleased ? '#fbbf24' : isConcluded ? '#c084fc' : '#34d399';
+                const border = isUnreleased ? 'rgba(245, 158, 11, 0.4)' : isConcluded ? 'rgba(147, 51, 234, 0.4)' : 'rgba(16, 185, 129, 0.4)';
+                return (
+                  <span style={{
+                    background: bg, color: color, border: `1px solid ${border}`,
+                    fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 'var(--radius-full)',
+                    display: 'inline-flex', alignItems: 'center', gap: 4,
+                  }}>
+                    <span style={{ width: 5, height: 5, borderRadius: '50%', background: color }} />
+                    {label}
+                  </span>
+                );
+              })()}
             </div>
 
-            <h1 style={{
-              fontSize: 16, fontWeight: 800, letterSpacing: '-0.02em',
-              color: 'white', lineHeight: 1.2, margin: '0 0 6px',
-              textShadow: '0 2px 8px rgba(0,0,0,0.6)',
-              overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
-            }}>
-              {details.title}
-            </h1>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '0 0 6px' }}>
+              <h1
+                className="selectable-text"
+                style={{
+                  fontSize: 16, fontWeight: 800, letterSpacing: '-0.02em',
+                  color: 'white', lineHeight: 1.2, margin: 0,
+                  textShadow: '0 2px 8px rgba(0,0,0,0.6)',
+                  overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+                  userSelect: 'text', WebkitUserSelect: 'text', cursor: 'text',
+                  flex: 1, minWidth: 0,
+                }}
+              >
+                {details.title}
+              </h1>
+              <button
+                onClick={handleCopyTitle}
+                title={copiedTitle ? '¡Copiado!' : 'Copiar nombre'}
+                style={{
+                  background: copiedTitle ? 'rgba(16, 185, 129, 0.25)' : 'rgba(255, 255, 255, 0.1)',
+                  border: `1px solid ${copiedTitle ? 'rgba(16, 185, 129, 0.5)' : 'rgba(255, 255, 255, 0.2)'}`,
+                  borderRadius: 'var(--radius-full)',
+                  padding: '4px 8px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  color: copiedTitle ? '#34d399' : 'white',
+                  cursor: 'pointer',
+                  fontSize: 10,
+                  fontWeight: 700,
+                  flexShrink: 0,
+                  backdropFilter: 'blur(8px)',
+                  userSelect: 'none',
+                }}
+              >
+                {copiedTitle ? <Check size={11} color="#34d399" /> : <Copy size={11} />}
+                <span>{copiedTitle ? 'Copiado' : 'Copiar'}</span>
+              </button>
+            </div>
 
             {/* Chips de Géneros */}
             <div style={{
@@ -700,7 +802,7 @@ export function MobileDetailsPage() {
             justifyContent: 'space-between', marginBottom: 12,
           }}>
             <h3 style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-primary)', margin: 0 }}>
-              Episodios ({details.episodes.length})
+              {details.episodes.length > 0 ? `Episodios (${details.episodes.length})` : 'Próximo Estreno'}
             </h3>
 
             {details.episodes.length > 12 && (
@@ -1024,6 +1126,16 @@ export function MobileDetailsPage() {
             setDownloadSuccessToast(msg);
             setTimeout(() => setDownloadSuccessToast(null), 3500);
           }}
+        />
+      )}
+
+      {/* Visor de Portada Ampliada Móvil */}
+      {details && (
+        <ImageLightboxModal
+          isOpen={showCoverZoom}
+          onClose={() => setShowCoverZoom(false)}
+          imageUrl={details.thumbnailUrl}
+          title={details.title}
         />
       )}
     </div>

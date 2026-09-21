@@ -9,6 +9,7 @@ export interface SearchSession {
   genre: string;
   status: string;
   animeType: string;
+  year?: string;
   orderBy: string;
   results: AnimeResult[];
   currentPage: number;
@@ -88,8 +89,9 @@ interface AnimeStore {
 function isItemSourceValid(item: AnimeResult, src: string): boolean {
   if (item.source && item.source !== src) return false;
   if (item.url) {
-    if (src === 'jkanime' && !item.url.includes('jkanime.net')) return false;
+    if (src === 'jkanime' && !item.url.includes('jkanime.')) return false;
     if (src === 'mundodonghua' && !item.url.includes('mundodonghua.com')) return false;
+    if (src === 'otakustv' && !item.url.includes('otakustv.net')) return false;
   }
   return true;
 }

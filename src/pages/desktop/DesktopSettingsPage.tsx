@@ -23,7 +23,7 @@ import { getProfileStats } from '@/services/profileService';
 import { getCacheStats, clearImageCache } from '@/services/downloadService';
 import { getDatabaseStats, optimizeDatabase, resetDatabase, clearHistory, type DatabaseStats } from '@/services/storageService';
 import { clearMemoryCache } from '@/components/CachedImage';
-import { DEFAULT_JKANIME, DEFAULT_MUNDODONGHUA } from '@/services/animeService';
+import { DEFAULT_JKANIME, DEFAULT_MUNDODONGHUA, DEFAULT_OTAKUSTV } from '@/services/animeService';
 import { CURRENT_VERSION } from '@/services/updateService';
 import type { ProfileStats } from '@/types';
 
@@ -49,6 +49,7 @@ export function DesktopSettingsPage() {
 
   const [jkanimeUrl, setJkanimeUrl] = useState(DEFAULT_JKANIME);
   const [donghuaUrl, setDonghuaUrl] = useState(DEFAULT_MUNDODONGHUA);
+  const [otakustvUrl, setOtakustvUrl] = useState(DEFAULT_OTAKUSTV);
   const [showAddSourceModal, setShowAddSourceModal] = useState(false);
   const [customSources, setCustomSources] = useState<Array<{ name: string; url: string; type: string }>>([]);
   const [newSourceName, setNewSourceName] = useState('');
@@ -186,6 +187,7 @@ export function DesktopSettingsPage() {
         const settings: Record<string, string> = await invoke('get_all_settings');
         if (settings.jkanime_base_url) setJkanimeUrl(settings.jkanime_base_url);
         if (settings.mundodonghua_base_url) setDonghuaUrl(settings.mundodonghua_base_url);
+        if (settings.otakustv_base_url) setOtakustvUrl(settings.otakustv_base_url);
         if (settings.download_dir) setDownloadDir(settings.download_dir);
         if (settings.max_concurrent_downloads) setMaxConcurrent(settings.max_concurrent_downloads);
         if (settings.player_type) setPlayerType(settings.player_type);
@@ -211,6 +213,7 @@ export function DesktopSettingsPage() {
     try {
       await invoke('set_setting', { key: 'jkanime_base_url', value: jkanimeUrl.trim() });
       await invoke('set_setting', { key: 'mundodonghua_base_url', value: donghuaUrl.trim() });
+      await invoke('set_setting', { key: 'otakustv_base_url', value: otakustvUrl.trim() });
       await invoke('set_setting', { key: 'download_dir', value: downloadDir.trim() });
       await invoke('set_setting', { key: 'max_concurrent_downloads', value: maxConcurrent });
       await invoke('set_setting', { key: 'player_type', value: playerType });
@@ -230,9 +233,11 @@ export function DesktopSettingsPage() {
   const handleResetUrls = async () => {
     setJkanimeUrl(DEFAULT_JKANIME);
     setDonghuaUrl(DEFAULT_MUNDODONGHUA);
+    setOtakustvUrl(DEFAULT_OTAKUSTV);
     try {
       await invoke('set_setting', { key: 'jkanime_base_url', value: DEFAULT_JKANIME });
       await invoke('set_setting', { key: 'mundodonghua_base_url', value: DEFAULT_MUNDODONGHUA });
+      await invoke('set_setting', { key: 'otakustv_base_url', value: DEFAULT_OTAKUSTV });
       setSaveStatus('URLs de catálogos restauradas por defecto');
       setTimeout(() => setSaveStatus(null), 3000);
     } catch (e) {
@@ -1099,7 +1104,7 @@ export function DesktopSettingsPage() {
             </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 14 }}>
             {/* Catálogo Principal */}
             <div
               style={{
@@ -1212,6 +1217,70 @@ export function DesktopSettingsPage() {
                   value={donghuaUrl}
                   onChange={(e) => setDonghuaUrl(e.target.value)}
                   placeholder="https://www.mundodonghua.com"
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    borderRadius: 'var(--radius-sm)',
+                    background: 'var(--bg-elevated)',
+                    border: '1px solid var(--border-moderate)',
+                    color: 'var(--text-primary)',
+                    fontSize: 12,
+                    fontFamily: 'monospace',
+                    outline: 'none',
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* Catálogo de Respaldo */}
+            <div
+              style={{
+                padding: '16px',
+                borderRadius: 'var(--radius-md)',
+                background: 'rgba(255, 255, 255, 0.03)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 12,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div
+                    style={{
+                      width: 40,
+                      height: 40,
+                      borderRadius: 10,
+                      background: 'rgba(245, 158, 11, 0.15)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#f59e0b',
+                    }}
+                  >
+                    <Layers size={20} />
+                  </div>
+                  <div>
+                    <h4 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: '#fff' }}>Catálogo Anime (Respaldo)</h4>
+                    <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>
+                      Servidor espejo OtakusTV para alta disponibilidad y contingencia
+                    </p>
+                  </div>
+                </div>
+                <span style={{ fontSize: 11, fontWeight: 600, color: '#34d399', background: 'rgba(16, 185, 129, 0.12)', padding: '3px 8px', borderRadius: '6px' }}>
+                  Conectado
+                </span>
+              </div>
+              <div>
+                <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4, fontWeight: 600 }}>
+                  URL Servidor / Endpoint:
+                </label>
+                <input
+                  type="text"
+                  value={otakustvUrl}
+                  onChange={(e) => setOtakustvUrl(e.target.value)}
+                  placeholder="https://www.otakustv.net"
                   style={{
                     width: '100%',
                     padding: '8px 12px',

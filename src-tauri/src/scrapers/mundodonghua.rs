@@ -352,22 +352,44 @@ impl AnimeExtractor for MundoDonghuaExtractor {
             Selector::parse("ul.md-donghua-episodes li a, div.episodes-list a, a[href*='/ver/']")
                 .expect("Invalid CSS selector");
 
+        static EP_HREF_NUM_RE: Lazy<Regex> =
+            Lazy::new(|| Regex::new(r#"/ver/[^/]+/(\d+)"#).unwrap());
+        static EP_LABEL_NUM_RE: Lazy<Regex> =
+            Lazy::new(|| Regex::new(r#"(?i)(?:episodio|ep|cap|capitulo)\s*(\d+)"#).unwrap());
+
+        let mut seen_numbers = std::collections::HashSet::new();
         for (idx, a) in doc.select(&ep_sel).enumerate() {
             let href = attr(&a, "href");
             if href.is_empty() {
                 continue;
             }
-            let ep_num = (idx + 1) as u32;
+            let label = inner_text(&a);
+            let ep_num = EP_HREF_NUM_RE
+                .captures(&href)
+                .and_then(|c| c.get(1))
+                .and_then(|m| m.as_str().parse::<u32>().ok())
+                .or_else(|| {
+                    EP_LABEL_NUM_RE
+                        .captures(&label)
+                        .and_then(|c| c.get(1))
+                        .and_then(|m| m.as_str().parse::<u32>().ok())
+                })
+                .unwrap_or((idx + 1) as u32);
 
-            episodes.push(Episode {
-                number: ep_num,
-                title: Some(format!("Episodio {}", ep_num)),
-                url: normalize_url(&href, &self.base_url),
-                thumbnail_url: None,
-                watched: false,
-                watch_progress: None,
-            });
+            if seen_numbers.insert(ep_num) {
+                episodes.push(Episode {
+                    number: ep_num,
+                    title: Some(format!("Episodio {}", ep_num)),
+                    url: normalize_url(&href, &self.base_url),
+                    thumbnail_url: None,
+                    watched: false,
+                    watch_progress: None,
+                });
+            }
         }
+
+        // Ordenar cronológicamente (Episodio 1 al N)
+        episodes.sort_by_key(|e| e.number);
 
         Ok(AnimeDetails {
             title,
@@ -423,9 +445,9 @@ impl AnimeExtractor for MundoDonghuaExtractor {
                                     && !servers.iter().any(|s: &VideoServer| s.url == stream_url)
                                 {
                                     servers.push(VideoServer {
-                                        name: "Asura (Directo HLS)".to_string(),
+                                        name: "Asura (HLS)".to_string(),
                                         url: stream_url.to_string(),
-                                        is_direct: true,
+                                        is_direct: false,
                                         referer: Some(self.base_url.clone()),
                                     });
                                 }
@@ -448,11 +470,12 @@ impl AnimeExtractor for MundoDonghuaExtractor {
                                 "VOE".to_string()
                             } else if iframe_url.contains("embedwish")
                                 || iframe_url.contains("sfastwish")
+                                || iframe_url.contains("streamwish")
                             {
                                 "Streamwish".to_string()
                             } else if iframe_url.contains("vidhide") {
                                 "Vidhide".to_string()
-                            } else if iframe_url.contains("bysekoze") {
+                            } else if iframe_url.contains("bysekoze") || iframe_url.contains("fmoon") {
                                 "Fmoon".to_string()
                             } else {
                                 format!("Servidor {}", servers.len() + 1)
@@ -488,8 +511,26 @@ impl AnimeExtractor for MundoDonghuaExtractor {
             }
         }
 
-        // Priorizar servidores directos HLS al inicio
-        servers.sort_by(|a, b| b.is_direct.cmp(&a.is_direct));
+        // 3. Ordenar servidores priorizando infraestructura CDN probada con CORS (Vidhide > Streamwish > Asura > otros)
+        fn server_rank(name: &str, url: &str) -> u32 {
+            let n = name.to_lowercase();
+            let u = url.to_lowercase();
+            if n.contains("vidhide") || u.contains("vidhide") {
+                100
+            } else if n.contains("streamwish") || u.contains("embedwish") || u.contains("sfastwish") {
+                90
+            } else if n.contains("asura") || u.contains("mdplayer") {
+                70
+            } else if n.contains("voe") || u.contains("voe.sx") {
+                60
+            } else if n.contains("fmoon") || u.contains("bysekoze") {
+                50
+            } else {
+                40
+            }
+        }
+
+        servers.sort_by(|a, b| server_rank(&b.name, &b.url).cmp(&server_rank(&a.name, &a.url)));
 
         Ok(servers)
     }
@@ -588,16 +629,17 @@ impl AnimeExtractor for MundoDonghuaExtractor {
 }
 
 fn normalize_donghua_url(url: &str, base_url: &str) -> String {
+    let base = base_url.trim_end_matches('/');
     if url.contains("/ver/") {
         let parts: Vec<&str> = url.split("/ver/").collect();
         if parts.len() > 1 {
             let segs: Vec<&str> = parts[1].split('/').collect();
             if !segs.is_empty() {
-                return format!("{}/donghua/{}", base_url.trim_end_matches('/'), segs[0]);
+                return format!("{}/donghua/{}", base, segs[0]);
             }
         }
     }
-    url.to_string()
+    normalize_url(url, base_url)
 }
 
 fn attr(element: &scraper::ElementRef, name: &str) -> String {

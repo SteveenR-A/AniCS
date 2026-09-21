@@ -3,7 +3,8 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search, X, Loader2, SearchX,
-  RotateCcw, SlidersHorizontal, RefreshCw, Clock, Check
+  RotateCcw, SlidersHorizontal, RefreshCw, Clock, Check,
+  Sparkles, Flame, Film
 } from 'lucide-react';
 import { useAnimeStore } from '@/stores/useAnimeStore';
 import { advancedSearch } from '@/services/animeService';
@@ -63,11 +64,29 @@ function MobileResultCard({ anime, onClick }: { anime: AnimeResult; onClick: () 
   );
 }
 
+const STATUS_OPTIONS = [
+  { id: '', label: 'Todos' },
+  { id: 'estreno', label: 'Estrenos' },
+  { id: 'en-emision', label: 'En emisión' },
+  { id: 'concluido', label: 'Concluidos' },
+];
+
+const TYPE_OPTIONS = [
+  { id: '', label: 'Todos' },
+  { id: 'anime', label: 'Anime' },
+  { id: 'pelicula', label: 'Película' },
+  { id: 'ova', label: 'OVA' },
+  { id: 'especial', label: 'Especial' },
+];
+
+const CURRENT_YEAR = new Date().getFullYear();
+const AVAILABLE_YEARS = Array.from({ length: CURRENT_YEAR - 1980 + 1 }, (_, i) => String(CURRENT_YEAR - i));
+
 export function MobileSearchPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const {
-    activeSource, searchResults, setSearchResults,
+    activeSource, setActiveSource, searchResults, setSearchResults,
     isSearching, setIsSearching, genres, loadGenres,
     saveSearchSession, getSearchSession,
     recentSearches, addRecentSearch, removeRecentSearch, clearRecentSearches
@@ -78,24 +97,26 @@ export function MobileSearchPage() {
   const urlGenre = searchParams.get('genre') ?? '';
   const urlStatus = searchParams.get('status') ?? '';
   const urlType = searchParams.get('type') ?? '';
+  const urlYear = searchParams.get('year') ?? '';
   const urlOrder = searchParams.get('order') ?? '';
 
   const [query, setQuery] = useState(urlQ);
   const [selectedGenre, setSelectedGenre] = useState<string>(urlGenre);
   const [selectedStatus, setSelectedStatus] = useState<string>(urlStatus);
   const [selectedType, setSelectedType] = useState<string>(urlType);
+  const [selectedYear, setSelectedYear] = useState<string>(urlYear);
   const [selectedOrder, setSelectedOrder] = useState<string>(urlOrder);
   const [currentPage, setCurrentPage] = useState<number>(urlPage);
   const [totalPages, setTotalPages] = useState<number | undefined>(undefined);
   const [hasNextPage, setHasNextPage] = useState(false);
-  const [showFilters, setShowFilters] = useState(Boolean(urlGenre || urlStatus || urlType));
+  const [showFilters, setShowFilters] = useState(Boolean(urlGenre || urlStatus || urlType || urlYear));
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const isInputFocusedRef = useRef(false);
   const isInitialMount = useRef(true);
   const searchRequestIdRef = useRef(0);
   const lastExecutedKey = useRef<string>('');
-  const activeFilterCount = (selectedGenre ? 1 : 0) + (selectedStatus ? 1 : 0) + (selectedType ? 1 : 0) + (selectedOrder ? 1 : 0);
+  const activeFilterCount = (selectedGenre ? 1 : 0) + (selectedStatus ? 1 : 0) + (selectedType ? 1 : 0) + (selectedYear ? 1 : 0) + (selectedOrder ? 1 : 0);
 
   useEffect(() => {
     loadGenres(activeSource);
@@ -106,6 +127,7 @@ export function MobileSearchPage() {
     newGenre: string,
     newStatus: string,
     newType: string,
+    newYear: string,
     newOrder: string,
     newPage: number
   ) => {
@@ -114,6 +136,7 @@ export function MobileSearchPage() {
     if (newGenre) params.set('genre', newGenre);
     if (newStatus) params.set('status', newStatus);
     if (newType) params.set('type', newType);
+    if (newYear) params.set('year', newYear);
     if (newOrder) params.set('order', newOrder);
     if (newPage > 1) params.set('p', String(newPage));
     if (activeSource) params.set('source', activeSource);
@@ -126,6 +149,7 @@ export function MobileSearchPage() {
     genre: string,
     status: string,
     type: string,
+    year: string,
     order: string,
     page: number = 1
   ) => {
@@ -138,6 +162,7 @@ export function MobileSearchPage() {
         genre: genre || undefined,
         status: status || undefined,
         animeType: type || undefined,
+        year: year || undefined,
         orderBy: order || undefined,
         page,
       };
@@ -161,6 +186,7 @@ export function MobileSearchPage() {
         genre,
         status,
         animeType: type,
+        year,
         orderBy: order,
         results: sanitized,
         currentPage: page,
@@ -187,13 +213,13 @@ export function MobileSearchPage() {
 
   // Restaurar sesión o ejecutar búsqueda inicial
   useEffect(() => {
-    const currentKey = `${activeSource}:${urlQ}:${urlGenre}:${urlStatus}:${urlType}:${urlOrder}:${urlPage}`;
+    const currentKey = `${activeSource}:${urlQ}:${urlGenre}:${urlStatus}:${urlType}:${urlYear}:${urlOrder}:${urlPage}`;
     if (lastExecutedKey.current === currentKey) {
       return;
     }
     lastExecutedKey.current = currentKey;
 
-    const hasParams = Boolean(urlQ || urlGenre || urlStatus || urlType || urlOrder || urlPage > 1);
+    const hasParams = Boolean(urlQ || urlGenre || urlStatus || urlType || urlYear || urlOrder || urlPage > 1);
 
     // Solo restaurar la sesión guardada en el primer montaje si no hay parámetros en la URL
     if (isInitialMount.current) {
@@ -204,12 +230,13 @@ export function MobileSearchPage() {
         setSelectedGenre(session.genre);
         setSelectedStatus(session.status);
         setSelectedType(session.animeType);
+        setSelectedYear(session.year || '');
         setSelectedOrder(session.orderBy);
         setCurrentPage(session.currentPage);
         setTotalPages(session.totalPages);
         setHasNextPage(session.hasNextPage);
         setSearchResults(session.results, session.query, activeSource);
-        syncUrlParams(session.query, session.genre, session.status, session.animeType, session.orderBy, session.currentPage);
+        syncUrlParams(session.query, session.genre, session.status, session.animeType, session.year || '', session.orderBy, session.currentPage);
         return;
       }
     }
@@ -221,19 +248,20 @@ export function MobileSearchPage() {
     setSelectedGenre(urlGenre);
     setSelectedStatus(urlStatus);
     setSelectedType(urlType);
+    setSelectedYear(urlYear);
     setSelectedOrder(urlOrder);
     setCurrentPage(urlPage);
 
     // Si no hay parámetros ni búsqueda, no disparar consultas pesadas innecesarias
-    if (!urlQ && !urlGenre && !urlStatus && !urlType && !urlOrder) {
+    if (!urlQ && !urlGenre && !urlStatus && !urlType && !urlYear && !urlOrder) {
       setSearchResults([], '', activeSource);
       setTotalPages(undefined);
       setHasNextPage(false);
       return;
     }
 
-    executeSearch(urlQ, urlGenre, urlStatus, urlType, urlOrder, urlPage);
-  }, [activeSource, urlQ, urlGenre, urlStatus, urlType, urlOrder, urlPage, getSearchSession, setSearchResults, syncUrlParams, executeSearch, query]);
+    executeSearch(urlQ, urlGenre, urlStatus, urlType, urlYear, urlOrder, urlPage);
+  }, [activeSource, urlQ, urlGenre, urlStatus, urlType, urlYear, urlOrder, urlPage, getSearchSession, setSearchResults, syncUrlParams, executeSearch, query]);
 
   const handleInput = (val: string) => {
     setQuery(val);
@@ -242,15 +270,15 @@ export function MobileSearchPage() {
     const trimmed = val.trim();
     if (trimmed.length === 0) {
       // Limpieza inmediata sin saturar la red ni rellenar la barra
-      const key = `${activeSource}::${selectedGenre}:${selectedStatus}:${selectedType}:${selectedOrder}:1`;
+      const key = `${activeSource}::${selectedGenre}:${selectedStatus}:${selectedType}:${selectedYear}:${selectedOrder}:1`;
       lastExecutedKey.current = key;
-      syncUrlParams('', selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
-      if (!selectedGenre && !selectedStatus && !selectedType && !selectedOrder) {
+      syncUrlParams('', selectedGenre, selectedStatus, selectedType, selectedYear, selectedOrder, 1);
+      if (!selectedGenre && !selectedStatus && !selectedType && !selectedYear && !selectedOrder) {
         setSearchResults([], '', activeSource);
         setTotalPages(undefined);
         setHasNextPage(false);
       } else {
-        executeSearch('', selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
+        executeSearch('', selectedGenre, selectedStatus, selectedType, selectedYear, selectedOrder, 1);
       }
       return;
     }
@@ -261,34 +289,34 @@ export function MobileSearchPage() {
     }
 
     debounceRef.current = setTimeout(() => {
-      const key = `${activeSource}:${val}:${selectedGenre}:${selectedStatus}:${selectedType}:${selectedOrder}:1`;
+      const key = `${activeSource}:${val}:${selectedGenre}:${selectedStatus}:${selectedType}:${selectedYear}:${selectedOrder}:1`;
       lastExecutedKey.current = key;
-      syncUrlParams(val, selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
-      executeSearch(val, selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
+      syncUrlParams(val, selectedGenre, selectedStatus, selectedType, selectedYear, selectedOrder, 1);
+      executeSearch(val, selectedGenre, selectedStatus, selectedType, selectedYear, selectedOrder, 1);
     }, 1000);
   };
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    const key = `${activeSource}:${query}:${selectedGenre}:${selectedStatus}:${selectedType}:${selectedOrder}:1`;
+    const key = `${activeSource}:${query}:${selectedGenre}:${selectedStatus}:${selectedType}:${selectedYear}:${selectedOrder}:1`;
     lastExecutedKey.current = key;
-    syncUrlParams(query, selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
-    executeSearch(query, selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
+    syncUrlParams(query, selectedGenre, selectedStatus, selectedType, selectedYear, selectedOrder, 1);
+    executeSearch(query, selectedGenre, selectedStatus, selectedType, selectedYear, selectedOrder, 1);
   };
 
   const handleClearQuery = () => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     setQuery('');
-    const key = `${activeSource}::${selectedGenre}:${selectedStatus}:${selectedType}:${selectedOrder}:1`;
+    const key = `${activeSource}::${selectedGenre}:${selectedStatus}:${selectedType}:${selectedYear}:${selectedOrder}:1`;
     lastExecutedKey.current = key;
-    syncUrlParams('', selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
-    if (!selectedGenre && !selectedStatus && !selectedType && !selectedOrder) {
+    syncUrlParams('', selectedGenre, selectedStatus, selectedType, selectedYear, selectedOrder, 1);
+    if (!selectedGenre && !selectedStatus && !selectedType && !selectedYear && !selectedOrder) {
       setSearchResults([], '', activeSource);
       setTotalPages(undefined);
       setHasNextPage(false);
     } else {
-      executeSearch('', selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
+      executeSearch('', selectedGenre, selectedStatus, selectedType, selectedYear, selectedOrder, 1);
     }
   };
 
@@ -298,10 +326,19 @@ export function MobileSearchPage() {
       (name ? selectedGenre.toLowerCase() === name.toLowerCase() : false);
     const nextGenre = isCurrentlySelected ? '' : slug;
     setSelectedGenre(nextGenre);
-    const key = `${activeSource}:${query}:${nextGenre}:${selectedStatus}:${selectedType}:${selectedOrder}:1`;
+    const key = `${activeSource}:${query}:${nextGenre}:${selectedStatus}:${selectedType}:${selectedYear}:${selectedOrder}:1`;
     lastExecutedKey.current = key;
-    syncUrlParams(query, nextGenre, selectedStatus, selectedType, selectedOrder, 1);
-    executeSearch(query, nextGenre, selectedStatus, selectedType, selectedOrder, 1);
+    syncUrlParams(query, nextGenre, selectedStatus, selectedType, selectedYear, selectedOrder, 1);
+    executeSearch(query, nextGenre, selectedStatus, selectedType, selectedYear, selectedOrder, 1);
+  };
+
+  const handleYearChange = (yr: string) => {
+    const nextYear = selectedYear === yr ? '' : yr;
+    setSelectedYear(nextYear);
+    const key = `${activeSource}:${query}:${selectedGenre}:${selectedStatus}:${selectedType}:${nextYear}:${selectedOrder}:1`;
+    lastExecutedKey.current = key;
+    syncUrlParams(query, selectedGenre, selectedStatus, selectedType, nextYear, selectedOrder, 1);
+    executeSearch(query, selectedGenre, selectedStatus, selectedType, nextYear, selectedOrder, 1);
   };
 
   const handleResetFilters = () => {
@@ -310,31 +347,33 @@ export function MobileSearchPage() {
     setSelectedGenre('');
     setSelectedStatus('');
     setSelectedType('');
+    setSelectedYear('');
     setSelectedOrder('');
     setCurrentPage(1);
-    const key = `${activeSource}::::::1`;
+    const key = `${activeSource}:::::::1`;
     lastExecutedKey.current = key;
-    syncUrlParams('', '', '', '', '', 1);
+    syncUrlParams('', '', '', '', '', '', 1);
     saveSearchSession(activeSource, {
       query: '',
       genre: '',
       status: '',
       animeType: '',
+      year: '',
       orderBy: '',
       results: [],
       currentPage: 1,
       totalPages: undefined,
       hasNextPage: false,
     });
-    executeSearch('', '', '', '', '', 1);
+    executeSearch('', '', '', '', '', '', 1);
   };
 
   const handlePageChange = (newPage: number) => {
     setCurrentPage(newPage);
-    const key = `${activeSource}:${query}:${selectedGenre}:${selectedStatus}:${selectedType}:${selectedOrder}:${newPage}`;
+    const key = `${activeSource}:${query}:${selectedGenre}:${selectedStatus}:${selectedType}:${selectedYear}:${selectedOrder}:${newPage}`;
     lastExecutedKey.current = key;
-    syncUrlParams(query, selectedGenre, selectedStatus, selectedType, selectedOrder, newPage);
-    executeSearch(query, selectedGenre, selectedStatus, selectedType, selectedOrder, newPage);
+    syncUrlParams(query, selectedGenre, selectedStatus, selectedType, selectedYear, selectedOrder, newPage);
+    executeSearch(query, selectedGenre, selectedStatus, selectedType, selectedYear, selectedOrder, newPage);
     window.scrollTo({ top: 0, behavior: 'smooth' });
     const mainEl = document.querySelector('main > div');
     if (mainEl) {
@@ -411,7 +450,7 @@ export function MobileSearchPage() {
         <button
           onClick={() => {
             loadGenres(activeSource);
-            executeSearch(query, selectedGenre, selectedStatus, selectedType, selectedOrder, currentPage);
+            executeSearch(query, selectedGenre, selectedStatus, selectedType, selectedYear, selectedOrder, currentPage);
           }}
           disabled={isSearching}
           title="Actualizar catálogo"
@@ -423,6 +462,137 @@ export function MobileSearchPage() {
           }}
         >
           <RefreshCw size={14} className={isSearching ? 'animate-spin' : ''} />
+        </button>
+      </div>
+
+      {/* Selector de Fuente Móvil */}
+      <div style={{
+        display: 'flex', background: 'var(--bg-surface)',
+        padding: 3, borderRadius: 'var(--radius-full)',
+        border: '1px solid var(--border-subtle)',
+        gap: 2, marginBottom: 10,
+      }}>
+        {[
+          { id: 'jkanime', label: 'JKAnime' },
+          { id: 'animejl', label: 'Anime-JL' },
+          { id: 'mundodonghua', label: 'Donghua' },
+        ].map((src) => (
+          <button
+            key={src.id}
+            onClick={() => {
+              setActiveSource(src.id);
+              syncUrlParams(query, selectedGenre, selectedStatus, selectedType, selectedYear, selectedOrder, 1);
+              executeSearch(query, selectedGenre, selectedStatus, selectedType, selectedYear, selectedOrder, 1);
+            }}
+            style={{
+              flex: 1, padding: '6px 8px', borderRadius: 'var(--radius-full)',
+              background: activeSource === src.id ? 'var(--accent-primary)' : 'transparent',
+              color: activeSource === src.id ? 'white' : 'var(--text-secondary)',
+              border: 'none', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+              whiteSpace: 'nowrap', textAlign: 'center',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            {src.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Barra de Acceso Rápido / Categorías y Estrenos */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 6,
+        marginBottom: 12, overflowX: 'auto', paddingBottom: 2,
+      }}>
+        <button
+          onClick={() => {
+            setSelectedStatus('');
+            setSelectedType('');
+            setSelectedYear('');
+            syncUrlParams(query, selectedGenre, '', '', '', selectedOrder, 1);
+            executeSearch(query, selectedGenre, '', '', '', selectedOrder, 1);
+          }}
+          style={{
+            padding: '5px 12px', borderRadius: 'var(--radius-full)',
+            background: !selectedStatus && !selectedType && !selectedYear ? 'var(--accent-primary)' : 'var(--bg-surface)',
+            color: !selectedStatus && !selectedType && !selectedYear ? '#ffffff' : 'var(--text-secondary)',
+            border: `1px solid ${!selectedStatus && !selectedType && !selectedYear ? 'transparent' : 'var(--border-subtle)'}`,
+            fontSize: 11, fontWeight: 700, cursor: 'pointer', flexShrink: 0,
+            transition: 'all var(--transition-fast)',
+          }}
+        >
+          Todos
+        </button>
+
+        <button
+          onClick={() => {
+            const nextStatus = selectedStatus === 'estreno' ? '' : 'estreno';
+            setSelectedStatus(nextStatus);
+            syncUrlParams(query, selectedGenre, nextStatus, selectedType, selectedYear, selectedOrder, 1);
+            executeSearch(query, selectedGenre, nextStatus, selectedType, selectedYear, selectedOrder, 1);
+          }}
+          style={{
+            padding: '5px 12px', borderRadius: 'var(--radius-full)',
+            background: selectedStatus === 'estreno'
+              ? 'linear-gradient(135deg, #f59e0b, #ef4444)'
+              : 'var(--bg-surface)',
+            color: selectedStatus === 'estreno' ? '#ffffff' : 'var(--text-secondary)',
+            border: `1px solid ${selectedStatus === 'estreno' ? 'transparent' : 'var(--border-subtle)'}`,
+            fontSize: 11, fontWeight: 700, cursor: 'pointer', flexShrink: 0,
+            display: 'inline-flex', alignItems: 'center', gap: 5,
+            boxShadow: selectedStatus === 'estreno' ? '0 2px 8px rgba(245, 158, 11, 0.4)' : 'none',
+            transition: 'all var(--transition-fast)',
+          }}
+        >
+          <Sparkles size={12} />
+          <span>Estrenos</span>
+        </button>
+
+        <button
+          onClick={() => {
+            const nextStatus = selectedStatus === 'en-emision' ? '' : 'en-emision';
+            setSelectedStatus(nextStatus);
+            syncUrlParams(query, selectedGenre, nextStatus, selectedType, selectedYear, selectedOrder, 1);
+            executeSearch(query, selectedGenre, nextStatus, selectedType, selectedYear, selectedOrder, 1);
+          }}
+          style={{
+            padding: '5px 12px', borderRadius: 'var(--radius-full)',
+            background: selectedStatus === 'en-emision'
+              ? 'linear-gradient(135deg, #10b981, #059669)'
+              : 'var(--bg-surface)',
+            color: selectedStatus === 'en-emision' ? '#ffffff' : 'var(--text-secondary)',
+            border: `1px solid ${selectedStatus === 'en-emision' ? 'transparent' : 'var(--border-subtle)'}`,
+            fontSize: 11, fontWeight: 700, cursor: 'pointer', flexShrink: 0,
+            display: 'inline-flex', alignItems: 'center', gap: 5,
+            boxShadow: selectedStatus === 'en-emision' ? '0 2px 8px rgba(16, 185, 129, 0.4)' : 'none',
+            transition: 'all var(--transition-fast)',
+          }}
+        >
+          <Flame size={12} />
+          <span>En Emisión</span>
+        </button>
+
+        <button
+          onClick={() => {
+            const nextType = selectedType === 'pelicula' ? '' : 'pelicula';
+            setSelectedType(nextType);
+            syncUrlParams(query, selectedGenre, selectedStatus, nextType, selectedYear, selectedOrder, 1);
+            executeSearch(query, selectedGenre, selectedStatus, nextType, selectedYear, selectedOrder, 1);
+          }}
+          style={{
+            padding: '5px 12px', borderRadius: 'var(--radius-full)',
+            background: selectedType === 'pelicula'
+              ? 'linear-gradient(135deg, #8b5cf6, #ec4899)'
+              : 'var(--bg-surface)',
+            color: selectedType === 'pelicula' ? '#ffffff' : 'var(--text-secondary)',
+            border: `1px solid ${selectedType === 'pelicula' ? 'transparent' : 'var(--border-subtle)'}`,
+            fontSize: 11, fontWeight: 700, cursor: 'pointer', flexShrink: 0,
+            display: 'inline-flex', alignItems: 'center', gap: 5,
+            boxShadow: selectedType === 'pelicula' ? '0 2px 8px rgba(139, 92, 246, 0.4)' : 'none',
+            transition: 'all var(--transition-fast)',
+          }}
+        >
+          <Film size={12} />
+          <span>Películas</span>
         </button>
       </div>
 
@@ -445,8 +615,8 @@ export function MobileSearchPage() {
               <span
                 onClick={() => {
                   setQuery(term);
-                  syncUrlParams(term, selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
-                  executeSearch(term, selectedGenre, selectedStatus, selectedType, selectedOrder, 1);
+                  syncUrlParams(term, selectedGenre, selectedStatus, selectedType, selectedYear, selectedOrder, 1);
+                  executeSearch(term, selectedGenre, selectedStatus, selectedType, selectedYear, selectedOrder, 1);
                 }}
                 style={{ cursor: 'pointer', fontWeight: 600 }}
               >
@@ -491,13 +661,32 @@ export function MobileSearchPage() {
               <X size={12} />
             </button>
           )}
+          {selectedStatus && (
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedStatus('');
+                syncUrlParams(query, selectedGenre, '', selectedType, selectedYear, selectedOrder, 1);
+                executeSearch(query, selectedGenre, '', selectedType, selectedYear, selectedOrder, 1);
+              }}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                background: 'rgba(245, 158, 11, 0.15)', border: '1px solid rgba(245, 158, 11, 0.35)',
+                borderRadius: 'var(--radius-full)', padding: '3px 8px',
+                color: '#f59e0b', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+              }}
+            >
+              <span>{STATUS_OPTIONS.find(s => s.id === selectedStatus)?.label || selectedStatus}</span>
+              <X size={12} />
+            </button>
+          )}
           {selectedType && (
             <button
               type="button"
               onClick={() => {
                 setSelectedType('');
-                syncUrlParams(query, selectedGenre, selectedStatus, '', selectedOrder, 1);
-                executeSearch(query, selectedGenre, selectedStatus, '', selectedOrder, 1);
+                syncUrlParams(query, selectedGenre, selectedStatus, '', selectedYear, selectedOrder, 1);
+                executeSearch(query, selectedGenre, selectedStatus, '', selectedYear, selectedOrder, 1);
               }}
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: 4,
@@ -506,7 +695,22 @@ export function MobileSearchPage() {
                 color: 'var(--accent-primary)', fontSize: 11, fontWeight: 600, cursor: 'pointer',
               }}
             >
-              <span>{selectedType}</span>
+              <span>{TYPE_OPTIONS.find(t => t.id === selectedType)?.label || selectedType}</span>
+              <X size={12} />
+            </button>
+          )}
+          {selectedYear && (
+            <button
+              type="button"
+              onClick={() => handleYearChange('')}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                background: 'rgba(99, 102, 241, 0.15)', border: '1px solid rgba(99, 102, 241, 0.35)',
+                borderRadius: 'var(--radius-full)', padding: '3px 8px',
+                color: 'var(--accent-primary)', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+              }}
+            >
+              <span>Año: {selectedYear}</span>
               <X size={12} />
             </button>
           )}
@@ -535,12 +739,13 @@ export function MobileSearchPage() {
               overflow: 'hidden',
               background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
               borderRadius: 'var(--radius-lg)', padding: '12px 14px', marginBottom: 14,
-              display: 'flex', flexDirection: 'column', gap: 10,
+              display: 'flex', flexDirection: 'column', gap: 12,
             }}
           >
+            {/* Header Filtros */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                Géneros ({genres.length})
+              <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--text-primary)' }}>
+                Filtros Avanzados
               </span>
               {activeFilterCount > 0 && (
                 <button
@@ -555,32 +760,129 @@ export function MobileSearchPage() {
               )}
             </div>
 
-            <div style={{
-              display: 'flex', flexWrap: 'wrap', gap: 4,
-              maxHeight: 110, overflowY: 'auto',
-            }}>
-              {genres.map((g) => {
-                const isSelected =
-                  selectedGenre.toLowerCase() === g.slug.toLowerCase() ||
-                  selectedGenre.toLowerCase() === g.name.toLowerCase();
-                return (
-                  <button
-                    key={g.slug}
-                    onClick={() => handleGenreToggle(g.slug, g.name)}
-                    style={{
-                      padding: '4px 10px', borderRadius: 'var(--radius-full)',
-                      background: isSelected ? 'var(--accent-primary)' : 'var(--bg-elevated)',
-                      border: isSelected ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)',
-                      color: isSelected ? 'white' : 'var(--text-secondary)',
-                      fontSize: 11, fontWeight: isSelected ? 700 : 500,
-                      cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4,
-                    }}
-                  >
-                    {isSelected && <Check size={11} />}
-                    {g.name}
-                  </button>
-                );
-              })}
+            {/* Filtro de Estado */}
+            <div>
+              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>
+                Estado
+              </span>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                {STATUS_OPTIONS.map((st) => {
+                  const isSelected = selectedStatus === st.id;
+                  return (
+                    <button
+                      key={st.id}
+                      onClick={() => {
+                        setSelectedStatus(st.id);
+                        syncUrlParams(query, selectedGenre, st.id, selectedType, selectedYear, selectedOrder, 1);
+                        executeSearch(query, selectedGenre, st.id, selectedType, selectedYear, selectedOrder, 1);
+                      }}
+                      style={{
+                        padding: '4px 10px', borderRadius: 'var(--radius-full)',
+                        background: isSelected ? 'var(--accent-primary)' : 'var(--bg-elevated)',
+                        border: isSelected ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)',
+                        color: isSelected ? 'white' : 'var(--text-secondary)',
+                        fontSize: 11, fontWeight: isSelected ? 700 : 500,
+                        cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4,
+                      }}
+                    >
+                      {isSelected && <Check size={11} />}
+                      {st.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Filtro de Tipo */}
+            <div>
+              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>
+                Tipo
+              </span>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                {TYPE_OPTIONS.map((tp) => {
+                  const isSelected = selectedType === tp.id;
+                  return (
+                    <button
+                      key={tp.id}
+                      onClick={() => {
+                        setSelectedType(tp.id);
+                        syncUrlParams(query, selectedGenre, selectedStatus, tp.id, selectedYear, selectedOrder, 1);
+                        executeSearch(query, selectedGenre, selectedStatus, tp.id, selectedYear, selectedOrder, 1);
+                      }}
+                      style={{
+                        padding: '4px 10px', borderRadius: 'var(--radius-full)',
+                        background: isSelected ? 'var(--accent-primary)' : 'var(--bg-elevated)',
+                        border: isSelected ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)',
+                        color: isSelected ? 'white' : 'var(--text-secondary)',
+                        fontSize: 11, fontWeight: isSelected ? 700 : 500,
+                        cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4,
+                      }}
+                    >
+                      {isSelected && <Check size={11} />}
+                      {tp.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Filtro de Año */}
+            <div>
+              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>
+                Año
+              </span>
+              <select
+                value={selectedYear}
+                onChange={(e) => handleYearChange(e.target.value)}
+                style={{
+                  width: '100%',
+                  background: 'var(--bg-elevated)',
+                  border: `1px solid ${selectedYear ? 'var(--accent-primary)' : 'var(--border-subtle)'}`,
+                  borderRadius: 'var(--radius-md)',
+                  padding: '7px 12px',
+                  color: selectedYear ? 'var(--accent-primary)' : 'var(--text-primary)',
+                  fontSize: 12, fontWeight: 600, outline: 'none',
+                }}
+              >
+                <option value="">Todos los años</option>
+                {AVAILABLE_YEARS.map((y) => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Filtro de Géneros */}
+            <div>
+              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>
+                Géneros ({genres.length})
+              </span>
+              <div style={{
+                display: 'flex', flexWrap: 'wrap', gap: 4,
+                maxHeight: 120, overflowY: 'auto',
+              }}>
+                {genres.map((g) => {
+                  const isSelected =
+                    selectedGenre.toLowerCase() === g.slug.toLowerCase() ||
+                    selectedGenre.toLowerCase() === g.name.toLowerCase();
+                  return (
+                    <button
+                      key={g.slug}
+                      onClick={() => handleGenreToggle(g.slug, g.name)}
+                      style={{
+                        padding: '4px 10px', borderRadius: 'var(--radius-full)',
+                        background: isSelected ? 'var(--accent-primary)' : 'var(--bg-elevated)',
+                        border: isSelected ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)',
+                        color: isSelected ? 'white' : 'var(--text-secondary)',
+                        fontSize: 11, fontWeight: isSelected ? 700 : 500,
+                        cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4,
+                      }}
+                    >
+                      {isSelected && <Check size={11} />}
+                      {g.name}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </motion.div>
         )}

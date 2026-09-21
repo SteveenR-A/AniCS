@@ -1,5 +1,18 @@
 [
   {
+    "version": "0.2.7",
+    "date": "2026-09-21",
+    "title": "Soporte OtakusTV, Reparación MundoDonghua y Mejoras de Búsqueda",
+    "type": "patch",
+    "highlights": [
+      "Soporte completo para nuevo catálogo de anime de respaldo OtakusTV",
+      "Reparación del scraper MundoDonghua con desempaquetado JS y orden cronológico de episodios",
+      "Corrección de filtros de búsqueda avanzada en JKAnime (Concluido, En emisión, Estrenos y Año)",
+      "Solución a la carga infinita en animes no estrenados con visualización inmediata de Próximo Estreno",
+      "Visor ampliado de portadas (Lightbox Modal) con zoom y botón para copiar nombres de anime"
+    ]
+  },
+  {
     "version": "0.2.6",
     "date": "2026-09-21",
     "title": "Actualización de Fuentes y Resiliencia de Streaming",
