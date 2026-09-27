@@ -1,14 +1,14 @@
-# AniCS v0.2.7 — Soporte OtakusTV, Reparación MundoDonghua y Mejoras de Búsqueda
+# AniCS v0.2.8 — Selector móvil desplegable, mejoras de reproducción y control modular
 
-**Fecha de lanzamiento:** 2026-09-21
+**Fecha de lanzamiento:** 2026-09-27
 
 ### 🚀 Novedades y Correcciones
 
-- Soporte completo para nuevo catálogo de anime de respaldo OtakusTV
-- Reparación del scraper MundoDonghua con desempaquetado JS y orden cronológico de episodios
-- Corrección de filtros de búsqueda avanzada en JKAnime (Concluido, En emisión, Estrenos y Año)
-- Solución a la carga infinita en animes no estrenados con visualización inmediata de Próximo Estreno
-- Visor ampliado de portadas (Lightbox Modal) con zoom y botón para copiar nombres de anime
+- Selector desplegable de catálogo en Android para evitar recorte de iconos
+- Recuperación de optimizaciones vanilla de reproducción HLS y MP4
+- Pre-consulta paralela de progreso de episodios y persistencia al cambiar de servidor
+- Control modular de suscripción VIP y login de Firebase mediante Feature Flags
+- Nombres reales de servidores de video sin enmascaramiento
 
 ---
 *Para ver el historial acumulativo completo de todas las versiones, consulta [CHANGELOG.md](./CHANGELOG.md).*

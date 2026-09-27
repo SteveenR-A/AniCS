@@ -1,4 +1,5 @@
 import type { VideoServer } from '@/types';
+import { FEATURE_FLAGS } from '@/config/features';
 
 /**
  * Dominios y protocolos no compatibles con reproducción nativa directa en el reproductor HTML5
@@ -18,14 +19,15 @@ const UNSUPPORTED_DOMAINS = [
  * Detecta si un servidor es exclusivo para el nivel VIP de la presentación.
  */
 export function isVipServer(nameOrUrl: string): boolean {
+  if (!FEATURE_FLAGS.SHOW_SUBSCRIPTION) return false;
   return /magi|desu|dedicado|vip/i.test(nameOrUrl);
 }
 
 /**
  * Filtra servidores inestables/no soportados y aplica enmascaramiento profesional (Server Aliasing)
- * para presentar una arquitectura limpia de nodos de red y CDN sin exponer fuentes de terceros.
+ * cuando FEATURE_FLAGS.MASK_SERVERS está activo, o devuelve el nombre real cuando está inactivo.
  */
-export function maskAndFilterServers(servers: VideoServer[]): VideoServer[] {
+export function maskAndFilterServers(servers: VideoServer[], forceMask?: boolean): VideoServer[] {
   if (!servers || !Array.isArray(servers)) return [];
 
   // 1. Filtrar servidores no soportados
@@ -41,6 +43,16 @@ export function maskAndFilterServers(servers: VideoServer[]): VideoServer[] {
 
     return !isUnsupported;
   });
+
+  const shouldMask = forceMask ?? FEATURE_FLAGS.MASK_SERVERS;
+
+  // Si no se requiere enmascarar, devolver el nombre real del servidor
+  if (!shouldMask) {
+    return supported.map((srv) => ({
+      ...srv,
+      name: srv.name?.trim() || 'Servidor Directo',
+    }));
+  }
 
   // 2. Enmascarar con nombres limpios y profesionales de infraestructura
   let cdnCounter = 1;

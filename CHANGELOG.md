@@ -5,6 +5,48 @@ El formato está basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1
 
 ---
 
+## [0.2.8] - 2026-09-27
+
+### Selector móvil desplegable, mejoras de reproducción y control modular
+- Selector desplegable de catálogo en Android para evitar recorte de iconos en la barra superior.
+- Recuperación de optimizaciones vanilla de reproducción HLS y MP4.
+- Pre-consulta paralela de progreso de episodios y persistencia de tiempo al cambiar de servidor.
+- Control modular de suscripción VIP y login de Firebase mediante Feature Flags.
+- Nombres reales de servidores de video sin enmascaramiento.
+
+---
+
+## [0.2.7] - 2026-09-21
+
+### Soporte OtakusTV, Reparación MundoDonghua y Mejoras de Búsqueda
+- Soporte completo para nuevo catálogo de anime de respaldo OtakusTV.
+- Reparación del scraper MundoDonghua con desempaquetado JS y orden cronológico de episodios.
+- Corrección de filtros de búsqueda avanzada en JKAnime (Concluido, En emisión, Estrenos y Año).
+- Solución a la carga infinita en animes no estrenados con visualización inmediata de Próximo Estreno.
+- Visor ampliado de portadas (Lightbox Modal) con zoom y botón para copiar nombres de anime.
+
+---
+
+## [0.2.6] - 2026-09-21
+
+### Actualización de Fuentes y Resiliencia de Streaming
+- Conmutación por error automática para JKAnime entre dominios espejo.
+- Nueva fuente de respaldo integrada.
+- Enmascaramiento profesional de servidores para presentación.
+- Autenticación con Google y funciones VIP preservadas.
+
+---
+
+## [0.2.5] - 2026-09-18
+
+### Persistencia de Servidores y URLs Móvil
+- Persistencia completa de fuentes, catálogos y URLs personalizadas en móvil.
+- Configuración directa y restablecimiento de endpoints de catálogo.
+- Enmascaramiento profesional de servidores y filtrado de hosts no soportados.
+- Licencia oficial GNU GPLv3 y aviso legal descentralizado.
+
+---
+
 ## [0.2.4] - 2026-09-08
 
 ### Multicuentas, Gestión de Suscripción VIP y Filtros Interactivos de Búsqueda

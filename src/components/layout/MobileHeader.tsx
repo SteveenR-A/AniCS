@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Tv2, Heart, Settings, User, Crown } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { Tv2, Heart, Settings, User, Crown, ChevronDown, Check } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useAnimeStore } from '@/stores/useAnimeStore';
 import { useProfileStore } from '@/stores/useProfileStore';
 import { useSubscriptionStore } from '@/stores/useSubscriptionStore';
@@ -15,7 +15,32 @@ export function MobileHeader() {
   const { activeProfile } = useProfileStore();
   const { isVip, openModal: openVipModal } = useSubscriptionStore();
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [isSourceMenuOpen, setIsSourceMenuOpen] = useState(false);
+  const sourceMenuRef = useRef<HTMLDivElement>(null);
 
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent | TouchEvent) {
+      if (sourceMenuRef.current && !sourceMenuRef.current.contains(event.target as Node)) {
+        setIsSourceMenuOpen(false);
+      }
+    }
+    if (isSourceMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      document.addEventListener('touchstart', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
+    };
+  }, [isSourceMenuOpen]);
+
+  const sourcesList = [
+    { id: 'jkanime', name: 'Anime', subtitle: 'Servidor Principal', color: 'var(--accent-primary)' },
+    { id: 'mundodonghua', name: 'Donghua', subtitle: 'Animación China', color: 'var(--accent-secondary)' },
+    { id: 'otakustv', name: 'Respaldo', subtitle: 'Servidor Alternativo', color: '#10b981' },
+  ];
+
+  const currentSourceInfo = sourcesList.find(s => s.id === activeSource) || sourcesList[0];
   const ProfileIcon = activeProfile ? getProfileAvatarIcon(activeProfile.avatar) : User;
 
   return (
@@ -68,115 +93,124 @@ export function MobileHeader() {
           </span>
         </div>
 
-        {/* Switcher Anime / Donghua en Móvil */}
-        <div
-          style={{
-            display: 'flex',
-            background: 'var(--bg-elevated)',
-            padding: 3,
-            borderRadius: 'var(--radius-full)',
-            border: '1px solid var(--border-subtle)',
-            position: 'relative',
-          }}
-        >
+        {/* Selector de Fuentes Desplegable en Móvil */}
+        <div ref={sourceMenuRef} style={{ position: 'relative' }}>
           <button
-            onClick={() => setActiveSource('jkanime')}
+            onClick={() => setIsSourceMenuOpen(!isSourceMenuOpen)}
+            aria-expanded={isSourceMenuOpen}
+            aria-label="Seleccionar catálogo o fuente de animación"
             style={{
-              position: 'relative',
-              padding: '4px 12px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              background: 'var(--bg-elevated)',
+              padding: '5px 11px',
               borderRadius: 'var(--radius-full)',
-              border: 'none',
-              background: 'transparent',
-              color: activeSource === 'jkanime' ? '#ffffff' : 'var(--text-muted)',
-              fontSize: 11,
+              border: '1px solid var(--border-subtle)',
+              color: 'var(--text-primary)',
+              fontSize: 12,
               fontWeight: 700,
               cursor: 'pointer',
-              zIndex: 2,
-              transition: 'color var(--transition-fast)',
+              transition: 'background var(--transition-fast), border-color var(--transition-fast)',
             }}
           >
-            {activeSource === 'jkanime' && (
-              <motion.div
-                layoutId="mobile-source-pill"
-                transition={{ type: 'spring', stiffness: 450, damping: 30 }}
-                style={{
-                  position: 'absolute',
-                  inset: 0,
-                  background: 'var(--accent-primary)',
-                  borderRadius: 'var(--radius-full)',
-                  zIndex: -1,
-                  boxShadow: '0 2px 8px rgba(124, 58, 237, 0.4)',
-                }}
-              />
-            )}
-            Anime
+            <span
+              style={{
+                width: 7,
+                height: 7,
+                borderRadius: '50%',
+                backgroundColor: currentSourceInfo.color,
+                boxShadow: `0 0 6px ${currentSourceInfo.color}`,
+                flexShrink: 0,
+              }}
+            />
+            <span>{currentSourceInfo.name}</span>
+            <ChevronDown
+              size={13}
+              color="var(--text-muted)"
+              style={{
+                transform: isSourceMenuOpen ? 'rotate(180deg)' : 'none',
+                transition: 'transform 0.2s ease',
+              }}
+            />
           </button>
 
-          <button
-            onClick={() => setActiveSource('mundodonghua')}
-            style={{
-              position: 'relative',
-              padding: '4px 12px',
-              borderRadius: 'var(--radius-full)',
-              border: 'none',
-              background: 'transparent',
-              color: activeSource === 'mundodonghua' ? '#ffffff' : 'var(--text-muted)',
-              fontSize: 11,
-              fontWeight: 700,
-              cursor: 'pointer',
-              zIndex: 2,
-              transition: 'color var(--transition-fast)',
-            }}
-          >
-            {activeSource === 'mundodonghua' && (
+          <AnimatePresence>
+            {isSourceMenuOpen && (
               <motion.div
-                layoutId="mobile-source-pill"
-                transition={{ type: 'spring', stiffness: 450, damping: 30 }}
+                initial={{ opacity: 0, y: -6, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -6, scale: 0.95 }}
+                transition={{ duration: 0.15 }}
                 style={{
                   position: 'absolute',
-                  inset: 0,
-                  background: 'var(--accent-secondary)',
-                  borderRadius: 'var(--radius-full)',
-                  zIndex: -1,
-                  boxShadow: '0 2px 8px rgba(236, 72, 153, 0.4)',
+                  top: 'calc(100% + 8px)',
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  background: 'var(--bg-card)',
+                  backdropFilter: 'blur(20px)',
+                  WebkitBackdropFilter: 'blur(20px)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-md)',
+                  padding: 6,
+                  minWidth: 165,
+                  boxShadow: '0 12px 30px rgba(0, 0, 0, 0.55)',
+                  zIndex: 100,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 3,
                 }}
-              />
+              >
+                {sourcesList.map((src) => {
+                  const isSelected = activeSource === src.id;
+                  return (
+                    <button
+                      key={src.id}
+                      onClick={() => {
+                        setActiveSource(src.id as any);
+                        setIsSourceMenuOpen(false);
+                      }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '8px 10px',
+                        borderRadius: 'var(--radius-sm)',
+                        background: isSelected ? 'var(--bg-elevated)' : 'transparent',
+                        border: 'none',
+                        color: isSelected ? 'var(--text-primary)' : 'var(--text-secondary)',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        transition: 'background var(--transition-fast)',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span
+                          style={{
+                            width: 8,
+                            height: 8,
+                            borderRadius: '50%',
+                            backgroundColor: src.color,
+                            boxShadow: isSelected ? `0 0 8px ${src.color}` : 'none',
+                            flexShrink: 0,
+                          }}
+                        />
+                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                          <span style={{ fontSize: 12, fontWeight: isSelected ? 700 : 500, color: isSelected ? 'white' : 'var(--text-primary)' }}>
+                            {src.name}
+                          </span>
+                          <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                            {src.subtitle}
+                          </span>
+                        </div>
+                      </div>
+                      {isSelected && <Check size={14} color="var(--accent-primary)" style={{ marginLeft: 6 }} />}
+                    </button>
+                  );
+                })}
+              </motion.div>
             )}
-            Donghua
-          </button>
-
-          <button
-            onClick={() => setActiveSource('otakustv')}
-            style={{
-              position: 'relative',
-              padding: '4px 10px',
-              borderRadius: 'var(--radius-full)',
-              border: 'none',
-              background: 'transparent',
-              color: activeSource === 'otakustv' ? '#ffffff' : 'var(--text-muted)',
-              fontSize: 11,
-              fontWeight: 700,
-              cursor: 'pointer',
-              zIndex: 2,
-              transition: 'color var(--transition-fast)',
-            }}
-          >
-            {activeSource === 'otakustv' && (
-              <motion.div
-                layoutId="mobile-source-pill"
-                transition={{ type: 'spring', stiffness: 450, damping: 30 }}
-                style={{
-                  position: 'absolute',
-                  inset: 0,
-                  background: 'linear-gradient(135deg, #10b981, #059669)',
-                  borderRadius: 'var(--radius-full)',
-                  zIndex: -1,
-                  boxShadow: '0 2px 8px rgba(16, 185, 129, 0.4)',
-                }}
-              />
-            )}
-            Respaldo
-          </button>
+          </AnimatePresence>
         </div>
 
         {/* Acciones directas: Perfil, Favoritos, VIP y Ajustes */}

@@ -127,14 +127,14 @@ describe('animeService', () => {
   });
 
   describe('getServers', () => {
-    it('calls invoke with correct arguments and applies server masking', async () => {
+    it('calls invoke with correct arguments and preserves real server names', async () => {
       const mockResult = [{ name: 'Server 1', url: 'http://test' }];
       vi.mocked(invoke).mockResolvedValueOnce(mockResult);
 
       const result = await animeService.getServers('/episode/1', 'jkanime');
 
       expect(invoke).toHaveBeenCalledWith('get_servers', { episodeUrl: '/episode/1', source: 'jkanime' });
-      expect(result).toEqual([{ name: 'Servidor CDN 1', url: 'http://test' }]);
+      expect(result).toEqual([{ name: 'Server 1', url: 'http://test' }]);
     });
   });
 

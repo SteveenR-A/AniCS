@@ -1,10 +1,19 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { isVipServer, maskAndFilterServers } from '../serverUtils';
+import { FEATURE_FLAGS } from '@/config/features';
 import type { VideoServer } from '@/types';
+
+vi.mock('@/config/features', () => ({
+  FEATURE_FLAGS: {
+    SHOW_SUBSCRIPTION: true,
+    ENABLE_FIREBASE_AUTH: false,
+    MASK_SERVERS: false,
+  },
+}));
 
 describe('serverUtils', () => {
   describe('isVipServer', () => {
-    it('detects magi and desu servers as VIP', () => {
+    it('detects magi and desu servers as VIP when SHOW_SUBSCRIPTION is true', () => {
       expect(isVipServer('Servidor Magi')).toBe(true);
       expect(isVipServer('Desu 1080p')).toBe(true);
       expect(isVipServer('Servidor Dedicado VIP')).toBe(true);
@@ -39,11 +48,26 @@ describe('serverUtils', () => {
 
       const result = maskAndFilterServers(input);
       expect(result).toHaveLength(1);
-      expect(result[0].name).toBe('Servidor CDN 1');
+      expect(result[0].name).toBe('Valid Server');
       expect(result[0].url).toBe('https://stream.example.com/video.mp4');
     });
 
-    it('masks known server types with clean professional names', () => {
+    it('returns real server names when MASK_SERVERS is false', () => {
+      const input: VideoServer[] = [
+        { name: 'Magi', url: 'https://magi.example.com/hls/1', isDirect: false },
+        { name: 'Desu', url: 'https://desu.example.com/hls/2', isDirect: false },
+        { name: 'Mediafire', url: 'https://download.example.com/file.mp4', isDirect: false },
+        { name: 'Streamwish', url: 'https://streamwish.to/e/123', isDirect: false },
+      ];
+
+      const result = maskAndFilterServers(input, false);
+      expect(result[0].name).toBe('Magi');
+      expect(result[1].name).toBe('Desu');
+      expect(result[2].name).toBe('Mediafire');
+      expect(result[3].name).toBe('Streamwish');
+    });
+
+    it('masks known server types with clean professional names when forceMask is true', () => {
       const input: VideoServer[] = [
         { name: 'Magi', url: 'https://magi.example.com/hls/1', isDirect: false },
         { name: 'Desu', url: 'https://desu.example.com/hls/2', isDirect: false },
@@ -55,7 +79,7 @@ describe('serverUtils', () => {
         { name: 'Other CDN', url: 'https://othercdn.com/stream', isDirect: false },
       ];
 
-      const result = maskAndFilterServers(input);
+      const result = maskAndFilterServers(input, true);
       expect(result[0].name).toBe('Servidor Dedicado VIP (1080p Ultra HD)');
       expect(result[1].name).toBe('Servidor Alta Velocidad (1080p)');
       expect(result[2].name).toBe('Servidor Principal HLS (1080p)');

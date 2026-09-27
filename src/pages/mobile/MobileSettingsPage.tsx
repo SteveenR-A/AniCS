@@ -387,74 +387,76 @@ export function MobileSettingsPage() {
             </div>
 
             {/* Cloud Sync Status */}
-            <div style={{
-              background: 'rgba(255, 255, 255, 0.03)',
-              borderRadius: 'var(--radius-md)',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
-              padding: '12px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div
+            {FEATURE_FLAGS.ENABLE_FIREBASE_AUTH && (
+              <div style={{
+                background: 'rgba(255, 255, 255, 0.03)',
+                borderRadius: 'var(--radius-md)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                padding: '12px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div
+                    style={{
+                      width: 36,
+                      height: 36,
+                      borderRadius: '10px',
+                      background: syncConfig.userId ? 'rgba(16, 185, 129, 0.15)' : 'rgba(59, 130, 246, 0.15)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: syncConfig.userId ? '#10b981' : 'var(--accent-primary)',
+                    }}
+                  >
+                    <Cloud size={18} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: 'white', display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span>Sincronización en la Nube</span>
+                      {FEATURE_FLAGS.SHOW_SUBSCRIPTION && (
+                        <span style={{
+                          fontSize: 9, fontWeight: 800,
+                          background: isVip ? 'rgba(245, 158, 11, 0.2)' : 'rgba(245, 158, 11, 0.15)',
+                          color: '#fbbf24', padding: '1px 5px', borderRadius: '4px',
+                          border: '1px solid rgba(245, 158, 11, 0.3)',
+                          display: 'inline-flex', alignItems: 'center', gap: 2,
+                        }}>
+                          <Crown size={9} />
+                          VIP
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                      {syncConfig.userId
+                        ? (syncConfig.userEmail || (syncConfig.lastSyncAt ? `Sync: ${new Date(syncConfig.lastSyncAt).toLocaleDateString()}` : 'Conectado'))
+                        : 'Historial y favoritos multi-dispositivo'}
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setIsSyncModalOpen(true)}
                   style={{
-                    width: 36,
-                    height: 36,
-                    borderRadius: '10px',
-                    background: syncConfig.userId ? 'rgba(16, 185, 129, 0.15)' : 'rgba(59, 130, 246, 0.15)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: syncConfig.userId ? '#10b981' : 'var(--accent-primary)',
+                    background: 'var(--accent-primary)',
+                    border: 'none',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '6px 12px',
+                    color: 'white',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    cursor: 'pointer',
                   }}
                 >
-                  <Cloud size={18} />
-                </div>
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: 'white', display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span>Sincronización en la Nube</span>
-                    {FEATURE_FLAGS.SHOW_SUBSCRIPTION && (
-                      <span style={{
-                        fontSize: 9, fontWeight: 800,
-                        background: isVip ? 'rgba(245, 158, 11, 0.2)' : 'rgba(245, 158, 11, 0.15)',
-                        color: '#fbbf24', padding: '1px 5px', borderRadius: '4px',
-                        border: '1px solid rgba(245, 158, 11, 0.3)',
-                        display: 'inline-flex', alignItems: 'center', gap: 2,
-                      }}>
-                        <Crown size={9} />
-                        VIP
-                      </span>
-                    )}
-                  </div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                    {syncConfig.userId
-                      ? (syncConfig.userEmail || (syncConfig.lastSyncAt ? `Sync: ${new Date(syncConfig.lastSyncAt).toLocaleDateString()}` : 'Conectado'))
-                      : 'Historial y favoritos multi-dispositivo'}
-                  </div>
-                </div>
+                  {syncConfig.userId ? 'Gestionar' : 'Conectar'}
+                </button>
               </div>
-
-              <button
-                type="button"
-                onClick={() => setIsSyncModalOpen(true)}
-                style={{
-                  background: 'var(--accent-primary)',
-                  border: 'none',
-                  borderRadius: 'var(--radius-md)',
-                  padding: '6px 12px',
-                  color: 'white',
-                  fontSize: 11,
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                }}
-              >
-                {syncConfig.userId ? 'Gestionar' : 'Conectar'}
-              </button>
-            </div>
+            )}
 
             {/* Barra Móvil de Demostración Rápida Multicuentas */}
-            {FEATURE_FLAGS.SHOW_SUBSCRIPTION && (
+            {FEATURE_FLAGS.ENABLE_FIREBASE_AUTH && FEATURE_FLAGS.SHOW_SUBSCRIPTION && (
               <div
                 style={{
                   background: 'rgba(255, 255, 255, 0.03)',

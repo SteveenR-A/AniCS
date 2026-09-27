@@ -119,7 +119,7 @@ if (fs.existsSync(changelogMdPath)) {
     const entryHeader = `## [${targetVersion}] - ${today}\n\n### ${releaseTitle}\n` +
       highlights.map((h) => `- ${h}`).join('\n') + '\n\n---\n\n';
     changelogMd = changelogMd.replace(
-      /(# Registro de Cambios[^\n]*\n\n[^\n]*\n[^\n]*\n\n---\n\n)/,
+      /(# Registro de Cambios[\s\S]*?\n---\n\n)/,
       `$1${entryHeader}`
     );
     fs.writeFileSync(changelogMdPath, changelogMd, 'utf8');
