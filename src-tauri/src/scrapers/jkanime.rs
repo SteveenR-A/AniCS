@@ -965,6 +965,12 @@ impl AnimeExtractor for JKAnimeExtractor {
         }
 
         let media_type = detect_media_type(url);
+        if media_type == MediaType::Unknown && !url.ends_with(".mp4") && !url.contains(".m3u8") {
+            return Err(AppError::Resolver(format!(
+                "El servidor {} no contiene un stream de video directo reproducible",
+                server.name
+            )));
+        }
         Ok(ResolvedMedia {
             direct_url: url.clone(),
             media_type,

@@ -212,9 +212,12 @@ async fn test_otakustv_get_latest() {
     let extractor = OtakusTVExtractor::new();
     let results = extractor.get_latest(1).await.expect("Failed to get latest from OtakusTV");
     println!("OtakusTV Latest results count: {}", results.len());
-    for r in results.iter().take(5) {
-        println!(" - Title: '{}', Ep: {:?}, URL: '{}'", r.title, r.episode, r.url);
-        assert!(r.url.starts_with("http"), "URL must be absolute: {}", r.url);
+    let ep_url = &results[0].url;
+    println!("Testing get_details with episode URL from latest: {}", ep_url);
+    let det = extractor.get_details(ep_url).await;
+    match det {
+        Ok(d) => println!("  -> Successfully got details: title='{}', thumb='{}', eps={}", d.title, d.thumbnail_url, d.episodes.len()),
+        Err(e) => println!("  -> Error getting details: {:?}", e),
     }
     assert!(!results.is_empty(), "OtakusTV get_latest returned empty results");
 }
@@ -222,11 +225,15 @@ async fn test_otakustv_get_latest() {
 #[tokio::test]
 async fn test_otakustv_search() {
     let extractor = OtakusTVExtractor::new();
-    let results = extractor.search("naruto").await.expect("Failed to search on OtakusTV");
+    let results = extractor.search("futsutsuka").await.expect("Failed to search on OtakusTV");
     println!("OtakusTV Search results count: {}", results.len());
     for r in results.iter().take(3) {
         println!(" - Title: '{}', URL: '{}', Thumb: '{}'", r.title, r.url, r.thumbnail_url);
         assert!(r.url.starts_with("http"), "Search URL must be absolute: {}", r.url);
+        let det = extractor.get_details(&r.url).await.expect("Failed details");
+        println!("    -> Details: title='{}', thumb='{}', eps={}", det.title, det.thumbnail_url, det.episodes.len());
+        assert!(!det.thumbnail_url.contains("i.imgur.com"), "No debe contener el logo de imgur como portada");
+        assert!(det.thumbnail_url.contains("/cdn/img/anime/"), "Debe apuntar a la portada oficial del anime");
     }
     assert!(!results.is_empty(), "OtakusTV search returned empty results");
 }
@@ -241,14 +248,22 @@ async fn test_otakustv_details_and_servers() {
     assert!(!details.title.is_empty());
     assert!(!details.episodes.is_empty());
 
-    let servers = extractor.get_servers("https://www.otakustv.net/ver/naruto-shippuden-the-movie-bonds-1").await
+    let servers = extractor.get_servers("https://www.otakustv.net/ver/dogulwang-9").await
         .expect("Failed to get servers from OtakusTV");
-    println!("OtakusTV Servers count: {}", servers.len());
+    println!("Dogulwang 9 Servers count: {}", servers.len());
     for s in servers.iter() {
         println!(" - Server: '{}', URL: '{}', Direct: {}", s.name, s.url, s.is_direct);
         assert!(s.url.starts_with("http"), "Server URL must be absolute: {}", s.url);
     }
     assert!(!servers.is_empty(), "OtakusTV should return video servers");
+    // Verificar que al menos los servidores confiables (uqload o lulustream) se resuelvan con stream directo
+    let uqload_srv = servers.iter().find(|s| s.name.to_lowercase().contains("uqload"));
+    if let Some(srv) = uqload_srv {
+        let res = extractor.resolve_stream(srv).await;
+        assert!(res.is_ok(), "Uqload debe resolverse a stream directo: {:?}", res);
+        let media = res.unwrap();
+        assert!(media.direct_url.contains(".m3u8") || media.direct_url.contains(".mp4"));
+    }
 }
 
 

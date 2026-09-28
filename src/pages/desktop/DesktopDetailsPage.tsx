@@ -100,7 +100,12 @@ export function DesktopDetailsPage() {
     const load = async () => {
       // Si tenemos una entrada completa en caché para esta URL, usarla de inmediato
       if (cached && cached.title && cached.url === decodedUrl) {
-        const hasTempThumbnail = cached.thumbnailUrl && cached.thumbnailUrl.includes('episodes_tumbl');
+        const hasTempThumbnail = cached.thumbnailUrl && (
+          cached.thumbnailUrl.includes('episodes_tumbl') ||
+          cached.thumbnailUrl.includes('i.imgur.com') ||
+          cached.thumbnailUrl.includes('episode.png') ||
+          cached.thumbnailUrl.includes('anime.png')
+        );
         if (!hasTempThumbnail) {
           setDetails(cached);
           setIsLoading(false);
@@ -131,8 +136,24 @@ export function DesktopDetailsPage() {
           checkFavorite(decodedUrl, activeProfile?.id),
         ]);
         if (isCancelled) return;
-        setDetails(det);
-        cacheDetails(det);
+
+        // Asegurar que no se sobreescriba una portada válida con placeholders o logos externos
+        const isInvalidThumb = !det.thumbnailUrl ||
+          det.thumbnailUrl.includes('i.imgur.com') ||
+          det.thumbnailUrl.includes('episode.png') ||
+          det.thumbnailUrl.includes('anime.png');
+
+        const resolvedThumb = isInvalidThumb && passedAnime?.thumbnailUrl && !passedAnime.thumbnailUrl.includes('i.imgur.com')
+          ? passedAnime.thumbnailUrl
+          : det.thumbnailUrl;
+
+        const cleanDet: AnimeDetails = {
+          ...det,
+          thumbnailUrl: resolvedThumb,
+        };
+
+        setDetails(cleanDet);
+        cacheDetails(cleanDet);
         setIsFavorite(fav);
         if (fav) {
           getFavorites(activeProfile?.id).then(list => {
@@ -577,7 +598,7 @@ export function DesktopDetailsPage() {
         <button
           onClick={() => navigate(-1)}
           style={{
-            position: 'absolute', top: 20, left: 24, zIndex: 10,
+            position: 'absolute', top: 12, left: 14, zIndex: 10,
             background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(8px)',
             border: '1px solid rgba(255,255,255,0.1)',
             borderRadius: 'var(--radius-full)',

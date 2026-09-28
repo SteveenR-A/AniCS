@@ -100,5 +100,17 @@ describe('serverUtils', () => {
       expect(result).toHaveLength(1);
       expect(result[0].url).toBe('https://valid.com/video');
     });
+
+    it('filters out descarga servers that are not suitable for streaming', () => {
+      const input: VideoServer[] = [
+        { name: 'Descarga 1', url: 'https://download.site/d/123', isDirect: true },
+        { name: 'Descarga 2', url: 'https://download.site/d/456', isDirect: false },
+        { name: 'Uqload', url: 'https://uqload.is/embed-123.html', isDirect: false },
+      ];
+
+      const result = maskAndFilterServers(input, false);
+      expect(result).toHaveLength(1);
+      expect(result[0].name).toBe('Uqload');
+    });
   });
 });

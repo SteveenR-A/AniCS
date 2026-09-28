@@ -95,23 +95,53 @@ function SkeletonCard() {
 export function DesktopHomePage() {
   const navigate = useNavigate();
   const activeSource = useAnimeStore((s) => s.activeSource);
+  const setLatestEpisodes = useAnimeStore((s) => s.setLatestEpisodes);
+  const setSchedule = useAnimeStore((s) => s.setSchedule);
 
-  const [latestList, setLatestList] = useState<AnimeResult[]>([]);
-  const [scheduleList, setScheduleList] = useState<AnimeResult[]>([]);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const cachedLatest = useAnimeStore((s) => s.latestEpisodesBySource[activeSource]);
+  const cachedSchedule = useAnimeStore((s) => s.scheduleBySource[activeSource]);
+
+  const [latestList, setLatestList] = useState<AnimeResult[]>(() => cachedLatest || []);
+  const [scheduleList, setScheduleList] = useState<AnimeResult[]>(() => cachedSchedule || []);
+  const [isLoading, setIsLoading] = useState<boolean>(() => !cachedLatest || cachedLatest.length === 0);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const load = useCallback(async (targetSource: string) => {
-    setIsLoading(true);
-    setLatestList([]);
-    setScheduleList([]);
+  useEffect(() => {
+    if (cachedLatest && cachedLatest.length > 0) {
+      setLatestList(cachedLatest);
+      setIsLoading(false);
+    }
+    if (cachedSchedule && cachedSchedule.length > 0) {
+      setScheduleList(cachedSchedule);
+    }
+  }, [cachedLatest, cachedSchedule]);
+
+  const load = useCallback(async (targetSource: string, force = false) => {
+    const store = useAnimeStore.getState();
+    const existingLatest = store.latestEpisodesBySource[targetSource];
+    const existingSchedule = store.scheduleBySource[targetSource];
+
+    if (!force && existingLatest && existingLatest.length > 0) {
+      setLatestList(existingLatest);
+      if (existingSchedule && existingSchedule.length > 0) {
+        setScheduleList(existingSchedule);
+      }
+      setIsLoading(false);
+      return;
+    }
+
+    if (!existingLatest || existingLatest.length === 0) {
+      setIsLoading(true);
+      setLatestList([]);
+      setScheduleList([]);
+    }
+
     try {
       const [latest, sched] = await Promise.allSettled([
         getLatest(targetSource, 1),
         getSchedule(targetSource),
       ]);
 
-      // Si el usuario cambió de fuente mientras cargaba, descartamos la respuesta antigua
       if (useAnimeStore.getState().activeSource !== targetSource) {
         return;
       }
@@ -127,6 +157,7 @@ export function DesktopHomePage() {
             return true;
           });
         setLatestList(sanitizedLatest);
+        setLatestEpisodes(sanitizedLatest, targetSource);
       }
       if (sched.status === 'fulfilled') {
         const seen = new Set<string>();
@@ -139,6 +170,7 @@ export function DesktopHomePage() {
             return true;
           });
         setScheduleList(uniqueSched);
+        setSchedule(uniqueSched, targetSource);
       }
     } catch (e) {
       console.error('Error cargando datos de inicio en Desktop', e);
@@ -148,7 +180,7 @@ export function DesktopHomePage() {
         setIsRefreshing(false);
       }
     }
-  }, []);
+  }, [setLatestEpisodes, setSchedule]);
 
   useEffect(() => {
     load(activeSource);
@@ -156,7 +188,7 @@ export function DesktopHomePage() {
 
   const handleRefresh = () => {
     setIsRefreshing(true);
-    load(activeSource);
+    load(activeSource, true);
   };
 
   const handleAnimeClick = (anime: AnimeResult) => {

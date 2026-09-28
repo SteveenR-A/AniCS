@@ -84,6 +84,46 @@ impl OtakusTVExtractor {
 
         String::from_utf8(bytes).ok()
     }
+    pub fn normalize_series_url(&self, url: &str) -> String {
+        let trimmed = url.trim_end_matches('/');
+        if trimmed.contains("/ver/") {
+            if let Some(pos) = trimmed.rfind('-') {
+                let (prefix, suffix) = trimmed.split_at(pos);
+                if suffix.len() > 1 && suffix[1..].chars().all(|c| c.is_ascii_digit()) {
+                    return prefix.replace("/ver/", "/anime/");
+                }
+            }
+            return trimmed.replace("/ver/", "/anime/");
+        }
+        trimmed.to_string()
+    }
+}
+
+fn otakustv_server_priority(name: &str) -> i32 {
+    let lower = name.to_lowercase();
+    if lower.contains("uqload") {
+        100
+    } else if lower.contains("lulustream") || lower.contains("lulu") {
+        95
+    } else if lower.contains("mp4upload") {
+        90
+    } else if lower.contains("streamwish") || lower.contains("swish") {
+        70
+    } else if lower.contains("voe") {
+        60
+    } else if lower.contains("filemoon") || lower.contains("fmoon") {
+        50
+    } else if lower.contains("vidhide") {
+        40
+    } else if lower.contains("dood") {
+        30
+    } else if lower.contains("mixdrop") {
+        20
+    } else if lower.contains("descarga") {
+        5
+    } else {
+        15
+    }
 }
 
 #[async_trait]
@@ -126,13 +166,22 @@ impl AnimeExtractor for OtakusTVExtractor {
 
             if title.is_empty() { continue; }
 
+            let slug = full_url.trim_end_matches('/').split('/').last().unwrap_or("").to_string();
+
             let thumbnail = article.select(&img_sel).next()
                 .map(|img| {
                     let d = img.value().attr("data-src").unwrap_or("").trim();
                     if !d.is_empty() { d.to_string() } else { img.value().attr("src").unwrap_or("").trim().to_string() }
                 })
+                .filter(|src| !src.contains("anime.png") && !src.contains("episode.png") && !src.contains("i.imgur.com"))
                 .map(|src| self.normalize_url(&src))
-                .unwrap_or_default();
+                .unwrap_or_else(|| {
+                    if !slug.is_empty() {
+                        self.url(&format!("/cdn/img/anime/{}.webp", slug))
+                    } else {
+                        String::new()
+                    }
+                });
 
             results.push(AnimeResult {
                 title,
@@ -198,13 +247,37 @@ impl AnimeExtractor for OtakusTVExtractor {
                 None
             };
 
-            let thumbnail = article.select(&img_sel).next()
+            // Extraer slug para inferir la portada oficial vertical del anime
+            let clean_ep = href.trim_end_matches('/');
+            let slug = if clean_ep.contains("/ver/") {
+                if let Some(pos) = clean_ep.rfind('-') {
+                    let (p, s) = clean_ep.split_at(pos);
+                    if s.len() > 1 && s[1..].chars().all(|c| c.is_ascii_digit()) {
+                        p.split('/').last().unwrap_or("")
+                    } else {
+                        clean_ep.split('/').last().unwrap_or("")
+                    }
+                } else {
+                    clean_ep.split('/').last().unwrap_or("")
+                }
+            } else {
+                clean_ep.split('/').last().unwrap_or("")
+            };
+
+            let mut thumbnail = article.select(&img_sel).next()
                 .map(|img| {
                     let d = img.value().attr("data-src").unwrap_or("").trim();
                     if !d.is_empty() { d.to_string() } else { img.value().attr("src").unwrap_or("").trim().to_string() }
                 })
+                .filter(|src| !src.contains("episode.png") && !src.contains("anime.png") && !src.contains("i.imgur.com"))
                 .map(|src| self.normalize_url(&src))
                 .unwrap_or_default();
+
+            if !slug.is_empty() {
+                thumbnail = self.url(&format!("/cdn/img/anime/{}.webp", slug));
+            } else if thumbnail.contains("/portada/") {
+                thumbnail = thumbnail.replace("/portada/", "/anime/");
+            }
 
             results.push(AnimeResult {
                 title,
@@ -229,21 +302,32 @@ impl AnimeExtractor for OtakusTVExtractor {
 
     // Detalles completos de la serie
     async fn get_details(&self, url: &str) -> AppResult<AnimeDetails> {
-        let html = fetch_html(url, Some(&self.base_url)).await
+        let clean_url = self.normalize_series_url(url);
+        let html = fetch_html(&clean_url, Some(&self.base_url)).await
             .map_err(AppError::Network)?;
 
         if html.is_empty() {
-            return Err(AppError::NotFound(format!("No content at {url}")));
+            return Err(AppError::NotFound(format!("No content at {clean_url}")));
         }
 
         let doc = Html::parse_document(&html);
 
         // 1. Título
         let title_sel = Selector::parse("div.ti h1, h1").unwrap();
-        let title = doc.select(&title_sel).next()
+        let raw_title = doc.select(&title_sel).next()
             .map(|h| h.text().collect::<String>().trim().to_string())
             .filter(|t| !t.is_empty())
             .unwrap_or_else(|| "Anime".to_string());
+        let title = if raw_title.to_lowercase().starts_with("ver ") {
+            let without_ver = raw_title[4..].trim();
+            if let Some(idx) = without_ver.to_lowercase().find(" episodio ") {
+                without_ver[..idx].trim().to_string()
+            } else {
+                without_ver.to_string()
+            }
+        } else {
+            raw_title
+        };
 
         // 2. Sinopsis
         let sinopsis_sel = Selector::parse("div.tx p, div.info p, p").unwrap();
@@ -256,15 +340,29 @@ impl AnimeExtractor for OtakusTVExtractor {
             }
         }
 
-        // 3. Miniatura / Portada
-        let img_sel = Selector::parse("div.info figure.i img, figure.i img, img").unwrap();
-        let thumbnail = doc.select(&img_sel).next()
-            .map(|img| {
-                let d = img.value().attr("data-src").unwrap_or("").trim();
-                if !d.is_empty() { d.to_string() } else { img.value().attr("src").unwrap_or("").trim().to_string() }
-            })
-            .map(|src| self.normalize_url(&src))
-            .unwrap_or_default();
+        // 3. Miniatura / Portada (Descartar logo del sitio imgur y obtener portada real)
+        let img_sel = Selector::parse("figure.i img, div.info figure img, div.img figure img, div.info img").unwrap();
+        let mut thumbnail = String::new();
+        for img in doc.select(&img_sel) {
+            let d = img.value().attr("data-src").unwrap_or("").trim();
+            let s = img.value().attr("src").unwrap_or("").trim();
+            let src = if !d.is_empty() { d } else { s };
+            if !src.is_empty()
+                && !src.contains("i.imgur.com")
+                && !src.contains("logo")
+                && !src.contains("avatar")
+                && !src.contains("episode.png")
+                && !src.contains("anime.png")
+            {
+                thumbnail = self.normalize_url(src);
+                break;
+            }
+        }
+
+        let slug = clean_url.trim_end_matches('/').split('/').last().unwrap_or("");
+        if (thumbnail.is_empty() || thumbnail.contains("i.imgur.com") || thumbnail.contains("episode.png") || thumbnail.contains("anime.png")) && !slug.is_empty() {
+            thumbnail = self.url(&format!("/cdn/img/anime/{}.webp", slug));
+        }
 
         // 4. Géneros
         let genre_sel = Selector::parse("a[href*='genero']").unwrap();
@@ -344,7 +442,7 @@ impl AnimeExtractor for OtakusTVExtractor {
 
         Ok(AnimeDetails {
             title,
-            url: url.to_string(),
+            url: clean_url,
             thumbnail_url: thumbnail,
             synopsis,
             genres,
@@ -363,7 +461,7 @@ impl AnimeExtractor for OtakusTVExtractor {
         })
     }
 
-    // Servidores de video para un episodio
+    // Servidores de video para un episodio ordenados por compatibilidad
     async fn get_servers(&self, episode_url: &str) -> AppResult<Vec<VideoServer>> {
         let html = fetch_html(episode_url, Some(&self.base_url)).await
             .map_err(AppError::Network)?;
@@ -431,7 +529,7 @@ impl AnimeExtractor for OtakusTVExtractor {
             }
         }
 
-        // 3. Extraer opciones de descarga si existen
+        // 3. Extraer opciones de descarga si existen (con prioridad baja y no directas para no romper streaming)
         if let Some(json_str) = dwn_json {
             if let Ok(parsed) = serde_json::from_str::<Vec<Vec<String>>>(&json_str) {
                 for (idx, item) in parsed.into_iter().enumerate() {
@@ -442,7 +540,7 @@ impl AnimeExtractor for OtakusTVExtractor {
                             servers.push(VideoServer {
                                 name: format!("Descarga {}", idx + 1),
                                 url: dl_url,
-                                is_direct: true,
+                                is_direct: false,
                                 referer: Some(episode_url.to_string()),
                             });
                         }
@@ -451,6 +549,13 @@ impl AnimeExtractor for OtakusTVExtractor {
             }
         }
 
+        // 4. Ordenar servidores por compatibilidad real y estabilidad
+        servers.sort_by(|a, b| {
+            let score_a = otakustv_server_priority(&a.name);
+            let score_b = otakustv_server_priority(&b.name);
+            score_b.cmp(&score_a)
+        });
+
         Ok(servers)
     }
 
@@ -458,7 +563,7 @@ impl AnimeExtractor for OtakusTVExtractor {
     async fn resolve_stream(&self, server: &VideoServer) -> AppResult<ResolvedMedia> {
         let url = &server.url;
 
-        // Streams directos
+        // 1. Streams directos
         if url.ends_with(".mp4") {
             return Ok(ResolvedMedia {
                 direct_url: url.clone(),
@@ -479,29 +584,95 @@ impl AnimeExtractor for OtakusTVExtractor {
             });
         }
 
-        // Si es una página de reproductor embebido, intentar extraer el stream
-        let html = fetch_html(url, server.referer.as_deref()).await
-            .map_err(AppError::Network)?;
+        // 2. Soporte específico para VOE (seguir redirección JavaScript si aplica)
+        let (html, effective_url) = if url.contains("voe.sx") {
+            let resp_html = fetch_html(url, server.referer.as_deref()).await
+                .map_err(AppError::Network)?;
+            static VOE_REDIR_RE: Lazy<Regex> = Lazy::new(|| {
+                Regex::new(r#"window\.location\.href\s*=\s*['"](https?://[^'"]+)['"]"#).unwrap()
+            });
+            if let Some(cap) = VOE_REDIR_RE.captures(&resp_html) {
+                let redir_url = cap[1].to_string();
+                let redir_html = fetch_html(&redir_url, Some(url)).await.unwrap_or_default();
+                (redir_html, redir_url)
+            } else {
+                (resp_html, url.clone())
+            }
+        } else {
+            let h = fetch_html(url, server.referer.as_deref()).await
+                .map_err(AppError::Network)?;
+            (h, url.clone())
+        };
 
+        if html.is_empty() {
+            return Err(AppError::Resolver("Página del servidor vacía o inaccesible".to_string()));
+        }
+
+        // 3. Soporte específico para Uqload
+        if url.contains("uqload") {
+            static UQLOAD_SRC_RE: Lazy<Regex> = Lazy::new(|| {
+                Regex::new(r#"sources\s*:\s*\[\s*['"](https?://[^'"]+)['"]"#).unwrap()
+            });
+            if let Some(cap) = UQLOAD_SRC_RE.captures(&html) {
+                let stream_url = cap[1].to_string();
+                let media_type = detect_media_type(&stream_url);
+                return Ok(ResolvedMedia {
+                    direct_url: stream_url,
+                    media_type,
+                    referer: Some(effective_url),
+                    user_agent: None,
+                    qualities: vec![],
+                });
+            }
+        }
+
+        // 4. Soporte específico para Mp4upload (video.mp4 directo)
+        if url.contains("mp4upload") {
+            static MP4UPLOAD_SRC_RE: Lazy<Regex> = Lazy::new(|| {
+                Regex::new(r#"(?i)src\s*:\s*["'](https?://[^"']+\.mp4[^"']*)["']"#).unwrap()
+            });
+            if let Some(cap) = MP4UPLOAD_SRC_RE.captures(&html) {
+                let stream_url = cap[1].to_string();
+                return Ok(ResolvedMedia {
+                    direct_url: stream_url,
+                    media_type: MediaType::Mp4,
+                    referer: Some("https://www.mp4upload.com/".to_string()),
+                    user_agent: None,
+                    qualities: vec![],
+                });
+            }
+        }
+
+        // 5. Soporte específico para Lulustream (HLS directo con unpacker)
+        if url.contains("luluvdo") || url.contains("lulustream") {
+            if let Some(stream_url) = crate::core::JsUnpacker::extract_stream_url(&html) {
+                return Ok(ResolvedMedia {
+                    direct_url: stream_url,
+                    media_type: MediaType::Hls,
+                    referer: Some("https://luluvdo.com/".to_string()),
+                    user_agent: None,
+                    qualities: vec![],
+                });
+            }
+        }
+
+        // 6. Extracción genérica con JsUnpacker
         if let Some(stream_url) = crate::core::JsUnpacker::extract_stream_url(&html) {
             let media_type = detect_media_type(&stream_url);
             return Ok(ResolvedMedia {
                 direct_url: stream_url,
                 media_type,
-                referer: Some(url.clone()),
+                referer: Some(effective_url),
                 user_agent: None,
                 qualities: vec![],
             });
         }
 
-        // Fallback genérico para iframes embebidos
-        Ok(ResolvedMedia {
-            direct_url: url.clone(),
-            media_type: MediaType::Unknown,
-            referer: server.referer.clone(),
-            user_agent: None,
-            qualities: vec![],
-        })
+        // 7. Si no se pudo extraer un stream directo reproducible, devolver error para permitir fallback automático
+        Err(AppError::Resolver(format!(
+            "El servidor {} no contiene un flujo de video reproducible directamente",
+            server.name
+        )))
     }
 
     // Lista de géneros disponibles

@@ -1,5 +1,19 @@
 [
   {
+    "version": "0.2.9",
+    "date": "2026-09-28",
+    "title": "Mejoras en Servidores de Respaldo, Desempaquetado y Navegación",
+    "type": "patch",
+    "highlights": [
+      "Extractores dedicados para Mp4upload y Lulustream en fuente Respaldo (OtakusTV)",
+      "Corrección en desempaquetado JavaScript multilínea en MundoDonghua",
+      "Solución a desmontaje prematuro de video en reproductor de JKAnime",
+      "Persistencia de estado y caché al navegar hacia atrás en catálogos",
+      "Ajustes ergonómicos en botón de volver y controles de reproductor",
+      "Registro de hoja de ruta en TASKS.md"
+    ]
+  },
+  {
     "version": "0.2.8",
     "date": "2026-09-27",
     "title": "Selector móvil desplegable, mejoras de reproducción y control modular",

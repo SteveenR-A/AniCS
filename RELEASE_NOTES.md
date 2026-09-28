@@ -1,14 +1,15 @@
-# AniCS v0.2.8 — Selector móvil desplegable, mejoras de reproducción y control modular
+# AniCS v0.2.9 — Mejoras en Servidores de Respaldo, Desempaquetado y Navegación
 
-**Fecha de lanzamiento:** 2026-09-27
+**Fecha de lanzamiento:** 2026-09-28
 
 ### 🚀 Novedades y Correcciones
 
-- Selector desplegable de catálogo en Android para evitar recorte de iconos
-- Recuperación de optimizaciones vanilla de reproducción HLS y MP4
-- Pre-consulta paralela de progreso de episodios y persistencia al cambiar de servidor
-- Control modular de suscripción VIP y login de Firebase mediante Feature Flags
-- Nombres reales de servidores de video sin enmascaramiento
+- Extractores dedicados para Mp4upload y Lulustream en fuente Respaldo (OtakusTV)
+- Corrección en desempaquetado JavaScript multilínea en MundoDonghua
+- Solución a desmontaje prematuro de video en reproductor de JKAnime
+- Persistencia de estado y caché al navegar hacia atrás en catálogos
+- Ajustes ergonómicos en botón de volver y controles de reproductor
+- Registro de hoja de ruta en TASKS.md
 
 ---
 *Para ver el historial acumulativo completo de todas las versiones, consulta [CHANGELOG.md](./CHANGELOG.md).*

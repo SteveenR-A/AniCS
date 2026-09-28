@@ -567,17 +567,26 @@ impl AnimeExtractor for MundoDonghuaExtractor {
             }
         }
 
-        // 3. Fallback genérico para otros servidores embebidos
+        // 3. Fallback genérico para otros servidores embebidos (Vidhide, Streamwish, Fmoon, etc.)
         let html = fetch_html(url, server.referer.as_deref())
             .await
             .map_err(AppError::Network)?;
 
         if let Some(stream_url) = JsUnpacker::extract_stream_url(&html) {
             let media_type = detect_media_type(&stream_url);
+            let stream_referer = if url.contains("vidhide") {
+                Some("https://vidhidepro.com/".to_string())
+            } else if url.contains("streamwish") || url.contains("embedwish") || url.contains("sfastwish") {
+                Some("https://embedwish.com/".to_string())
+            } else if url.contains("fmoon") || url.contains("bysekoze") {
+                Some("https://bysekoze.com/".to_string())
+            } else {
+                Some(self.base_url.clone())
+            };
             return Ok(ResolvedMedia {
                 direct_url: stream_url,
                 media_type,
-                referer: Some(self.base_url.clone()),
+                referer: stream_referer,
                 user_agent: None,
                 qualities: vec![],
             });

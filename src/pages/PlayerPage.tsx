@@ -21,7 +21,7 @@ import { upsertHistory, getEpisodeProgress } from '@/services/storageService';
 import { getLocalMediaUrl, setKeepScreenOn, setNativeFullscreen, setNativeScreenOrientation } from '@/services/downloadService';
 import { useResponsive } from '@/hooks/useResponsive';
 import { rewriteDeadCdnUrl, createRobustHlsLoader } from '@/utils/hlsLoader';
-import { isVipServer } from '@/utils/serverUtils';
+import { isVipServer, getServerPriority } from '@/utils/serverUtils';
 import type { VideoServer } from '@/types';
 
 function formatTime(s: number) {
@@ -158,7 +158,7 @@ export function PlayerPage() {
   };
 
   // Gestos & HUD Toasts
-  const [hudToast, setHudToast] = useState<{ icon: 'volume' | 'brightness' | 'seek' | 'aspect' | 'vip' | 'external'; text: string; value?: number } | null>(null);
+  const [hudToast, setHudToast] = useState<{ icon: 'volume' | 'brightness' | 'seek' | 'aspect' | 'vip' | 'external' | 'server'; text: string; value?: number } | null>(null);
   const [brightness, setBrightness] = useState(1.0);
   const [doubleTapSide, setDoubleTapSide] = useState<'left' | 'right' | null>(null);
   const [centerPlayPulse, setCenterPlayPulse] = useState<'play' | 'pause' | null>(null);
@@ -229,7 +229,7 @@ export function PlayerPage() {
     }
   };
 
-  const showToast = (toast: { icon: 'volume' | 'brightness' | 'seek' | 'aspect' | 'vip' | 'external'; text: string; value?: number }) => {
+  const showToast = (toast: { icon: 'volume' | 'brightness' | 'seek' | 'aspect' | 'vip' | 'external' | 'server'; text: string; value?: number }) => {
     setHudToast(toast);
     if (toastTimeout.current) clearTimeout(toastTimeout.current);
     toastTimeout.current = setTimeout(() => setHudToast(null), 1500);
@@ -382,6 +382,121 @@ export function PlayerPage() {
 
   // Sincronización precisa de Anime y Episodio desde URL (sin mezclar animes previos)
   const currentLoadedKey = useRef<string>('');
+  const failedServersRef = useRef<Set<string>>(new Set());
+  const tryFallbackServerRef = useRef<() => void>(() => {});
+
+  const handleSelectServer = async (server: VideoServer, currentSource?: string) => {
+    const isTargetVip = isVipServer(server.name);
+    if (isTargetVip && FEATURE_FLAGS.SHOW_SUBSCRIPTION && !isVip) {
+      showToast({
+        icon: 'vip',
+        text: `El servidor ${server.name} es exclusivo para miembros VIP`,
+      });
+      openVipModal();
+      return;
+    }
+    const sourceToUse = currentSource || querySource;
+    setSelectedServer(server);
+    setIsResolving(true);
+    try {
+      const media = await resolveStream(server, sourceToUse);
+      setResolvedMedia(media);
+      failedServersRef.current.delete(server.url);
+    } catch (err) {
+      console.warn(`[AniCS Player] Servidor ${server.name} falló:`, err);
+      failedServersRef.current.add(server.url);
+      showToast({
+        icon: 'server',
+        text: `Error en ${server.name}, buscando alternativo...`,
+      });
+      tryFallbackServerRef.current();
+    } finally {
+      setIsResolving(false);
+    }
+  };
+
+  const tryFallbackServer = useCallback(() => {
+    if (!servers.length || !selectedServer) return;
+    const isUserVip = !FEATURE_FLAGS.SHOW_SUBSCRIPTION || isVip;
+    const allowed = isUserVip ? servers : servers.filter(s => !isVipServer(s.name));
+    if (!allowed.length) return;
+
+    failedServersRef.current.add(selectedServer.url);
+
+    // Buscar el siguiente servidor no probado
+    const nextServer = allowed.find(s => !failedServersRef.current.has(s.url));
+
+    // Si ya se probaron todos, permitir reintento manual cíclico si el usuario lo solicita
+    if (!nextServer) {
+      const currentIndex = allowed.findIndex(s => s.url === selectedServer.url);
+      const nextCandidate = allowed[(currentIndex + 1) % allowed.length];
+      if (nextCandidate && nextCandidate.url !== selectedServer.url) {
+        showToast({
+          icon: 'server',
+          text: `Reintentando con ${nextCandidate.name}...`,
+        });
+        handleSelectServer(nextCandidate);
+        return;
+      }
+      showToast({
+        icon: 'server',
+        text: 'Ningún servidor disponible para este episodio',
+      });
+      return;
+    }
+
+    showToast({
+      icon: 'server',
+      text: `Cambiando a ${nextServer.name}...`,
+    });
+    handleSelectServer(nextServer);
+  }, [servers, selectedServer, isVip, querySource]);
+
+  useEffect(() => {
+    tryFallbackServerRef.current = tryFallbackServer;
+  }, [tryFallbackServer]);
+
+  // Selección y resolución automática del primer servidor funcional disponible
+  const autoResolveWorkingServer = useCallback(async (
+    candidateServers: VideoServer[],
+    source: string
+  ): Promise<boolean> => {
+    if (!candidateServers || candidateServers.length === 0) {
+      return false;
+    }
+
+    const isUserVip = !FEATURE_FLAGS.SHOW_SUBSCRIPTION || isVip;
+    const allowed = isUserVip
+      ? [...candidateServers]
+      : candidateServers.filter(s => !isVipServer(s.name));
+
+    if (allowed.length === 0) {
+      return false;
+    }
+
+    // Ordenar servidores por compatibilidad y estabilidad probada
+    allowed.sort((a, b) => getServerPriority(b) - getServerPriority(a));
+
+    for (const candidate of allowed) {
+      if (failedServersRef.current.has(candidate.url)) {
+        continue;
+      }
+      try {
+        setIsResolving(true);
+        setSelectedServer(candidate);
+        const media = await resolveStream(candidate, source);
+        if (media && media.directUrl) {
+          setResolvedMedia(media);
+          return true;
+        }
+      } catch (err) {
+        console.warn(`[AniCS Player] Servidor ${candidate.name} (${candidate.url}) no resolvió stream:`, err);
+        failedServersRef.current.add(candidate.url);
+      }
+    }
+
+    return false;
+  }, [isVip]);
 
   useEffect(() => {
     const initFromParams = async () => {
@@ -439,23 +554,11 @@ export function PlayerPage() {
         } else {
           const srvs = await getServers(targetEp.url, querySource);
           setServers(srvs);
+          failedServersRef.current.clear();
 
-          const isUserVip = !FEATURE_FLAGS.SHOW_SUBSCRIPTION || isVip;
-
-          let preferred: VideoServer | undefined;
-          if (isUserVip) {
-            preferred = srvs.find(s => isVipServer(s.name))
-              ?? srvs.find(s => s.isDirect)
-              ?? srvs[0];
-          } else {
-            const standardServers = srvs.filter(s => !isVipServer(s.name));
-            preferred = standardServers.find(s => s.isDirect) ?? standardServers[0] ?? srvs[0];
-          }
-
-          if (preferred) {
-            setSelectedServer(preferred);
-            const media = await resolveStream(preferred, querySource);
-            setResolvedMedia(media);
+          const ok = await autoResolveWorkingServer(srvs, querySource);
+          if (!ok) {
+            setLoadError('No se encontró ningún servidor con transmisión disponible para este episodio');
           }
         }
         setIsResolving(false);
@@ -486,48 +589,6 @@ export function PlayerPage() {
     }
   }, [volume, isMuted, playbackSpeed]);
 
-  const tryFallbackServerRef = useRef<() => void>(() => {});
-
-  const handleSelectServer = async (server: VideoServer) => {
-    const isTargetVip = isVipServer(server.name);
-    if (isTargetVip && FEATURE_FLAGS.SHOW_SUBSCRIPTION && !isVip) {
-      showToast({
-        icon: 'vip',
-        text: `El servidor ${server.name} es exclusivo para miembros VIP`,
-      });
-      openVipModal();
-      return;
-    }
-    setSelectedServer(server);
-    setIsResolving(true);
-    try {
-      const media = await resolveStream(server, querySource);
-      setResolvedMedia(media);
-    } catch (err) {
-      console.warn(`Server ${server.name} failed:`, err);
-      tryFallbackServerRef.current();
-    } finally {
-      setIsResolving(false);
-    }
-  };
-
-  const tryFallbackServer = useCallback(() => {
-    if (!servers.length || !selectedServer) return;
-    const isUserVip = !FEATURE_FLAGS.SHOW_SUBSCRIPTION || isVip;
-    const allowed = isUserVip ? servers : servers.filter(s => !isVipServer(s.name));
-    if (!allowed.length) return;
-
-    const currentIndex = allowed.findIndex(s => s.url === selectedServer.url);
-    const nextServer = allowed[(currentIndex + 1) % allowed.length];
-
-    if (nextServer && nextServer.url !== selectedServer.url) {
-      handleSelectServer(nextServer);
-    }
-  }, [servers, selectedServer, querySource, isVip]);
-
-  useEffect(() => {
-    tryFallbackServerRef.current = tryFallbackServer;
-  }, [tryFallbackServer]);
 
   // Resolver stream resuelto en el elemento de video
   useEffect(() => {
@@ -664,16 +725,28 @@ export function PlayerPage() {
       });
     } else if (isHls && video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = sourceUrl;
-      const onCanPlay = () => {
-        video.play().catch(() => {});
+      const attemptPlay = () => {
+        video.play().catch(err => {
+          console.warn('[AniCS Stream] Autoplay error o bloqueado por navegador:', err);
+        });
       };
-      video.addEventListener('canplay', onCanPlay, { once: true });
+      if (video.readyState >= 2) {
+        attemptPlay();
+      } else {
+        video.addEventListener('canplay', attemptPlay, { once: true });
+      }
     } else {
       video.src = sourceUrl;
-      const onCanPlay = () => {
-        video.play().catch(() => {});
+      const attemptPlay = () => {
+        video.play().catch(err => {
+          console.warn('[AniCS Stream] Autoplay error o bloqueado por navegador:', err);
+        });
       };
-      video.addEventListener('canplay', onCanPlay, { once: true });
+      if (video.readyState >= 2) {
+        attemptPlay();
+      } else {
+        video.addEventListener('canplay', attemptPlay, { once: true });
+      }
     }
 
     return () => {
@@ -683,7 +756,7 @@ export function PlayerPage() {
       hlsRef.current?.destroy();
       hlsRef.current = null;
     };
-  }, [resolvedMedia]);
+  }, [resolvedMedia, isLoadingInitial]);
 
   // Guardar progreso en el historial de SQLite
   const saveProgress = useCallback((overrideProgress?: number) => {
@@ -828,27 +901,16 @@ export function PlayerPage() {
     }
 
     try {
+      failedServersRef.current.clear();
       const srvs = await getServers(ep.url, querySource);
       setServers(srvs);
 
-      const isUserVip = !FEATURE_FLAGS.SHOW_SUBSCRIPTION || isVip;
-      const isVipServer = (name: string) => /magi|desu/i.test(name);
-
-      let direct: VideoServer | undefined;
-      if (isUserVip) {
-        direct = srvs.find(s => s.name.toLowerCase().includes('magi'))
-          ?? srvs.find(s => s.name.toLowerCase().includes('desu'))
-          ?? srvs.find(s => s.isDirect)
-          ?? srvs[0];
-      } else {
-        const standardServers = srvs.filter(s => !isVipServer(s.name));
-        direct = standardServers.find(s => s.isDirect) ?? standardServers[0] ?? srvs[0];
-      }
-
-      if (direct) {
-        const media = await resolveStream(direct, querySource);
-        setSelectedServer(direct);
-        setResolvedMedia(media);
+      const ok = await autoResolveWorkingServer(srvs, querySource);
+      if (!ok) {
+        showToast({
+          icon: 'server',
+          text: 'No hay servidores funcionales disponibles para este episodio',
+        });
       }
     } catch (e) {
       console.error('Failed to change episode:', e);
@@ -1078,16 +1140,46 @@ export function PlayerPage() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isPlaying, volume, isMuted, isFullscreen]);
 
-  if (isLoadingInitial) {
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#000', flexDirection: 'column', gap: 14 }}>
-        <Loader2 size={36} className="animate-spin" color="var(--accent-primary)" />
-        <p style={{ color: 'var(--text-muted)', fontSize: 14, fontWeight: 600 }}>Cargando anime...</p>
-      </div>
-    );
-  }
-
   if (!currentAnime || !currentEpisode) {
+    if (isLoadingInitial) {
+      return (
+        <div
+          ref={containerRef}
+          style={{
+            width: '100vw', height: '100vh', background: '#000000',
+            position: 'relative', overflow: 'hidden', userSelect: 'none',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+        >
+          <div
+            style={{
+              position: 'absolute', inset: 0,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: '#000000', pointerEvents: 'none',
+            }}
+          >
+            <video
+              ref={videoRef}
+              playsInline
+              webkit-playsinline="true"
+              style={{
+                width: '100%', height: '100%',
+                maxWidth: '100%', maxHeight: '100%',
+                objectFit: aspectRatio,
+              }}
+            />
+          </div>
+          <div style={{
+            position: 'absolute', inset: 0, zIndex: 60,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: '#000000', flexDirection: 'column', gap: 14,
+          }}>
+            <Loader2 size={36} className="animate-spin" color="var(--accent-primary)" />
+            <p style={{ color: 'var(--text-muted)', fontSize: 14, fontWeight: 600 }}>Cargando anime...</p>
+          </div>
+        </div>
+      );
+    }
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', flexDirection: 'column', gap: 16, background: '#000', padding: 24, textAlign: 'center' }}>
         <AlertCircle size={48} style={{ color: '#f87171', opacity: 0.8 }} />
@@ -1127,6 +1219,17 @@ export function PlayerPage() {
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
     >
+      {/* ── Capa de Carga Inicial (Overlay sin desmontar el elemento video) ── */}
+      {isLoadingInitial && (
+        <div style={{
+          position: 'absolute', inset: 0, zIndex: 60,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: '#000000', flexDirection: 'column', gap: 14,
+        }}>
+          <Loader2 size={36} className="animate-spin" color="var(--accent-primary)" />
+          <p style={{ color: 'var(--text-muted)', fontSize: 14, fontWeight: 600 }}>Cargando anime...</p>
+        </div>
+      )}
       {/* ── Capa de Video con Brillo Real ── */}
       <div
         style={{
@@ -1305,6 +1408,7 @@ export function PlayerPage() {
             {hudToast.icon === 'aspect' && <Scaling size={16} color="var(--accent-primary)" />}
             {hudToast.icon === 'vip' && <Crown size={16} color="#fbbf24" />}
             {hudToast.icon === 'external' && <ExternalLink size={16} color="var(--accent-primary)" />}
+            {hudToast.icon === 'server' && <RotateCw size={16} color="var(--accent-primary)" />}
             <span>{hudToast.text}</span>
           </motion.div>
         )}
@@ -1337,8 +1441,8 @@ export function PlayerPage() {
               display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
               paddingTop: isMobile ? 'calc(12px + env(safe-area-inset-top, 0px))' : '18px',
               paddingBottom: isMobile ? 'calc(12px + env(safe-area-inset-bottom, 0px))' : '18px',
-              paddingLeft: isMobile ? 'calc(16px + env(safe-area-inset-left, 0px))' : '24px',
-              paddingRight: isMobile ? 'calc(16px + env(safe-area-inset-right, 0px))' : '24px',
+              paddingLeft: isMobile ? 'calc(10px + env(safe-area-inset-left, 0px))' : '12px',
+              paddingRight: isMobile ? 'calc(10px + env(safe-area-inset-right, 0px))' : '16px',
               zIndex: 20, pointerEvents: 'auto',
             }}
             onWheel={e => e.stopPropagation()}

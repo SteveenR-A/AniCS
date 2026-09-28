@@ -560,7 +560,7 @@ export function MobileDetailsPage() {
         <button
           onClick={() => navigate(-1)}
           style={{
-            position: 'absolute', top: 12, left: 14,
+            position: 'absolute', top: 10, left: 10,
             background: 'rgba(10,11,15,0.75)', border: '1px solid var(--border-subtle)',
             borderRadius: 'var(--radius-full)', padding: '6px 12px',
             color: 'var(--text-primary)', cursor: 'pointer',

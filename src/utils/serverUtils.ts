@@ -13,6 +13,8 @@ const UNSUPPORTED_DOMAINS = [
   'zippyshare.com',
   'torrent',
   'fembed',
+  'movearnpre',
+  'dhcplay',
 ];
 
 /**
@@ -21,6 +23,34 @@ const UNSUPPORTED_DOMAINS = [
 export function isVipServer(nameOrUrl: string): boolean {
   if (!FEATURE_FLAGS.SHOW_SUBSCRIPTION) return false;
   return /magi|desu|dedicado|vip/i.test(nameOrUrl);
+}
+
+/**
+ * Retorna la puntuación de compatibilidad y estabilidad del servidor para streaming.
+ */
+export function getServerPriority(server: VideoServer): number {
+  const name = (server.name || '').toLowerCase();
+  const url = (server.url || '').toLowerCase();
+
+  // 1. VIP / Servidores dedicados principales (Magi, Desu)
+  if (name.includes('magi')) return 100;
+  if (name.includes('desu') && !name.includes('desuka')) return 95;
+
+  // 2. Servidores HLS principales y streams directos
+  if (name.includes('asura') || url.includes('redirector.php') || url.includes('.m3u8') || name.includes('m3u8')) return 90;
+  if (name.includes('uqload') || url.includes('uqload')) return 88;
+  if (name.includes('lulustream') || url.includes('luluvdo')) return 85;
+  if (name.includes('mp4upload') || url.includes('mp4upload')) return 82;
+  if (name.includes('mediafire') || url.includes('mediafire')) return 75;
+  if (server.isDirect || url.endsWith('.mp4')) return 70;
+
+  // 3. Otros servidores de streaming conocidos
+  if (name.includes('voe') || url.includes('voe.sx')) return 65;
+  if (name.includes('streamwish') || url.includes('streamwish') || url.includes('swish')) return 60;
+  if (name.includes('filemoon') || url.includes('filemoon') || url.includes('fmoon') || url.includes('bysesukior')) return 50;
+  if (name.includes('vidhide') || url.includes('vidhide')) return 30;
+
+  return 10;
 }
 
 /**
@@ -36,6 +66,11 @@ export function maskAndFilterServers(servers: VideoServer[], forceMask?: boolean
     const lowerUrl = srv.url.toLowerCase();
     const lowerName = (srv.name || '').toLowerCase();
 
+    // Descartar opciones de descarga externa no aptas para streaming
+    if (lowerName.startsWith('descarga ') || lowerName === 'descarga') {
+      return false;
+    }
+
     // Descartar dominios no compatibles con el reproductor nativo
     const isUnsupported = UNSUPPORTED_DOMAINS.some(
       (domain) => lowerUrl.includes(domain) || lowerName.includes(domain)
@@ -43,6 +78,9 @@ export function maskAndFilterServers(servers: VideoServer[], forceMask?: boolean
 
     return !isUnsupported;
   });
+
+  // Ordenar por compatibilidad y estabilidad
+  supported.sort((a, b) => getServerPriority(b) - getServerPriority(a));
 
   const shouldMask = forceMask ?? FEATURE_FLAGS.MASK_SERVERS;
 

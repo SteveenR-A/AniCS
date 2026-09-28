@@ -11,7 +11,7 @@ pub struct JsUnpacker;
 
 static PACKER_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(
-        r#"eval\(function\(p,a,c,k,e,(?:r|d)\).*?return\s+p\}.*?\('(.*?)',\s*(\d+),\s*(\d+),\s*'(.*?)'\.split"#,
+        r#"(?s)eval\(function\(p,a,c,k,e,(?:r|d)\).*?return\s+p\s*\}?\s*\(\s*['"](.*?)['"]\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*['"](.*?)['"]\.split"#,
     )
     .expect("Invalid packer regex")
 });
@@ -80,6 +80,47 @@ impl JsUnpacker {
         }
     }
 
+    /// Comprueba si una URL candidata apunta realmente a un recurso de video y no a scripts o imágenes
+    pub fn is_video_url(url: &str) -> bool {
+        let clean = url.trim();
+        if clean.is_empty() {
+            return false;
+        }
+        let lower = clean.to_lowercase();
+        // Descartar scripts de analíticas, estilos, imágenes y fuentes
+        if lower.ends_with(".js")
+            || lower.contains(".min.js")
+            || lower.ends_with(".css")
+            || lower.ends_with(".png")
+            || lower.ends_with(".jpg")
+            || lower.ends_with(".jpeg")
+            || lower.ends_with(".gif")
+            || lower.ends_with(".svg")
+            || lower.ends_with(".webp")
+            || lower.ends_with(".ico")
+            || lower.ends_with(".html")
+            || lower.ends_with(".htm")
+            || lower.ends_with(".json")
+            || lower.contains("beacon")
+            || lower.contains("gtag")
+            || lower.contains("analytics")
+            || lower.contains("jquery")
+            || lower.contains("cloudflareinsights")
+        {
+            return false;
+        }
+
+        // Admitir extensiones de video o rutas de streaming HLS/DASH conocidas
+        lower.contains(".m3u8")
+            || lower.contains(".mp4")
+            || lower.contains(".mkv")
+            || lower.contains("/hls/")
+            || lower.contains("/hls2/")
+            || lower.contains(".urlset/")
+            || lower.contains("/stream")
+            || lower.contains("/video")
+    }
+
     /// Extrae la primera URL de stream (.m3u8 o .mp4) de texto posiblemente ofuscado.
     pub fn extract_stream_url(html: &str) -> Option<String> {
         // 1. Intentar desofuscar si está empaquetado
@@ -89,28 +130,37 @@ impl JsUnpacker {
             html.to_string()
         };
 
-        // 2. Buscar .m3u8
+        // 2. Buscar .m3u8 directo
         static M3U8_RE: Lazy<Regex> = Lazy::new(|| {
             Regex::new(r#"(https?://[^\s"'\\<>]+\.m3u8[^\s"'\\<>]*)"#).unwrap()
         });
-        if let Some(m) = M3U8_RE.find(&text) {
-            return Some(m.as_str().replace('\\', ""));
+        for cap in M3U8_RE.captures_iter(&text) {
+            let u = cap[1].replace('\\', "");
+            if Self::is_video_url(&u) {
+                return Some(u);
+            }
         }
 
-        // 3. Buscar file: "url" o source: "url"
-        static FILE_RE: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r#"(?:file|source|src)\s*[:=]\s*["'](https?://[^"']+)["']"#).unwrap()
-        });
-        if let Some(cap) = FILE_RE.captures(&text) {
-            return Some(cap[1].replace('\\', ""));
-        }
-
-        // 4. Buscar .mp4
+        // 3. Buscar .mp4 directo
         static MP4_RE: Lazy<Regex> = Lazy::new(|| {
             Regex::new(r#"(https?://[^\s"'\\<>]+\.mp4[^\s"'\\<>]*)"#).unwrap()
         });
-        if let Some(m) = MP4_RE.find(&text) {
-            return Some(m.as_str().replace('\\', ""));
+        for cap in MP4_RE.captures_iter(&text) {
+            let u = cap[1].replace('\\', "");
+            if Self::is_video_url(&u) {
+                return Some(u);
+            }
+        }
+
+        // 4. Buscar sources: ["https://..."] o sources: [{ file: "https://..." }]
+        static SOURCES_RE: Lazy<Regex> = Lazy::new(|| {
+            Regex::new(r#"(?:sources|source|file|src)\s*[:=]\s*["'](https?://[^"']+)["']"#).unwrap()
+        });
+        for cap in SOURCES_RE.captures_iter(&text) {
+            let candidate = cap[1].replace('\\', "");
+            if Self::is_video_url(&candidate) {
+                return Some(candidate);
+            }
         }
 
         None
@@ -141,5 +191,16 @@ mod tests {
         let result = JsUnpacker::extract_stream_url(html);
         assert!(result.is_some());
         assert!(result.unwrap().contains(".m3u8"));
+    }
+
+    #[test]
+    fn test_unpack_multiline() {
+        let script = "eval(function(p,a,c,k,e,d){\nwhile(c--)if(k[c])p=p.replace(new RegExp('\\\\b'+c.toString(a)+'\\\\b','g'),k[c]);\nreturn p\n}('0 1 = \"2://3/4/5.6\";',7,7,'var|video_url|https|cdn.example.com|stream|master|m3u8'.split('|')))";
+        assert!(JsUnpacker::is_packed(script));
+        let unpacked = JsUnpacker::unpack(script);
+        assert!(unpacked.is_some(), "Should unpack multiline script");
+        let stream = JsUnpacker::extract_stream_url(script);
+        assert!(stream.is_some(), "Should extract stream from multiline script");
+        assert_eq!(stream.unwrap(), "https://cdn.example.com/stream/master.m3u8");
     }
 }
