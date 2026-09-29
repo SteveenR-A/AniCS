@@ -118,6 +118,48 @@ pub enum PauseReason {
     UserPaused,
 }
 
+async fn should_use_hls_engine(url: &str, referer: Option<&str>) -> bool {
+    use reqwest::header;
+
+    let lower = url.to_lowercase();
+    if lower.contains(".m3u8") || lower.contains("mpegurl") || lower.contains("/hls/") {
+        return true;
+    }
+    if lower.contains(".mp4")
+        || lower.contains(".mkv")
+        || lower.contains("mediafire.com")
+        || lower.contains("mp4upload")
+        || lower.contains("streamtape")
+    {
+        return false;
+    }
+
+    // Algunos CDN entregan URLs opacas sin extensión. Una petición ligera permite
+    // distinguir playlists HLS por Content-Type sin descargar el archivo completo.
+    let mut req = crate::scrapers::DOWNLOAD_CLIENT
+        .get(url)
+        .header(header::RANGE, "bytes=0-0");
+
+    if let Some(r) = referer {
+        req = req.header(header::REFERER, r);
+    }
+
+    match tokio::time::timeout(std::time::Duration::from_secs(15), req.send()).await {
+        Ok(Ok(resp)) => resp
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .map(|ct| {
+                let ct = ct.to_ascii_lowercase();
+                ct.contains("mpegurl")
+                    || ct.contains("application/vnd.apple.mpegurl")
+                    || ct.contains("application/x-mpegurl")
+            })
+            .unwrap_or(false),
+        _ => false,
+    }
+}
+
 pub fn sanitize_anime_folder_name(name: &str) -> String {
     let invalid_chars = ['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
     let cleaned: String = name
@@ -352,12 +394,9 @@ fn spawn_download(
         let stream_url = task_record.stream_url.clone();
         let referer = task_record.referer.clone();
 
-        let is_mp4 = stream_url.contains(".mp4")
-            || stream_url.contains("mediafire.com")
-            || stream_url.contains("mp4upload")
-            || stream_url.contains("streamtape");
+        let use_hls = should_use_hls_engine(&stream_url, referer.as_deref()).await;
 
-        if is_mp4 {
+        if !use_hls {
             let is_mediafire_page = stream_url.contains("mediafire.com")
                 && !stream_url.starts_with("https://download")
                 && !stream_url.starts_with("http://download")
