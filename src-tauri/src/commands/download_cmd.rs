@@ -1025,6 +1025,17 @@ async fn download_direct_mp4(
         let status = resp.status();
         let supports_range = status.as_u16() == 206;
         if !status.is_success() {
+            let transient = status.as_u16() == 408
+                || status.as_u16() == 429
+                || status.is_server_error();
+
+            if transient && consecutive_stalls < MAX_STALL_RETRIES {
+                consecutive_stalls += 1;
+                let delay_ms = std::cmp::min(1200 * consecutive_stalls as u64, 8000);
+                tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+                continue 'connection_loop;
+            }
+
             return Err(AppError::Download(format!("HTTP error {}", status)));
         }
 
