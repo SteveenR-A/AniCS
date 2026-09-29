@@ -465,13 +465,19 @@ fn resolve_relative_url(url: &str, base: &str) -> String {
         return url.to_string();
     }
     if url.starts_with("//") {
-        return format!("https:{url}");
+        let scheme = url::Url::parse(base)
+            .ok()
+            .map(|u| u.scheme().to_string())
+            .unwrap_or_else(|| "https".to_string());
+        return format!("{scheme}:{url}");
     }
-    if url.starts_with('/') {
-        if let Some(origin_end) = base[8..].find('/') {
-            return format!("{}{url}", &base[..8 + origin_end]);
+
+    if let Ok(base_url) = url::Url::parse(base) {
+        if let Ok(joined) = base_url.join(url) {
+            return joined.to_string();
         }
     }
+
     if let Some(last_slash) = base.rfind('/') {
         format!("{}/{url}", &base[..last_slash])
     } else {
