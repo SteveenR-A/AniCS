@@ -1,9 +1,12 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
 use tauri::{AppHandle, Emitter, Manager, State};
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::sync::{mpsc, oneshot, Mutex, Notify};
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -22,14 +25,65 @@ type DownloadMap = Arc<Mutex<HashMap<String, DownloadHandle>>>;
 
 pub struct DownloadManager {
     pub tasks: DownloadMap,
-    pub semaphore: Arc<tokio::sync::Semaphore>,
+    pub active_slots: Arc<AtomicUsize>,
+    pub slot_notify: Arc<Notify>,
 }
 
 impl DownloadManager {
     pub fn new() -> Self {
         Self {
             tasks: Arc::new(Mutex::new(HashMap::new())),
-            semaphore: Arc::new(tokio::sync::Semaphore::new(2)), // Máximo 2 descargas concurrentes activas
+            active_slots: Arc::new(AtomicUsize::new(0)),
+            slot_notify: Arc::new(Notify::new()),
+        }
+    }
+}
+
+fn configured_concurrency_limit() -> usize {
+    storage::get_setting("max_concurrent_downloads")
+        .ok()
+        .flatten()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(3)
+        .clamp(1, 4)
+}
+
+struct DownloadSlotGuard {
+    active_slots: Arc<AtomicUsize>,
+    slot_notify: Arc<Notify>,
+}
+
+impl Drop for DownloadSlotGuard {
+    fn drop(&mut self) {
+        self.active_slots.fetch_sub(1, Ordering::AcqRel);
+        self.slot_notify.notify_waiters();
+    }
+}
+
+async fn acquire_download_slot(
+    active_slots: Arc<AtomicUsize>,
+    slot_notify: Arc<Notify>,
+    cancel_rx: &mut oneshot::Receiver<()>,
+) -> Option<DownloadSlotGuard> {
+    loop {
+        let limit = configured_concurrency_limit();
+        let current = active_slots.load(Ordering::Acquire);
+
+        if current < limit
+            && active_slots
+                .compare_exchange(current, current + 1, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok()
+        {
+            return Some(DownloadSlotGuard {
+                active_slots,
+                slot_notify,
+            });
+        }
+
+        tokio::select! {
+            _ = &mut *cancel_rx => return None,
+            _ = slot_notify.notified() => {}
+            _ = tokio::time::sleep(std::time::Duration::from_millis(750)) => {}
         }
     }
 }
@@ -204,7 +258,8 @@ fn spawn_download(
     download_id: String,
     task_record: DownloadTask,
     app_handle: AppHandle,
-    semaphore: Arc<tokio::sync::Semaphore>,
+    active_slots: Arc<AtomicUsize>,
+    slot_notify: Arc<Notify>,
     mut cancel_rx: oneshot::Receiver<()>,
     tasks_map: DownloadMap,
 ) -> tokio::task::JoinHandle<()> {
@@ -258,24 +313,27 @@ fn spawn_download(
             error: None,
         });
 
-        // 2. Esperar turno en el semáforo
-        let _permit = tokio::select! {
-            _ = &mut cancel_rx => {
+        // 2. Esperar un turno respetando el ajuste max_concurrent_downloads (1..4).
+        // El límite se consulta mientras la tarea espera, por lo que cambiarlo en Ajustes
+        // afecta a las tareas en cola sin reiniciar AniCS.
+        let _slot_guard = match acquire_download_slot(
+            active_slots,
+            slot_notify,
+            &mut cancel_rx,
+        ).await {
+            Some(guard) => guard,
+            None => {
                 let _ = storage::update_download_progress_db(
-                    &dl_id_task, "paused", task_record.progress, task_record.downloaded_bytes, task_record.total_bytes, None
+                    &dl_id_task,
+                    "paused",
+                    task_record.progress,
+                    task_record.downloaded_bytes,
+                    task_record.total_bytes,
+                    None,
                 );
                 let _ = app_handle_finish.emit("download-paused", serde_json::json!({ "id": dl_id_task }));
                 tasks_map.lock().await.remove(&dl_id_cleanup);
                 return;
-            }
-            permit_res = semaphore.acquire() => {
-                match permit_res {
-                    Ok(p) => p,
-                    Err(_) => {
-                        tasks_map.lock().await.remove(&dl_id_cleanup);
-                        return;
-                    }
-                }
             }
         };
 
@@ -489,7 +547,8 @@ pub async fn start_download(
         download_id.clone(),
         task_record,
         app_handle,
-        state.download_manager.semaphore.clone(),
+        state.download_manager.active_slots.clone(),
+        state.download_manager.slot_notify.clone(),
         cancel_rx,
         tasks_map.clone(),
     );
@@ -557,7 +616,8 @@ pub async fn resume_download(
         download_id.clone(),
         record,
         app_handle,
-        state.download_manager.semaphore.clone(),
+        state.download_manager.active_slots.clone(),
+        state.download_manager.slot_notify.clone(),
         cancel_rx,
         tasks_map.clone(),
     );
@@ -601,7 +661,8 @@ pub async fn retry_download(
         download_id.clone(),
         record,
         app_handle,
-        state.download_manager.semaphore.clone(),
+        state.download_manager.active_slots.clone(),
+        state.download_manager.slot_notify.clone(),
         cancel_rx,
         tasks_map.clone(),
     );
