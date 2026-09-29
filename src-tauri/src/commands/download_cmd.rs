@@ -113,6 +113,23 @@ pub struct LocalAnimeFolder {
     pub episodes: Vec<LocalEpisodeItem>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchDownloadItem {
+    pub anime_title: String,
+    pub episode_number: u32,
+    pub episode_url: String,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchDownloadResult {
+    pub episode_number: u32,
+    pub download_id: Option<String>,
+    pub error: Option<String>,
+}
+
 pub enum PauseReason {
     Completed,
     UserPaused,
@@ -529,20 +546,17 @@ fn spawn_download(
     })
 }
 
-/// Iniciar una descarga y persistirla en SQLite
-#[tauri::command]
-pub async fn start_download(
+async fn start_download_internal(
     anime_title: String,
     episode_number: u32,
     stream_url: String,
     referer: Option<String>,
     output_dir: Option<String>,
     app_handle: AppHandle,
-    state: State<'_, AppState>,
+    state: &AppState,
 ) -> Result<String, String> {
     let download_id = Uuid::new_v4().to_string();
 
-    // Determinar directorio de descarga
     let base_dir = if let Some(dir) = output_dir {
         if !dir.trim().is_empty() {
             PathBuf::from(dir)
@@ -577,7 +591,6 @@ pub async fn start_download(
         created_at: Utc::now().to_rfc3339(),
     };
 
-    // Guardar en base de datos SQLite
     storage::save_download_task(&task_record).map_err(|e| e.to_string())?;
 
     let (cancel_tx, cancel_rx) = oneshot::channel::<()>();
@@ -592,8 +605,129 @@ pub async fn start_download(
         tasks_map.clone(),
     );
 
-    tasks_map.lock().await.insert(download_id.clone(), DownloadHandle { task: handle, cancel_tx });
+    tasks_map.lock().await.insert(
+        download_id.clone(),
+        DownloadHandle {
+            task: handle,
+            cancel_tx,
+        },
+    );
     Ok(download_id)
+}
+
+/// Iniciar una descarga individual y persistirla en SQLite.
+#[tauri::command]
+pub async fn start_download(
+    anime_title: String,
+    episode_number: u32,
+    stream_url: String,
+    referer: Option<String>,
+    output_dir: Option<String>,
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    start_download_internal(
+        anime_title,
+        episode_number,
+        stream_url,
+        referer,
+        output_dir,
+        app_handle,
+        state.inner(),
+    )
+    .await
+}
+
+/// Resuelve y encola un lote completo dentro de Rust para que el proceso no dependa
+/// del WebView mientras Android tiene la pantalla apagada.
+#[tauri::command]
+pub async fn start_batch_download(
+    items: Vec<BatchDownloadItem>,
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Vec<BatchDownloadResult>, String> {
+    if items.len() > 200 {
+        return Err("El lote excede el máximo de 200 episodios".to_string());
+    }
+
+    let mut results = Vec::with_capacity(items.len());
+
+    for item in items {
+        let extractor = match crate::scrapers::create_extractor(&item.source) {
+            Some(extractor) => extractor,
+            None => {
+                results.push(BatchDownloadResult {
+                    episode_number: item.episode_number,
+                    download_id: None,
+                    error: Some(format!("Fuente desconocida: {}", item.source)),
+                });
+                continue;
+            }
+        };
+
+        let servers = match extractor.get_servers(&item.episode_url).await {
+            Ok(servers) => servers,
+            Err(e) => {
+                results.push(BatchDownloadResult {
+                    episode_number: item.episode_number,
+                    download_id: None,
+                    error: Some(format!("No se pudieron obtener servidores: {e}")),
+                });
+                continue;
+            }
+        };
+
+        let mut resolved = None;
+        let mut last_error = None;
+        for server in servers {
+            match extractor.resolve_stream(&server).await {
+                Ok(media) if !media.direct_url.trim().is_empty() => {
+                    resolved = Some(media);
+                    break;
+                }
+                Ok(_) => {
+                    last_error = Some("El servidor no devolvió una URL directa".to_string());
+                }
+                Err(e) => {
+                    last_error = Some(e.to_string());
+                }
+            }
+        }
+
+        let Some(media) = resolved else {
+            results.push(BatchDownloadResult {
+                episode_number: item.episode_number,
+                download_id: None,
+                error: last_error.or_else(|| Some("No hay servidores reproducibles".to_string())),
+            });
+            continue;
+        };
+
+        match start_download_internal(
+            item.anime_title,
+            item.episode_number,
+            media.direct_url,
+            media.referer,
+            None,
+            app_handle.clone(),
+            state.inner(),
+        )
+        .await
+        {
+            Ok(download_id) => results.push(BatchDownloadResult {
+                episode_number: item.episode_number,
+                download_id: Some(download_id),
+                error: None,
+            }),
+            Err(e) => results.push(BatchDownloadResult {
+                episode_number: item.episode_number,
+                download_id: None,
+                error: Some(e),
+            }),
+        }
+    }
+
+    Ok(results)
 }
 
 /// Pausar una descarga activa
