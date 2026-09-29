@@ -2,8 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { DownloadCloud, X, Layers, ListFilter, CheckSquare, Check, Loader2, Crown } from 'lucide-react';
 import type { Episode } from '@/types';
-import { getServers, resolveStream } from '@/services/animeService';
-import { startDownload } from '@/services/downloadService';
+import { notifyServiceStart, startBatchDownloads } from '@/services/downloadService';
 import { useDownloadStore } from '@/stores/useDownloadStore';
 import { useSubscriptionStore } from '@/stores/useSubscriptionStore';
 import { FEATURE_FLAGS } from '@/config/features';
@@ -77,68 +76,58 @@ export const BatchDownloadModal: React.FC<BatchDownloadModalProps> = ({
     if (targetEpisodes.length === 0 || isProcessing) return;
 
     setIsProcessing(true);
-    let successCount = 0;
-    const total = targetEpisodes.length;
-
-    // Ordenar de menor a mayor número para descargar en orden cronológico
     const sorted = [...targetEpisodes].sort((a, b) => a.number - b.number);
+    const total = sorted.length;
 
-    for (let i = 0; i < sorted.length; i++) {
-      const ep = sorted[i];
-      setProgressText(`Obteniendo enlaces: Cap. ${ep.number} (${i + 1}/${total})...`);
+    setProgressText(`Preparando ${total} episodios en segundo plano...`);
+    notifyServiceStart(
+      `AniCS · ${total} episodios`,
+      'Resolviendo servidores y preparando la cola...'
+    );
 
-      try {
-        const servers = await getServers(ep.url, source);
-        if (servers && servers.length > 0) {
-          let resolvedMedia = null;
-          for (const srv of servers) {
-            try {
-              const res = await resolveStream(srv, source);
-              if (res && res.directUrl) {
-                resolvedMedia = res;
-                break;
-              }
-            } catch {}
-          }
-
-          if (resolvedMedia && resolvedMedia.directUrl) {
-            const downloadId = await startDownload({
-              animeTitle,
-              episodeNumber: ep.number,
-              streamUrl: resolvedMedia.directUrl,
-              referer: resolvedMedia.referer,
-            });
-
-            useDownloadStore.getState().addTask({
-              id: downloadId,
-              animeTitle,
-              episodeNumber: ep.number,
-              streamUrl: resolvedMedia.directUrl,
-              outputPath: '',
-              progress: 0,
-              speedKbps: 0,
-              downloadedBytes: 0,
-              totalBytes: 0,
-              status: 'downloading',
-            });
-
-            successCount++;
-            setEnqueuedCount(successCount);
-          }
-        }
-      } catch (err) {
-        console.warn(`Error encolando descarga para Cap. ${ep.number}:`, err);
-      }
-    }
-
-    setIsProcessing(false);
+    // La resolución ocurre en Rust. Cerramos el modal para que la operación no dependa
+    // del ciclo de vida del WebView cuando Android bloquea la pantalla.
     onClose();
-    if (onSuccessToast) {
-      onSuccessToast(
-        successCount > 0
-          ? `Se encolaron ${successCount} de ${total} episodios para descarga`
-          : 'No se pudieron obtener enlaces directos para los episodios seleccionados'
+
+    try {
+      const results = await startBatchDownloads(
+        sorted.map((ep) => ({
+          animeTitle,
+          episodeNumber: ep.number,
+          episodeUrl: ep.url,
+          source,
+        }))
       );
+
+      const successCount = results.filter((item) => Boolean(item.downloadId)).length;
+      setEnqueuedCount(successCount);
+
+      // Recupera desde SQLite las tareas creadas por Rust, incluso si algunos eventos
+      // de progreso ocurrieron mientras el WebView estaba suspendido.
+      await useDownloadStore.getState().syncWithDb();
+
+      const failed = results
+        .filter((item) => !item.downloadId)
+        .map((item) => item.episodeNumber);
+
+      if (onSuccessToast) {
+        if (successCount > 0) {
+          const suffix = failed.length > 0
+            ? ` · Fallaron: ${failed.slice(0, 5).join(', ')}${failed.length > 5 ? '…' : ''}`
+            : '';
+          onSuccessToast(
+            `Se encolaron ${successCount} de ${total} episodios${suffix}`
+          );
+        } else {
+          onSuccessToast('No se pudieron resolver servidores para el lote seleccionado');
+        }
+      }
+    } catch (err) {
+      console.warn('Error preparando descarga por lotes:', err);
+      await useDownloadStore.getState().syncWithDb();
+      onSuccessToast?.('No se pudo preparar la descarga por lotes');
+    } finally {
+      setIsProcessing(false);
     }
   };
 
