@@ -126,6 +126,7 @@ pub fn run() {
             commands::open_in_external_player,
             // Descargas y Archivos Locales
             commands::start_download,
+            commands::start_batch_download,
             commands::pause_download,
             commands::pause_all_downloads,
             commands::resume_download,
