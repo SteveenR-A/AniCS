@@ -2,7 +2,7 @@ package com.anics.app
 
 import android.Manifest
 import android.app.Activity
-import app.tauri.plugin.TauriActivity
+import com.anics.app.generated.TauriActivity
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
