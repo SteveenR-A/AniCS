@@ -1,9 +1,12 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
 use tauri::{AppHandle, Emitter, Manager, State};
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::sync::{mpsc, oneshot, Mutex, Notify};
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -22,14 +25,65 @@ type DownloadMap = Arc<Mutex<HashMap<String, DownloadHandle>>>;
 
 pub struct DownloadManager {
     pub tasks: DownloadMap,
-    pub semaphore: Arc<tokio::sync::Semaphore>,
+    pub active_slots: Arc<AtomicUsize>,
+    pub slot_notify: Arc<Notify>,
 }
 
 impl DownloadManager {
     pub fn new() -> Self {
         Self {
             tasks: Arc::new(Mutex::new(HashMap::new())),
-            semaphore: Arc::new(tokio::sync::Semaphore::new(2)), // Máximo 2 descargas concurrentes activas
+            active_slots: Arc::new(AtomicUsize::new(0)),
+            slot_notify: Arc::new(Notify::new()),
+        }
+    }
+}
+
+fn configured_concurrency_limit() -> usize {
+    storage::get_setting("max_concurrent_downloads")
+        .ok()
+        .flatten()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(3)
+        .clamp(1, 4)
+}
+
+struct DownloadSlotGuard {
+    active_slots: Arc<AtomicUsize>,
+    slot_notify: Arc<Notify>,
+}
+
+impl Drop for DownloadSlotGuard {
+    fn drop(&mut self) {
+        self.active_slots.fetch_sub(1, Ordering::AcqRel);
+        self.slot_notify.notify_waiters();
+    }
+}
+
+async fn acquire_download_slot(
+    active_slots: Arc<AtomicUsize>,
+    slot_notify: Arc<Notify>,
+    cancel_rx: &mut oneshot::Receiver<()>,
+) -> Option<DownloadSlotGuard> {
+    loop {
+        let limit = configured_concurrency_limit();
+        let current = active_slots.load(Ordering::Acquire);
+
+        if current < limit
+            && active_slots
+                .compare_exchange(current, current + 1, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok()
+        {
+            return Some(DownloadSlotGuard {
+                active_slots,
+                slot_notify,
+            });
+        }
+
+        tokio::select! {
+            _ = &mut *cancel_rx => return None,
+            _ = slot_notify.notified() => {}
+            _ = tokio::time::sleep(std::time::Duration::from_millis(750)) => {}
         }
     }
 }
@@ -59,9 +113,68 @@ pub struct LocalAnimeFolder {
     pub episodes: Vec<LocalEpisodeItem>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchDownloadItem {
+    pub anime_title: String,
+    pub episode_number: u32,
+    pub episode_url: String,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchDownloadResult {
+    pub episode_number: u32,
+    pub download_id: Option<String>,
+    pub error: Option<String>,
+}
+
 pub enum PauseReason {
     Completed,
     UserPaused,
+}
+
+async fn should_use_hls_engine(url: &str, referer: Option<&str>) -> bool {
+    use reqwest::header;
+
+    let lower = url.to_lowercase();
+    if lower.contains(".m3u8") || lower.contains("mpegurl") || lower.contains("/hls/") {
+        return true;
+    }
+    if lower.contains(".mp4")
+        || lower.contains(".mkv")
+        || lower.contains("mediafire.com")
+        || lower.contains("mp4upload")
+        || lower.contains("streamtape")
+    {
+        return false;
+    }
+
+    // Algunos CDN entregan URLs opacas sin extensión. Una petición ligera permite
+    // distinguir playlists HLS por Content-Type sin descargar el archivo completo.
+    let mut req = crate::scrapers::DOWNLOAD_CLIENT
+        .get(url)
+        .header(header::RANGE, "bytes=0-0");
+
+    if let Some(r) = referer {
+        req = req.header(header::REFERER, r);
+    }
+
+    match tokio::time::timeout(std::time::Duration::from_secs(15), req.send()).await {
+        Ok(Ok(resp)) => resp
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .map(|ct| {
+                let ct = ct.to_ascii_lowercase();
+                ct.contains("mpegurl")
+                    || ct.contains("application/vnd.apple.mpegurl")
+                    || ct.contains("application/x-mpegurl")
+            })
+            .unwrap_or(false),
+        _ => false,
+    }
 }
 
 pub fn sanitize_anime_folder_name(name: &str) -> String {
@@ -204,7 +317,8 @@ fn spawn_download(
     download_id: String,
     task_record: DownloadTask,
     app_handle: AppHandle,
-    semaphore: Arc<tokio::sync::Semaphore>,
+    active_slots: Arc<AtomicUsize>,
+    slot_notify: Arc<Notify>,
     mut cancel_rx: oneshot::Receiver<()>,
     tasks_map: DownloadMap,
 ) -> tokio::task::JoinHandle<()> {
@@ -258,24 +372,27 @@ fn spawn_download(
             error: None,
         });
 
-        // 2. Esperar turno en el semáforo
-        let _permit = tokio::select! {
-            _ = &mut cancel_rx => {
+        // 2. Esperar un turno respetando el ajuste max_concurrent_downloads (1..4).
+        // El límite se consulta mientras la tarea espera, por lo que cambiarlo en Ajustes
+        // afecta a las tareas en cola sin reiniciar AniCS.
+        let _slot_guard = match acquire_download_slot(
+            active_slots,
+            slot_notify,
+            &mut cancel_rx,
+        ).await {
+            Some(guard) => guard,
+            None => {
                 let _ = storage::update_download_progress_db(
-                    &dl_id_task, "paused", task_record.progress, task_record.downloaded_bytes, task_record.total_bytes, None
+                    &dl_id_task,
+                    "paused",
+                    task_record.progress,
+                    task_record.downloaded_bytes,
+                    task_record.total_bytes,
+                    None,
                 );
                 let _ = app_handle_finish.emit("download-paused", serde_json::json!({ "id": dl_id_task }));
                 tasks_map.lock().await.remove(&dl_id_cleanup);
                 return;
-            }
-            permit_res = semaphore.acquire() => {
-                match permit_res {
-                    Ok(p) => p,
-                    Err(_) => {
-                        tasks_map.lock().await.remove(&dl_id_cleanup);
-                        return;
-                    }
-                }
             }
         };
 
@@ -294,12 +411,9 @@ fn spawn_download(
         let stream_url = task_record.stream_url.clone();
         let referer = task_record.referer.clone();
 
-        let is_mp4 = stream_url.contains(".mp4")
-            || stream_url.contains("mediafire.com")
-            || stream_url.contains("mp4upload")
-            || stream_url.contains("streamtape");
+        let use_hls = should_use_hls_engine(&stream_url, referer.as_deref()).await;
 
-        if is_mp4 {
+        if !use_hls {
             let is_mediafire_page = stream_url.contains("mediafire.com")
                 && !stream_url.starts_with("https://download")
                 && !stream_url.starts_with("http://download")
@@ -432,20 +546,17 @@ fn spawn_download(
     })
 }
 
-/// Iniciar una descarga y persistirla en SQLite
-#[tauri::command]
-pub async fn start_download(
+async fn start_download_internal(
     anime_title: String,
     episode_number: u32,
     stream_url: String,
     referer: Option<String>,
     output_dir: Option<String>,
     app_handle: AppHandle,
-    state: State<'_, AppState>,
+    state: &AppState,
 ) -> Result<String, String> {
     let download_id = Uuid::new_v4().to_string();
 
-    // Determinar directorio de descarga
     let base_dir = if let Some(dir) = output_dir {
         if !dir.trim().is_empty() {
             PathBuf::from(dir)
@@ -480,7 +591,6 @@ pub async fn start_download(
         created_at: Utc::now().to_rfc3339(),
     };
 
-    // Guardar en base de datos SQLite
     storage::save_download_task(&task_record).map_err(|e| e.to_string())?;
 
     let (cancel_tx, cancel_rx) = oneshot::channel::<()>();
@@ -489,13 +599,135 @@ pub async fn start_download(
         download_id.clone(),
         task_record,
         app_handle,
-        state.download_manager.semaphore.clone(),
+        state.download_manager.active_slots.clone(),
+        state.download_manager.slot_notify.clone(),
         cancel_rx,
         tasks_map.clone(),
     );
 
-    tasks_map.lock().await.insert(download_id.clone(), DownloadHandle { task: handle, cancel_tx });
+    tasks_map.lock().await.insert(
+        download_id.clone(),
+        DownloadHandle {
+            task: handle,
+            cancel_tx,
+        },
+    );
     Ok(download_id)
+}
+
+/// Iniciar una descarga individual y persistirla en SQLite.
+#[tauri::command]
+pub async fn start_download(
+    anime_title: String,
+    episode_number: u32,
+    stream_url: String,
+    referer: Option<String>,
+    output_dir: Option<String>,
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    start_download_internal(
+        anime_title,
+        episode_number,
+        stream_url,
+        referer,
+        output_dir,
+        app_handle,
+        state.inner(),
+    )
+    .await
+}
+
+/// Resuelve y encola un lote completo dentro de Rust para que el proceso no dependa
+/// del WebView mientras Android tiene la pantalla apagada.
+#[tauri::command]
+pub async fn start_batch_download(
+    items: Vec<BatchDownloadItem>,
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Vec<BatchDownloadResult>, String> {
+    if items.len() > 200 {
+        return Err("El lote excede el máximo de 200 episodios".to_string());
+    }
+
+    let mut results = Vec::with_capacity(items.len());
+
+    for item in items {
+        let extractor = match crate::scrapers::create_extractor(&item.source) {
+            Some(extractor) => extractor,
+            None => {
+                results.push(BatchDownloadResult {
+                    episode_number: item.episode_number,
+                    download_id: None,
+                    error: Some(format!("Fuente desconocida: {}", item.source)),
+                });
+                continue;
+            }
+        };
+
+        let servers = match extractor.get_servers(&item.episode_url).await {
+            Ok(servers) => servers,
+            Err(e) => {
+                results.push(BatchDownloadResult {
+                    episode_number: item.episode_number,
+                    download_id: None,
+                    error: Some(format!("No se pudieron obtener servidores: {e}")),
+                });
+                continue;
+            }
+        };
+
+        let mut resolved = None;
+        let mut last_error = None;
+        for server in servers {
+            match extractor.resolve_stream(&server).await {
+                Ok(media) if !media.direct_url.trim().is_empty() => {
+                    resolved = Some(media);
+                    break;
+                }
+                Ok(_) => {
+                    last_error = Some("El servidor no devolvió una URL directa".to_string());
+                }
+                Err(e) => {
+                    last_error = Some(e.to_string());
+                }
+            }
+        }
+
+        let Some(media) = resolved else {
+            results.push(BatchDownloadResult {
+                episode_number: item.episode_number,
+                download_id: None,
+                error: last_error.or_else(|| Some("No hay servidores reproducibles".to_string())),
+            });
+            continue;
+        };
+
+        match start_download_internal(
+            item.anime_title,
+            item.episode_number,
+            media.direct_url,
+            media.referer,
+            None,
+            app_handle.clone(),
+            state.inner(),
+        )
+        .await
+        {
+            Ok(download_id) => results.push(BatchDownloadResult {
+                episode_number: item.episode_number,
+                download_id: Some(download_id),
+                error: None,
+            }),
+            Err(e) => results.push(BatchDownloadResult {
+                episode_number: item.episode_number,
+                download_id: None,
+                error: Some(e),
+            }),
+        }
+    }
+
+    Ok(results)
 }
 
 /// Pausar una descarga activa
@@ -557,7 +789,8 @@ pub async fn resume_download(
         download_id.clone(),
         record,
         app_handle,
-        state.download_manager.semaphore.clone(),
+        state.download_manager.active_slots.clone(),
+        state.download_manager.slot_notify.clone(),
         cancel_rx,
         tasks_map.clone(),
     );
@@ -601,7 +834,8 @@ pub async fn retry_download(
         download_id.clone(),
         record,
         app_handle,
-        state.download_manager.semaphore.clone(),
+        state.download_manager.active_slots.clone(),
+        state.download_manager.slot_notify.clone(),
         cancel_rx,
         tasks_map.clone(),
     );
@@ -791,6 +1025,17 @@ async fn download_direct_mp4(
         let status = resp.status();
         let supports_range = status.as_u16() == 206;
         if !status.is_success() {
+            let transient = status.as_u16() == 408
+                || status.as_u16() == 429
+                || status.is_server_error();
+
+            if transient && consecutive_stalls < MAX_STALL_RETRIES {
+                consecutive_stalls += 1;
+                let delay_ms = std::cmp::min(1200 * consecutive_stalls as u64, 8000);
+                tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+                continue 'connection_loop;
+            }
+
             return Err(AppError::Download(format!("HTTP error {}", status)));
         }
 

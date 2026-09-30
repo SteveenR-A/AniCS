@@ -146,7 +146,7 @@ jobs:
             echo "No se encontró el archivo Gradle de la app Android"
             exit 1
           fi
-          CAST_DEP="com.google.android.gms:play-services-cast-framework:22.3.0"
+          CAST_DEP="com.google.android.gms:play-services-cast-framework:21.5.0"
           if ! grep -q "$CAST_DEP" "$APP_GRADLE"; then
             if [[ "$APP_GRADLE" == *.kts ]]; then
               sed -i "/dependencies[[:space:]]*{/a\\    implementation(\"$CAST_DEP\")" "$APP_GRADLE"
@@ -158,6 +158,55 @@ jobs:
             echo "Error crítico: No se pudo inyectar play-services-cast-framework en $APP_GRADLE"
             exit 1
           }
+
+          # Forzar compatibilidad de versiones de Kotlin stdlib con Kotlin 1.9 de Tauri
+          ROOT_GRADLE="src-tauri/gen/android/build.gradle.kts"
+          if [ -f "$ROOT_GRADLE" ] && ! grep -q "resolutionStrategy" "$ROOT_GRADLE"; then
+            cat << 'EOF' >> "$ROOT_GRADLE"
+
+allprojects {
+    configurations.all {
+        resolutionStrategy {
+            force("org.jetbrains.kotlin:kotlin-stdlib:1.9.25")
+            force("org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.25")
+            force("org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.25")
+            force("org.jetbrains.kotlin:kotlin-stdlib-common:1.9.25")
+            force("org.jetbrains.kotlin:kotlin-reflect:1.9.25")
+        }
+    }
+}
+EOF
+          fi
+
+          if ! grep -q "resolutionStrategy" "$APP_GRADLE"; then
+            if [[ "$APP_GRADLE" == *.kts ]]; then
+              cat << 'EOF' >> "$APP_GRADLE"
+
+configurations.all {
+    resolutionStrategy {
+        force("org.jetbrains.kotlin:kotlin-stdlib:1.9.25")
+        force("org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.25")
+        force("org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.25")
+        force("org.jetbrains.kotlin:kotlin-stdlib-common:1.9.25")
+        force("org.jetbrains.kotlin:kotlin-reflect:1.9.25")
+    }
+}
+EOF
+            else
+              cat << 'EOF' >> "$APP_GRADLE"
+
+configurations.all {
+    resolutionStrategy {
+        force 'org.jetbrains.kotlin:kotlin-stdlib:1.9.25'
+        force 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.25'
+        force 'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.25'
+        force 'org.jetbrains.kotlin:kotlin-stdlib-common:1.9.25'
+        force 'org.jetbrains.kotlin:kotlin-reflect:1.9.25'
+    }
+}
+EOF
+            fi
+          fi
 
           # Sincronizar y asegurar iconos de la aplicación AniCS en Android
           npx @tauri-apps/cli icon app-icon.png || true
@@ -191,7 +240,7 @@ jobs:
           MANIFEST="src-tauri/gen/android/app/src/main/AndroidManifest.xml"
           if [ -f "$MANIFEST" ]; then
             if ! grep -q "MANAGE_EXTERNAL_STORAGE" "$MANIFEST"; then
-              sed -i 's|<application|<uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />\n    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />\n    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />\n    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />\n    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />\n    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />\n    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />\n    <uses-permission android:name="android.permission.WAKE_LOCK" />\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />\n    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />\n    <application android:requestLegacyExternalStorage="true"|g' "$MANIFEST"
+              sed -i 's|<application|<uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />\n    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />\n    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />\n    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />\n    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />\n    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />\n    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />\n    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />\n    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />\n    <uses-permission android:name="android.permission.WAKE_LOCK" />\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />\n    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />\n    <application android:requestLegacyExternalStorage="true"|g' "$MANIFEST"
               echo "Permisos de almacenamiento añadidos al AndroidManifest.xml"
             fi
             if ! grep -q "CHANGE_WIFI_MULTICAST_STATE" "$MANIFEST"; then

@@ -11,7 +11,10 @@ use reqwest::header;
 use crate::core::{AppError, AppResult, DownloadProgress, DownloadStatus};
 use crate::scrapers::DOWNLOAD_CLIENT;
 
-const WINDOW_SIZE: usize = 6; // Fragmentos HLS concurrentes en vuelo (optimizado para background/mobile)
+#[cfg(target_os = "android")]
+const WINDOW_SIZE: usize = 3; // Menos presión de red/CPU cuando Android entra en background.
+#[cfg(not(target_os = "android"))]
+const WINDOW_SIZE: usize = 6;
 const MAX_PLAYLIST_SEGMENTS: usize = 5000; // Límite de seguridad contra DoS y bombas de fragmentos
 
 /// Resultado del análisis de un manifiesto HLS
@@ -351,14 +354,68 @@ impl HlsEngine {
     }
 
     async fn fetch_url(&self, url: &str) -> AppResult<String> {
-        let mut req = DOWNLOAD_CLIENT.get(url);
-        if let Some(ref ref_url) = self.referer {
-            req = req.header(header::REFERER, ref_url.as_str());
+        const MAX_ATTEMPTS: u32 = 5;
+
+        for attempt in 1..=MAX_ATTEMPTS {
+            let mut req = DOWNLOAD_CLIENT
+                .get(url)
+                .header(header::CACHE_CONTROL, "no-cache");
+
+            if let Some(ref ref_url) = self.referer {
+                req = req.header(header::REFERER, ref_url.as_str());
+            }
+
+            let result = tokio::time::timeout(
+                std::time::Duration::from_secs(30),
+                req.send(),
+            ).await;
+
+            match result {
+                Ok(Ok(resp)) if resp.status().is_success() => {
+                    let body = resp.text().await.map_err(AppError::Network)?;
+                    if body.trim_start().starts_with("#EXTM3U") {
+                        return Ok(body);
+                    }
+                    if attempt == MAX_ATTEMPTS {
+                        return Err(AppError::Download(
+                            "El servidor no devolvió una playlist HLS válida".to_string(),
+                        ));
+                    }
+                }
+                Ok(Ok(resp)) => {
+                    let status = resp.status();
+                    if attempt == MAX_ATTEMPTS
+                        || !(status.as_u16() == 408
+                            || status.as_u16() == 429
+                            || status.is_server_error())
+                    {
+                        return Err(AppError::Download(format!(
+                            "Error al obtener playlist HLS: HTTP {}",
+                            status
+                        )));
+                    }
+                }
+                Ok(Err(e)) => {
+                    if attempt == MAX_ATTEMPTS {
+                        return Err(AppError::Network(e));
+                    }
+                }
+                Err(_) => {
+                    if attempt == MAX_ATTEMPTS {
+                        return Err(AppError::Download(
+                            "Timeout al obtener la playlist HLS".to_string(),
+                        ));
+                    }
+                }
+            }
+
+            let delay = std::cmp::min(750 * 2u64.pow(attempt - 1), 6000);
+            tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
         }
-        req.send().await
-            .map_err(AppError::Network)?
-            .text().await
-            .map_err(AppError::Network)
+
+        Err(AppError::Download(
+            "No se pudo obtener la playlist HLS".to_string(),
+        ))
     }
 }
 
@@ -380,9 +437,19 @@ async fn download_segment(url: &str, referer: Option<&str>) -> AppResult<Bytes> 
     let fetch_fut = async {
         let resp = req.send().await.map_err(AppError::Network)?;
         if !resp.status().is_success() {
-            return Err(AppError::Download(format!("Segment error: {}", resp.status())));
+            return Err(AppError::Download(format!(
+                "Segment error: HTTP {}",
+                resp.status()
+            )));
         }
-        resp.bytes().await.map_err(AppError::Network)
+
+        let bytes = resp.bytes().await.map_err(AppError::Network)?;
+        if bytes.is_empty() {
+            return Err(AppError::Download(
+                "El servidor devolvió un segmento HLS vacío".to_string(),
+            ));
+        }
+        Ok(bytes)
     };
 
     match tokio::time::timeout(std::time::Duration::from_secs(45), fetch_fut).await {
@@ -398,13 +465,19 @@ fn resolve_relative_url(url: &str, base: &str) -> String {
         return url.to_string();
     }
     if url.starts_with("//") {
-        return format!("https:{url}");
+        let scheme = url::Url::parse(base)
+            .ok()
+            .map(|u| u.scheme().to_string())
+            .unwrap_or_else(|| "https".to_string());
+        return format!("{scheme}:{url}");
     }
-    if url.starts_with('/') {
-        if let Some(origin_end) = base[8..].find('/') {
-            return format!("{}{url}", &base[..8 + origin_end]);
+
+    if let Ok(base_url) = url::Url::parse(base) {
+        if let Ok(joined) = base_url.join(url) {
+            return joined.to_string();
         }
     }
+
     if let Some(last_slash) = base.rfind('/') {
         format!("{}/{url}", &base[..last_slash])
     } else {

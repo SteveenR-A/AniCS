@@ -4,6 +4,7 @@ import android.app.*
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
@@ -52,6 +53,7 @@ class DownloadService : Service() {
     }
 
     private var wakeLock: PowerManager.WakeLock? = null
+    private var wifiLock: WifiManager.WifiLock? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -68,6 +70,7 @@ class DownloadService : Service() {
         )
         startForegroundSafe(NOTIF_ID_PROGRESS, initialNotif)
         acquireWakeLock()
+        acquireWifiLock()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -80,6 +83,7 @@ class DownloadService : Service() {
             "START", ACTION_START -> {
                 isRunning = true
                 acquireWakeLock()
+                acquireWifiLock()
 
                 val title    = intent.getStringExtra("title")   ?: "Descargas AniCS"
                 val subtitle = intent.getStringExtra("subtitle") ?: "Iniciando descargas..."
@@ -93,6 +97,7 @@ class DownloadService : Service() {
                 if (!isRunning) {
                     isRunning = true
                     acquireWakeLock()
+                    acquireWifiLock()
                 }
                 val title    = intent.getStringExtra("title")    ?: "Descargas AniCS"
                 val subtitle = intent.getStringExtra("subtitle") ?: ""
@@ -108,6 +113,7 @@ class DownloadService : Service() {
 
             "STOP", ACTION_STOP -> {
                 isRunning = false
+                releaseWifiLock()
                 releaseWakeLock()
                 stopForegroundSafe()
                 stopSelf()
@@ -138,11 +144,12 @@ class DownloadService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         isRunning = false
+        releaseWifiLock()
         releaseWakeLock()
     }
 
     // -------------------------------------------------------------------------
-    // WakeLock
+    // WakeLock / WifiLock
     // -------------------------------------------------------------------------
     private fun acquireWakeLock() {
         try {
@@ -171,6 +178,43 @@ class DownloadService : Service() {
             wakeLock = null
         } catch (e: Exception) {
             Log.w(TAG, "No se pudo liberar WakeLock: ${e.message}")
+        }
+    }
+
+    /**
+     * Mantiene la radio Wi-Fi activa durante transferencias largas cuando la pantalla se apaga.
+     * En Android 14+ WIFI_MODE_FULL_HIGH_PERF se degrada internamente según la política
+     * del sistema, por lo que el Partial WakeLock + Foreground Service siguen siendo la
+     * protección principal. El lock se libera inmediatamente cuando termina la cola.
+     */
+    @Suppress("DEPRECATION")
+    private fun acquireWifiLock() {
+        try {
+            if (wifiLock == null || wifiLock?.isHeld == false) {
+                val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+                wifiLock = wifiManager.createWifiLock(
+                    WifiManager.WIFI_MODE_FULL_HIGH_PERF,
+                    "AniCS:DownloadWifiLock"
+                ).apply {
+                    setReferenceCounted(false)
+                    acquire()
+                }
+                Log.d(TAG, "WifiLock adquirido para descargas en segundo plano")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "No se pudo adquirir WifiLock: ${e.message}")
+        }
+    }
+
+    private fun releaseWifiLock() {
+        try {
+            if (wifiLock?.isHeld == true) {
+                wifiLock?.release()
+                Log.d(TAG, "WifiLock liberado")
+            }
+            wifiLock = null
+        } catch (e: Exception) {
+            Log.w(TAG, "No se pudo liberar WifiLock: ${e.message}")
         }
     }
 

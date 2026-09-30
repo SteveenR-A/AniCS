@@ -135,6 +135,28 @@ export const startDownload = (params: {
     outputDir: params.outputDir,
   });
 
+export interface BatchDownloadItem {
+  animeTitle: string;
+  episodeNumber: number;
+  episodeUrl: string;
+  source: string;
+}
+
+export interface BatchDownloadResult {
+  episodeNumber: number;
+  downloadId?: string;
+  error?: string;
+}
+
+/**
+ * Resuelve servidores y encola el lote dentro del backend Rust.
+ * Esto evita depender del ciclo de vida del WebView cuando Android apaga la pantalla.
+ */
+export const startBatchDownloads = (
+  items: BatchDownloadItem[]
+): Promise<BatchDownloadResult[]> =>
+  invoke('start_batch_download', { items });
+
 /** Pausar una descarga activa limpiamente */
 export const pauseDownload = (downloadId: string): Promise<void> =>
   invoke('pause_download', { downloadId });
