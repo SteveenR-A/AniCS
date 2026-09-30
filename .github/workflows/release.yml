@@ -194,8 +194,7 @@ jobs:
           for file in MainActivity.kt GoogleCastOptionsProvider.kt DownloadService.kt; do
             if [ -f "scripts/android/$file" ]; then
               echo "Copiando $file a $KOTLIN_DIR con paquete $PACKAGE_NAME..."
-              sed "s/^package .*/package $PACKAGE_NAME/" "scripts/android/$file" | \
-              sed "s/com\.anics\.app\.generated\.TauriActivity/${PACKAGE_NAME}.generated.TauriActivity/g" > "$KOTLIN_DIR/$file"
+              sed "s/^package .*/package $PACKAGE_NAME/" "scripts/android/$file" > "$KOTLIN_DIR/$file"
             fi
           done
 
