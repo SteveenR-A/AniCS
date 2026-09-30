@@ -360,9 +360,14 @@ export const useAnimeStore = create<AnimeStore>((set, get) => ({
   loadSources: async () => {
     try {
       const sources = await getSources();
-      const initialSource = sources[0]?.id ?? 'jkanime';
-      set({ sources, activeSource: initialSource });
-      get().loadGenres(initialSource);
+      const currentActive = get().activeSource;
+      const isValidActive = sources.some(s => s.id === currentActive);
+      const activeSource = isValidActive ? currentActive : (sources[0]?.id ?? 'jkanime');
+      set({ sources, activeSource });
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('anics:sources-changed'));
+      }
+      get().loadGenres(activeSource);
     } catch (e) {
       console.error('Failed to load sources', e);
     }

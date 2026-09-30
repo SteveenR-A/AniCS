@@ -5,7 +5,7 @@ import { convertFileSrc } from '@tauri-apps/api/core';
 import {
   ArrowLeft, Play, Download, Heart,
   ChevronDown, ChevronUp, Check, HardDrive, CheckCircle2,
-  Calendar, Layers, Tag, Tv, Globe, Sparkles, Clock, DownloadCloud, Crown, Lock, Copy
+  Calendar, Layers, Tag, Tv, Globe, Sparkles, Clock, DownloadCloud, Crown, Lock
 } from 'lucide-react';
 import { getDetails, getServers, resolveStream } from '@/services/animeService';
 import { addFavorite, removeFavorite, isFavorite as checkFavorite, getHistory, getFavorites, updateFavoriteStatus } from '@/services/storageService';
@@ -62,20 +62,7 @@ export function DesktopDetailsPage() {
   const [epSearch, setEpSearch] = useState('');
   const [loadingEpisode, setLoadingEpisode] = useState<number | null>(null);
   const [showCoverZoom, setShowCoverZoom] = useState(false);
-  const [copiedTitle, setCopiedTitle] = useState(false);
-
   const { isVip, openModal: openVipModal } = useSubscriptionStore();
-
-  const handleCopyTitle = async () => {
-    if (!details?.title) return;
-    try {
-      await navigator.clipboard.writeText(details.title);
-      setCopiedTitle(true);
-      setTimeout(() => setCopiedTitle(false), 2000);
-    } catch {
-      // fallback
-    }
-  };
 
   // Sincronización con Descargas Locales e Historial de Visualización
   const [localEpisodesMap, setLocalEpisodesMap] = useState<Map<number, LocalEpisodeItem>>(new Map());
@@ -573,7 +560,7 @@ export function DesktopDetailsPage() {
         minHeight: 280,
         display: 'flex',
         alignItems: 'flex-end',
-        padding: '36px 36px 28px',
+        padding: '72px 36px 28px',
         overflow: 'hidden',
         background: 'var(--bg-surface)',
         borderBottom: '1px solid var(--border-subtle)',
@@ -702,31 +689,6 @@ export function DesktopDetailsPage() {
                 {details.title}
               </h1>
 
-              <motion.button
-                whileHover={{ scale: 1.08 }}
-                whileTap={{ scale: 0.94 }}
-                onClick={handleCopyTitle}
-                title={copiedTitle ? '¡Nombre copiado!' : 'Copiar nombre del anime'}
-                style={{
-                  background: copiedTitle ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255, 255, 255, 0.08)',
-                  border: `1px solid ${copiedTitle ? 'rgba(16, 185, 129, 0.5)' : 'rgba(255, 255, 255, 0.16)'}`,
-                  borderRadius: 'var(--radius-full)',
-                  padding: '5px 12px',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  color: copiedTitle ? '#34d399' : 'rgba(255, 255, 255, 0.85)',
-                  cursor: 'pointer',
-                  fontSize: 12,
-                  fontWeight: 600,
-                  backdropFilter: 'blur(8px)',
-                  transition: 'all 0.2s ease',
-                  userSelect: 'none',
-                }}
-              >
-                {copiedTitle ? <Check size={13} color="#34d399" /> : <Copy size={13} />}
-                <span>{copiedTitle ? 'Copiado' : 'Copiar'}</span>
-              </motion.button>
             </div>
 
             {/* Chips de Géneros */}

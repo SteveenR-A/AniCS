@@ -1,4 +1,5 @@
 pub mod commands;
+pub mod casting;
 pub mod core;
 pub mod downloader;
 pub mod scrapers;
@@ -13,6 +14,7 @@ use commands::download_cmd::DownloadManager;
 /// Estado global compartido por todos los comandos Tauri
 pub struct AppState {
     pub download_manager: DownloadManager,
+    pub dlna: casting::dlna::DlnaManager,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -26,6 +28,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .manage(AppState {
             download_manager: DownloadManager::new(),
+            dlna: casting::dlna::DlnaManager::new(),
         })
         .setup(|app| {
             // Inicializar base de datos SQLite
@@ -140,6 +143,11 @@ pub fn run() {
             commands::set_download_dir,
             commands::get_local_media_url,
             commands::get_local_server_port,
+            casting::dlna::discover_dlna_devices,
+            casting::dlna::cast_to_dlna_device,
+            casting::dlna::control_dlna_playback,
+            casting::dlna::get_dlna_playback_state,
+            casting::dlna::set_dlna_volume,
             commands::get_storage_space_info,
             commands::cache_image,
             commands::get_cache_stats,

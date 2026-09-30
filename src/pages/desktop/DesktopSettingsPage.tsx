@@ -18,6 +18,7 @@ import { useProfileStore } from '@/stores/useProfileStore';
 import { useSyncStore } from '@/stores/useSyncStore';
 import { useSubscriptionStore, SUBSCRIPTION_PLANS } from '@/stores/useSubscriptionStore';
 import { useAccountStore } from '@/stores/useAccountStore';
+import { useAnimeStore } from '@/stores/useAnimeStore';
 import { FEATURE_FLAGS } from '@/config/features';
 import { getProfileStats } from '@/services/profileService';
 import { getCacheStats, clearImageCache } from '@/services/downloadService';
@@ -221,6 +222,7 @@ export function DesktopSettingsPage() {
       await invoke('set_setting', { key: 'github_repo', value: updateRepo.trim() });
       await invoke('set_setting', { key: 'max_image_cache_mb', value: maxCacheMb });
       await invoke('set_setting', { key: 'custom_sources', value: JSON.stringify(customSources) });
+      await useAnimeStore.getState().loadSources();
 
       setSaveStatus('Ajustes guardados correctamente');
       setTimeout(() => setSaveStatus(null), 3000);
@@ -1328,6 +1330,8 @@ export function DesktopSettingsPage() {
                     setCustomSources(updated);
                     try {
                       await invoke('set_setting', { key: 'custom_sources', value: JSON.stringify(updated) });
+
+                      await useAnimeStore.getState().loadSources();
                       setSaveStatus('Catálogo eliminado');
                       setTimeout(() => setSaveStatus(null), 3000);
                     } catch (e) {
@@ -2199,6 +2203,7 @@ export function DesktopSettingsPage() {
                       setCustomSources(updated);
                       try {
                         await invoke('set_setting', { key: 'custom_sources', value: JSON.stringify(updated) });
+                        await useAnimeStore.getState().loadSources();
                         setSaveStatus('Catálogo personalizado guardado');
                       } catch (e) {
                         console.error('Error saving custom source in Desktop', e);

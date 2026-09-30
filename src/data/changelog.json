@@ -1,5 +1,21 @@
 [
   {
+    "version": "0.2.10",
+    "date": "2026-09-29",
+    "title": "Reproductor, portadas y transmisión en Android",
+    "type": "patch",
+    "highlights": [
+      "Botón central de reproducir y pausar con un solo clic o toque, manteniendo el ocultamiento automático de controles.",
+      "Selector de servidores de video personalizados en PC y Android, con cambio de fuente conservando la posición exacta y el estado de reproducción.",
+      "Catálogos personalizados visibles y actualizados en los menús de navegación después de guardarlos.",
+      "Portadas verticales en el historial de PC y Android para mostrar mejor las imágenes de cada anime.",
+      "Soporte inicial de Google Cast en Android con selector nativo y controles de reproducción en televisores compatibles.",
+      "Transmisión DLNA/UPnP en Android, con soporte para videos locales mediante servidor de red con solicitudes HTTP Range.",
+      "Icono de transmisión oculto en PC, incluido el diseño de ventana pequeña.",
+      "Publicación en GitHub Actions con validación previa de versiones y limpieza automática de artefactos temporales después del release."
+    ]
+  },
+  {
     "version": "0.2.9",
     "date": "2026-09-28",
     "title": "Mejoras en Servidores de Respaldo, Desempaquetado y Navegación",

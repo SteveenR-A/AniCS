@@ -6,17 +6,7 @@ Este documento centraliza las tareas pendientes priorizadas para futuras version
 
 ## 📋 Tareas Pendientes Prioritarias
 
-### 1. 📥 Gestor de Descargas Avanzado (Batch & Queue)
-* **Objetivo:** Facilitar la descarga masiva y ordenada de series completas o temporadas.
-* **Características a Implementar:**
-  - **Selección Múltiple:** Checkboxes o modo de selección en [DesktopDetailsPage.tsx](file:///c:/Documentos/AniCS/src/pages/desktop/DesktopDetailsPage.tsx) y [MobileDetailsPage.tsx](file:///c:/Documentos/AniCS/src/pages/mobile/MobileDetailsPage.tsx) para elegir episodios específicos.
-  - **Descargar Temporada / Lote:** Botón "Descargar todos" o seleccionar rango (ej. Episodios 1 al 12).
-  - **Gestión de Cola:** Configuración de descargas simultáneas en ajustes (ej. 1, 2 o 3 en paralelo) para evitar saturación de ancho de banda.
-  - **Resolución Automática:** Encolar la resolución de servidores en segundo plano antes de iniciar cada fragmento HLS/MP4.
-
----
-
-### 2. 🔔 Notificaciones de Nuevos Episodios
+### 1. 🔔 Notificaciones de Nuevos Episodios
 * **Objetivo:** Notificar al usuario de forma nativa en Windows y Android cuando un anime en emisión que sigue o tiene en favoritos estrena un nuevo capítulo.
 * **Fuente de Datos (Integración con AniGrid):**
   - Utilizar la arquitectura y lógica ya implementada en el proyecto hermano **AniGrid** (`C:\Documentos\AniGrid`), desplegado en Vercel.
@@ -43,17 +33,20 @@ Este documento centraliza las tareas pendientes priorizadas para futuras version
 
 ---
 
-### 3. 📺 Transmitir a Smart TV (Cast / DLNA)
-* **Objetivo:** Permitir enviar la reproducción de anime o donghua a televisores y pantallas conectadas en la red local.
-* **Características a Implementar:**
-  - **Google Cast / Chromecast:**
-    - Soporte para transmisión de flujos HLS (`.m3u8`) y archivos directos `.mp4`.
-    - Selector de dispositivos Cast disponibles en la red local.
-  - **DLNA / UPnP:**
-    - Descubrimiento de Smart TVs (Samsung Tizen, LG webOS, Android TV, etc.) mediante protocolo SSDP.
-    - Servir el contenido a través del servidor multimedia local ya integrado en AniCS (`media_server.rs`), asegurando compatibilidad con solicitudes de rango HTTP (`206 Partial Content`).
-  - **Controles Remotos en la App:**
-    - Barra de control flotante en AniCS para pausar, reanudar, adelantar/retroceder y cambiar volumen en la televisión.
+
+---
+
+## ✅ Tareas Completadas
+
+* **Gestor de Descargas por Lotes:** Selección de episodios no vistos, selección manual o por rango, resolución de enlaces y encolado desde las vistas de escritorio y Android.
+* **Transmisión DLNA / UPnP a Smart TV en Android:** Descubrimiento SSDP, envío de videos descargados mediante servidor LAN con soporte HTTP Range, y controles remotos de reproducir, pausar, buscar, detener y volumen. El botón de transmisión está oculto en PC.
+* **Google Cast en Android (integración inicial):** SDK oficial, selector nativo de televisores y controles de reproducción desde AniCS para enlaces de video compatibles.
+
+## 📋 Pendientes de transmisión
+
+* **Google Cast en Android:** Validar el APK y la reproducción con televisores físicos; comprobar enlaces MP4/HLS de los distintos servidores.
+* **Archivos locales mediante Google Cast:** Exponer una URL accesible por el televisor. Actualmente las descargas se transmiten mediante DLNA/UPnP.
+* **Google Cast en PC:** Integración pendiente para una versión futura. El icono de transmisión permanece oculto en Windows, incluso en ventanas pequeñas.
 
 ---
 

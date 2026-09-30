@@ -1,0 +1,67 @@
+.player-server-selector { position: relative; }
+.player-server-selector button { color: white; cursor: pointer; }
+.player-server-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: min(180px, 30vw);
+  height: 34px;
+  padding: 0 10px;
+  background: rgba(255, 255, 255, .12);
+  border: 1px solid rgba(255, 255, 255, .2);
+  border-radius: var(--radius-full, 9999px);
+  backdrop-filter: blur(10px);
+  font-size: 11px;
+  font-weight: 700;
+  color: white;
+  box-sizing: border-box;
+  transition: background 0.2s, border-color 0.2s;
+}
+.player-server-trigger:hover {
+  background: rgba(255, 255, 255, .18);
+  border-color: rgba(255, 255, 255, .3);
+}
+.player-server-trigger.is-portrait {
+  height: 30px;
+  padding: 0 8px;
+  font-size: 10px;
+  gap: 4px;
+}
+.player-server-trigger span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.player-server-trigger svg { flex-shrink: 0; }
+.player-server-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: min(320px, 85vw);
+  max-height: 65vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 12px;
+  color: white;
+  background: rgba(15, 16, 22, .98);
+  border: 1px solid var(--border-moderate);
+  border-radius: 12px;
+  z-index: 50;
+}
+.player-server-heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.player-server-option {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  text-align: left;
+  padding: 10px 8px;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  overflow-wrap: anywhere;
+}
+.player-server-option[aria-pressed="true"] { background: var(--accent-primary); }
+.player-server-option:disabled { opacity: .55; cursor: default; }
+.player-server-option small { display: block; margin-top: 4px; }
+.player-server-form { display: grid; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-moderate); }
+.player-server-form input { min-width: 0; width: 100%; padding: 8px; color: white; background: rgba(255, 255, 255, .08); border: 1px solid var(--border-moderate); border-radius: 6px; }
+.player-server-form button, .player-server-heading button { display: flex; align-items: center; justify-content: center; gap: 5px; padding: 7px 9px; background: rgba(255, 255, 255, .12); border: 1px solid var(--border-moderate); border-radius: 6px; }
+.player-server-error { color: #f87171; }

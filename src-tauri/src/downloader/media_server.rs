@@ -1,5 +1,5 @@
 use std::io::SeekFrom;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr, UdpSocket};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU16, Ordering};
 use tauri::AppHandle;
@@ -10,6 +10,14 @@ use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 
 static SERVER_PORT: AtomicU16 = AtomicU16::new(0);
+static DLNA_PORT: AtomicU16 = AtomicU16::new(0);
+static DLNA_FILE: Lazy<Mutex<Option<DlnaFile>>> = Lazy::new(|| Mutex::new(None));
+
+#[derive(Clone)]
+struct DlnaFile {
+    token: String,
+    path: PathBuf,
+}
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct AuthCallbackData {
@@ -57,6 +65,27 @@ pub async fn start_media_server(_app_handle: AppHandle) -> Result<u16, Box<dyn s
     SERVER_PORT.store(port, Ordering::Relaxed);
     log::info!("Local media streaming server started on port {}", port);
 
+    // Isolated LAN listener: it only serves the single file registered for an active DLNA cast.
+    match TcpListener::bind("0.0.0.0:0").await {
+        Ok(listener) => {
+            let lan_port = listener.local_addr()?.port();
+            DLNA_PORT.store(lan_port, Ordering::Relaxed);
+            tokio::spawn(async move {
+                loop {
+                    match listener.accept().await {
+                        Ok((stream, _)) => { tokio::spawn(handle_dlna_connection(stream)); }
+                        Err(error) => {
+                            log::warn!("DLNA media server accept error: {}", error);
+                            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                        }
+                    }
+                }
+            });
+            log::info!("DLNA media server listening on port {}", lan_port);
+        }
+        Err(error) => log::warn!("DLNA media sharing is unavailable: {}", error),
+    }
+
     tokio::spawn(async move {
         loop {
             match listener.accept().await {
@@ -72,6 +101,98 @@ pub async fn start_media_server(_app_handle: AppHandle) -> Result<u16, Box<dyn s
     });
 
     Ok(port)
+}
+
+pub async fn prepare_dlna_file(path: &str, renderer_ip: IpAddr) -> Result<String, String> {
+    let port = DLNA_PORT.load(Ordering::Relaxed);
+    if port == 0 { return Err("No se pudo iniciar el servidor local para compartir el video.".to_string()); }
+    let path = tokio::fs::canonicalize(path).await.map_err(|error| format!("No se encontró el video descargado: {error}"))?;
+    if !tokio::fs::metadata(&path).await.map_err(|error| error.to_string())?.is_file() {
+        return Err("La ruta elegida no es un archivo de video.".to_string());
+    }
+    let socket = UdpSocket::bind("0.0.0.0:0").map_err(|error| error.to_string())?;
+    socket.connect(SocketAddr::new(renderer_ip, 1900)).map_err(|error| error.to_string())?;
+    let local_ip = socket.local_addr().map_err(|error| error.to_string())?.ip();
+    if local_ip.is_unspecified() || local_ip.is_loopback() {
+        return Err("El dispositivo no tiene una dirección de red local disponible.".to_string());
+    }
+    let token = uuid::Uuid::new_v4().simple().to_string();
+    *DLNA_FILE.lock() = Some(DlnaFile { token: token.clone(), path });
+    Ok(format!("http://{local_ip}:{port}/dlna/{token}/media"))
+}
+
+pub fn clear_dlna_file(token: &str) {
+    let mut active = DLNA_FILE.lock();
+    if active.as_ref().is_some_and(|file| file.token == token) {
+        *active = None;
+    }
+}
+
+async fn handle_dlna_connection(mut stream: TcpStream) {
+    let mut buffer = [0u8; 4096];
+    let length = match stream.read(&mut buffer).await { Ok(length) if length > 0 => length, _ => return };
+    let request = String::from_utf8_lossy(&buffer[..length]);
+    let mut lines = request.lines();
+    let Some(request_line) = lines.next() else { return; };
+    let parts: Vec<&str> = request_line.split_whitespace().collect();
+    if parts.len() < 2 { return; }
+    let method = parts[0];
+    let route: Vec<&str> = parts[1].split('?').next().unwrap_or_default().split('/').collect();
+    if route.len() != 4 || route[1] != "dlna" || route[3] != "media" {
+        let _ = stream.write_all(b"HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n").await;
+        return;
+    }
+    let Some(file) = DLNA_FILE.lock().as_ref().filter(|file| file.token == route[2]).cloned() else {
+        let _ = stream.write_all(b"HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n").await;
+        return;
+    };
+    if method == "OPTIONS" {
+        let _ = stream.write_all(b"HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, HEAD, OPTIONS\r\nAccess-Control-Allow-Headers: Range\r\nConnection: close\r\n\r\n").await;
+        return;
+    }
+    if method != "GET" && method != "HEAD" {
+        let _ = stream.write_all(b"HTTP/1.1 405 Method Not Allowed\r\nConnection: close\r\nContent-Length: 0\r\n\r\n").await;
+        return;
+    }
+    let range = lines.find_map(|line| {
+        let (name, value) = line.split_once(':')?;
+        name.eq_ignore_ascii_case("range").then(|| value.trim().to_string())
+    });
+    serve_dlna_file(&mut stream, method, &file.path, range.as_deref()).await;
+}
+
+async fn serve_dlna_file(stream: &mut TcpStream, method: &str, path: &PathBuf, range: Option<&str>) {
+    let Ok(metadata) = tokio::fs::metadata(path).await else {
+        let _ = stream.write_all(b"HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n").await;
+        return;
+    };
+    let size = metadata.len();
+    let mime = get_mime_type(path);
+    let requested_range = range.and_then(|value| parse_range(value, size));
+    let (status, start, end) = match (range, requested_range) {
+        (Some(_), None) => {
+            let response = format!("HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: bytes */{size}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+            let _ = stream.write_all(response.as_bytes()).await;
+            return;
+        }
+        (_, Some((start, end))) => ("206 Partial Content", start, end),
+        _ => ("200 OK", 0, size.saturating_sub(1)),
+    };
+    let length = if size == 0 { 0 } else { end.saturating_sub(start).saturating_add(1) };
+    let mut header = format!("HTTP/1.1 {status}\r\nContent-Type: {mime}\r\nContent-Length: {length}\r\nAccept-Ranges: bytes\r\nConnection: close\r\ntransferMode.dlna.org: Streaming\r\n");
+    if status == "206 Partial Content" { header.push_str(&format!("Content-Range: bytes {start}-{end}/{size}\r\n")); }
+    header.push_str("contentFeatures.dlna.org: DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000\r\n\r\n");
+    if stream.write_all(header.as_bytes()).await.is_err() || method == "HEAD" { return; }
+    let Ok(mut file) = tokio::fs::File::open(path).await else { return; };
+    if file.seek(SeekFrom::Start(start)).await.is_err() { return; }
+    let mut remaining = length;
+    let mut chunk = [0u8; 64 * 1024];
+    while remaining > 0 {
+        let count = std::cmp::min(remaining, chunk.len() as u64) as usize;
+        let read = match file.read(&mut chunk[..count]).await { Ok(0) | Err(_) => break, Ok(read) => read };
+        if stream.write_all(&chunk[..read]).await.is_err() { break; }
+        remaining -= read as u64;
+    }
 }
 
 async fn handle_connection(mut stream: TcpStream, _addr: SocketAddr) {

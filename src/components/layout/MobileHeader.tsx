@@ -11,7 +11,7 @@ import { SubscriptionModal } from '@/components/SubscriptionModal';
 
 export function MobileHeader() {
   const navigate = useNavigate();
-  const { activeSource, setActiveSource } = useAnimeStore();
+  const { sources, activeSource, setActiveSource } = useAnimeStore();
   const { activeProfile } = useProfileStore();
   const { isVip, openModal: openVipModal } = useSubscriptionStore();
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
@@ -34,11 +34,23 @@ export function MobileHeader() {
     };
   }, [isSourceMenuOpen]);
 
-  const sourcesList = [
-    { id: 'jkanime', name: 'Anime', subtitle: 'Servidor Principal', color: 'var(--accent-primary)' },
-    { id: 'mundodonghua', name: 'Donghua', subtitle: 'Animación China', color: 'var(--accent-secondary)' },
-    { id: 'otakustv', name: 'Respaldo', subtitle: 'Servidor Alternativo', color: '#10b981' },
-  ];
+  const sourcesList = sources.length > 0
+    ? sources.map(s => {
+        if (s.id === 'jkanime') return { id: s.id, name: 'Anime', subtitle: 'Servidor Principal', color: 'var(--accent-primary)' };
+        if (s.id === 'mundodonghua') return { id: s.id, name: 'Donghua', subtitle: 'Animación China', color: 'var(--accent-secondary)' };
+        if (s.id === 'otakustv') return { id: s.id, name: 'Respaldo', subtitle: 'Servidor Alternativo', color: '#10b981' };
+        return {
+          id: s.id,
+          name: s.name || s.id,
+          subtitle: 'Catálogo Personalizado',
+          color: '#f59e0b',
+        };
+      })
+    : [
+        { id: 'jkanime', name: 'Anime', subtitle: 'Servidor Principal', color: 'var(--accent-primary)' },
+        { id: 'mundodonghua', name: 'Donghua', subtitle: 'Animación China', color: 'var(--accent-secondary)' },
+        { id: 'otakustv', name: 'Respaldo', subtitle: 'Servidor Alternativo', color: '#10b981' },
+      ];
 
   const currentSourceInfo = sourcesList.find(s => s.id === activeSource) || sourcesList[0];
   const ProfileIcon = activeProfile ? getProfileAvatarIcon(activeProfile.avatar) : User;

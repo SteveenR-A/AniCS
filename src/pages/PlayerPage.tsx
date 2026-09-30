@@ -7,7 +7,7 @@ import {
   Maximize, Minimize, Settings, ChevronLeft,
   Loader2, SkipForward, SkipBack, RotateCcw, RotateCw,
   Sun, ListVideo, Zap, AlertCircle,
-  Scaling, Smartphone, Crown, Lock, ExternalLink
+  Scaling, Smartphone, Crown, ExternalLink, Tv
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { usePlayerStore } from '@/stores/usePlayerStore';
@@ -22,6 +22,9 @@ import { getLocalMediaUrl, setKeepScreenOn, setNativeFullscreen, setNativeScreen
 import { useResponsive } from '@/hooks/useResponsive';
 import { rewriteDeadCdnUrl, createRobustHlsLoader } from '@/utils/hlsLoader';
 import { isVipServer, getServerPriority } from '@/utils/serverUtils';
+import { usePlaybackServers } from '@/hooks/usePlaybackServers';
+import { ServerSelector } from '@/components/player/ServerSelector';
+import { CastDialog } from '@/components/player/CastDialog';
 import type { VideoServer } from '@/types';
 
 function formatTime(s: number) {
@@ -42,15 +45,16 @@ export function PlayerPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { isMobile } = useResponsive();
+  const isAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const hlsRef = useRef<Hls | null>(null);
   const controlsTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const toastTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const centerAnimTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const doubleTapTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
-  // Timers para distinguir 1 clic (mostrar/ocultar HUD) de 2 clics (seek/play)
+  // Side taps retain the double-tap seek gesture.
   const clickTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Touch gesture state refs
@@ -61,13 +65,14 @@ export function PlayerPage() {
   const initialBrightness = useRef<number>(1.0);
   const initialVolume = useRef<number>(1.0);
   const lastTapTime = useRef<number>(0);
+  const suppressTouchClickRef = useRef(false);
 
   const queryUrl = searchParams.get('url');
   const queryEp = searchParams.get('ep');
   const querySource = searchParams.get('source') ?? 'jkanime';
 
   const {
-    currentAnime, currentEpisode, servers, resolvedMedia,
+    currentAnime, currentEpisode, servers: extractedServers, resolvedMedia,
     selectedServer, setSelectedServer, setResolvedMedia, setIsResolving,
     isResolving, volume, isMuted, setVolume, setIsMuted,
     playbackTime, setPlaybackTime, duration, setDuration,
@@ -87,6 +92,13 @@ export function PlayerPage() {
   const [autoNext, setAutoNext] = useState(true);
   const [activeDrawer, setActiveDrawer] = useState<'none' | 'servers' | 'settings'>('none');
   const [showServerDropdown, setShowServerDropdown] = useState(false);
+  const [showCastDialog, setShowCastDialog] = useState(false);
+  const { servers, refresh: refreshServers, addServer } = usePlaybackServers(extractedServers, currentEpisode?.url || '', querySource);
+  const interactionRef = useRef({ activeDrawer, showServerDropdown, showControls });
+  interactionRef.current = { activeDrawer, showServerDropdown, showControls };
+  const pendingSwitchRef = useRef<{ time: number; playing: boolean } | null>(null);
+  const serverRequestRef = useRef(0);
+  const lastTimeUiUpdateRef = useRef(0);
 
   const playbackTimeRef = useRef(playbackTime);
   const durationRef = useRef(duration);
@@ -95,6 +107,15 @@ export function PlayerPage() {
   const hasResumedProgressRef = useRef(false);
   const readyToSaveRef = useRef(false);
   const pendingProgressPromiseRef = useRef<Promise<number | null> | null>(null);
+  const mediaSessionRef = useRef(0);
+  const progressReadyTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const markProgressReady = useCallback(() => {
+    clearTimeout(progressReadyTimerRef.current);
+    const session = mediaSessionRef.current;
+    progressReadyTimerRef.current = setTimeout(() => {
+      if (session === mediaSessionRef.current) readyToSaveRef.current = true;
+    }, 1500);
+  }, []);
 
   useEffect(() => { playbackTimeRef.current = playbackTime; }, [playbackTime]);
   useEffect(() => { durationRef.current = duration; }, [duration]);
@@ -161,7 +182,6 @@ export function PlayerPage() {
   const [hudToast, setHudToast] = useState<{ icon: 'volume' | 'brightness' | 'seek' | 'aspect' | 'vip' | 'external' | 'server'; text: string; value?: number } | null>(null);
   const [brightness, setBrightness] = useState(1.0);
   const [doubleTapSide, setDoubleTapSide] = useState<'left' | 'right' | null>(null);
-  const [centerPlayPulse, setCenterPlayPulse] = useState<'play' | 'pause' | null>(null);
 
   // Timeline scrubbing (desplazamiento continuo estilo mpv con puntero táctil/ratón)
   const [isScrubbing, setIsScrubbing] = useState(false);
@@ -241,12 +261,6 @@ export function PlayerPage() {
     setAspectRatio(nextAspect);
     const label = nextAspect === 'contain' ? 'Original (Ajustar 16:9)' : nextAspect === 'cover' ? 'Zoom (Llenar pantalla)' : 'Estirar imagen';
     showToast({ icon: 'aspect', text: `Aspecto: ${label}` });
-  };
-
-  const triggerCenterPulse = (type: 'play' | 'pause') => {
-    setCenterPlayPulse(type);
-    if (centerAnimTimeout.current) clearTimeout(centerAnimTimeout.current);
-    centerAnimTimeout.current = setTimeout(() => setCenterPlayPulse(null), 500);
   };
 
   // Métodos de control de Pantalla Completa
@@ -385,7 +399,7 @@ export function PlayerPage() {
   const failedServersRef = useRef<Set<string>>(new Set());
   const tryFallbackServerRef = useRef<() => void>(() => {});
 
-  const handleSelectServer = async (server: VideoServer, currentSource?: string) => {
+  const handleSelectServer = useCallback(async (server: VideoServer, currentSource?: string, recoverOnFailure = false) => {
     const isTargetVip = isVipServer(server.name);
     if (isTargetVip && FEATURE_FLAGS.SHOW_SUBSCRIPTION && !isVip) {
       showToast({
@@ -396,29 +410,38 @@ export function PlayerPage() {
       return;
     }
     const sourceToUse = currentSource || querySource;
-    setSelectedServer(server);
+    const request = ++serverRequestRef.current;
     setIsResolving(true);
     try {
       const media = await resolveStream(server, sourceToUse);
+      if (request !== serverRequestRef.current) return;
+      const video = videoRef.current;
+      pendingSwitchRef.current = { time: video?.currentTime ?? playbackTimeRef.current, playing: video ? !video.paused : false };
+      hasResumedProgressRef.current = true;
+      readyToSaveRef.current = false;
+      setSelectedServer(server);
       setResolvedMedia(media);
       failedServersRef.current.delete(server.url);
     } catch (err) {
+      if (request !== serverRequestRef.current) return;
       console.warn(`[AniCS Player] Servidor ${server.name} falló:`, err);
       failedServersRef.current.add(server.url);
       showToast({
         icon: 'server',
-        text: `Error en ${server.name}, buscando alternativo...`,
+        text: `No se pudo cargar ${server.name}`,
       });
-      tryFallbackServerRef.current();
+      // Keep the previous working stream if resolving the requested server fails.
+      if (recoverOnFailure) tryFallbackServerRef.current();
     } finally {
-      setIsResolving(false);
+      if (request === serverRequestRef.current) setIsResolving(false);
     }
-  };
+  }, [querySource, isVip, openVipModal, setSelectedServer, setResolvedMedia, setIsResolving]);
 
-  const tryFallbackServer = useCallback(() => {
+  const tryFallbackServer = useCallback((manualRetry = false) => {
     if (!servers.length || !selectedServer) return;
     const isUserVip = !FEATURE_FLAGS.SHOW_SUBSCRIPTION || isVip;
-    const allowed = isUserVip ? servers : servers.filter(s => !isVipServer(s.name));
+    const playable = servers.filter(server => !server.unavailableReason);
+    const allowed = isUserVip ? playable : playable.filter(s => !isVipServer(s.name));
     if (!allowed.length) return;
 
     failedServersRef.current.add(selectedServer.url);
@@ -430,7 +453,7 @@ export function PlayerPage() {
     if (!nextServer) {
       const currentIndex = allowed.findIndex(s => s.url === selectedServer.url);
       const nextCandidate = allowed[(currentIndex + 1) % allowed.length];
-      if (nextCandidate && nextCandidate.url !== selectedServer.url) {
+      if (manualRetry && nextCandidate && nextCandidate.url !== selectedServer.url) {
         showToast({
           icon: 'server',
           text: `Reintentando con ${nextCandidate.name}...`,
@@ -449,8 +472,8 @@ export function PlayerPage() {
       icon: 'server',
       text: `Cambiando a ${nextServer.name}...`,
     });
-    handleSelectServer(nextServer);
-  }, [servers, selectedServer, isVip, querySource]);
+    handleSelectServer(nextServer, undefined, true);
+  }, [servers, selectedServer, isVip, handleSelectServer]);
 
   useEffect(() => {
     tryFallbackServerRef.current = tryFallbackServer;
@@ -511,6 +534,8 @@ export function PlayerPage() {
       }
 
       currentLoadedKey.current = loadKey;
+      ++serverRequestRef.current;
+      pendingSwitchRef.current = null;
       resetPlayback();
       setIsLoadingInitial(true);
       setLoadError(null);
@@ -574,6 +599,7 @@ export function PlayerPage() {
 
     return () => {
       // Limpiar al desmontar la vista del reproductor
+      ++serverRequestRef.current;
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
@@ -593,6 +619,8 @@ export function PlayerPage() {
   // Resolver stream resuelto en el elemento de video
   useEffect(() => {
     const video = videoRef.current;
+    ++mediaSessionRef.current;
+    clearTimeout(progressReadyTimerRef.current);
     if (!video || !resolvedMedia || !resolvedMedia.directUrl) {
       if (video) {
         video.pause();
@@ -603,6 +631,33 @@ export function PlayerPage() {
     }
 
     // Cleanup previous hls instance and video state
+    const switchState = pendingSwitchRef.current;
+    pendingSwitchRef.current = null;
+    let disposed = false;
+    let restored = !switchState;
+    let playStarted = false;
+    const sourceTimers: ReturnType<typeof setTimeout>[] = [];
+    const restorePosition = () => {
+      if (disposed || restored || video.readyState < 1 || !switchState) return;
+      video.currentTime = Number.isFinite(video.duration)
+        ? Math.min(switchState.time, video.duration) : switchState.time;
+      playbackTimeRef.current = video.currentTime;
+      setPlaybackTime(video.currentTime);
+      restored = true;
+      readyToSaveRef.current = true;
+    };
+    const playWhenReady = () => {
+      if (disposed || playStarted) return;
+      restorePosition();
+      if (!restored || (switchState && !switchState.playing)) return;
+      playStarted = true;
+      video.play().catch(err => {
+        playStarted = false;
+        console.warn('[AniCS Stream] No se pudo iniciar reproducción:', err);
+      });
+    };
+    video.addEventListener('loadedmetadata', restorePosition);
+    video.addEventListener('canplay', playWhenReady, { once: true });
     if (hlsRef.current) {
       hlsRef.current.destroy();
       hlsRef.current = null;
@@ -615,7 +670,7 @@ export function PlayerPage() {
     let isHls = resolvedMedia.mediaType === 'hls' || sourceUrl.includes('.m3u8');
     let blobUrlToRevoke: string | null = null;
 
-    if (sourceUrl.toLowerCase().endsWith('.ts') && !sourceUrl.includes('.m3u8')) {
+    if (/\.ts(?:$|[?#])/i.test(sourceUrl) && !sourceUrl.includes('.m3u8')) {
       isHls = true;
       const m3u8Content = `#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:7200\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:7200.0,\n${sourceUrl}\n#EXT-X-ENDLIST`;
       sourceUrl = URL.createObjectURL(new Blob([m3u8Content], { type: 'application/vnd.apple.mpegurl' }));
@@ -642,16 +697,16 @@ export function PlayerPage() {
 
       let playTriggered = false;
       const attemptAutoPlay = () => {
-        if (!playTriggered) {
+        restorePosition();
+        if (!disposed && restored && !playTriggered) {
           playTriggered = true;
-          video.play().catch(err => {
-            console.warn('[AniCS Stream] Autoplay error o bloqueado por navegador:', err);
-          });
+          playWhenReady();
         }
       };
 
       // 1. Reanudar progreso inmediatamente al cargar los niveles de HLS, antes de descargar fragmentos
       hls.once(Hls.Events.LEVEL_LOADED, async (_, data) => {
+        if (disposed) return;
         const totalDuration = data.details?.totalduration;
         if (totalDuration && totalDuration > 0) {
           setDuration(totalDuration);
@@ -661,7 +716,7 @@ export function PlayerPage() {
           if (playbackTimeRef.current > 2 && !hasResumedProgressRef.current) {
             hasResumedProgressRef.current = true;
             video.currentTime = playbackTimeRef.current;
-            setTimeout(() => { readyToSaveRef.current = true; }, 1500);
+            sourceTimers.push(setTimeout(() => { readyToSaveRef.current = true; }, 1500));
             return;
           }
 
@@ -671,13 +726,14 @@ export function PlayerPage() {
               const savedProg = pendingProgressPromiseRef.current
                 ? await pendingProgressPromiseRef.current
                 : await getEpisodeProgress(currentEpisodeRef.current.url, activeProfileId);
+              if (disposed) return;
 
               if (savedProg && savedProg > 0.01 && savedProg < 0.95 && totalDuration > 0) {
                 const targetTime = savedProg * totalDuration;
                 hasResumedProgressRef.current = true;
                 video.currentTime = targetTime;
                 showToast({ icon: 'seek', text: `Reanudado al ${Math.round(savedProg * 100)}%` });
-                setTimeout(() => { readyToSaveRef.current = true; }, 1500);
+                sourceTimers.push(setTimeout(() => { readyToSaveRef.current = true; }, 1500));
                 return;
               }
             } catch (e) {
@@ -698,7 +754,7 @@ export function PlayerPage() {
         if (video.readyState >= 2) {
           attemptAutoPlay();
         } else {
-          setTimeout(attemptAutoPlay, 1200);
+          sourceTimers.push(setTimeout(attemptAutoPlay, 1200));
         }
       });
 
@@ -725,31 +781,21 @@ export function PlayerPage() {
       });
     } else if (isHls && video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = sourceUrl;
-      const attemptPlay = () => {
-        video.play().catch(err => {
-          console.warn('[AniCS Stream] Autoplay error o bloqueado por navegador:', err);
-        });
-      };
       if (video.readyState >= 2) {
-        attemptPlay();
-      } else {
-        video.addEventListener('canplay', attemptPlay, { once: true });
+        playWhenReady();
       }
     } else {
       video.src = sourceUrl;
-      const attemptPlay = () => {
-        video.play().catch(err => {
-          console.warn('[AniCS Stream] Autoplay error o bloqueado por navegador:', err);
-        });
-      };
       if (video.readyState >= 2) {
-        attemptPlay();
-      } else {
-        video.addEventListener('canplay', attemptPlay, { once: true });
+        playWhenReady();
       }
     }
 
     return () => {
+      disposed = true;
+      sourceTimers.forEach(clearTimeout);
+      video.removeEventListener('loadedmetadata', restorePosition);
+      video.removeEventListener('canplay', playWhenReady);
       if (blobUrlToRevoke) {
         URL.revokeObjectURL(blobUrlToRevoke);
       }
@@ -812,14 +858,29 @@ export function PlayerPage() {
 
   const showControlsTemp = useCallback(() => {
     setShowControls(true);
+    if (!interactionRef.current.showControls && videoRef.current) setPlaybackTime(videoRef.current.currentTime);
     if (controlsTimeout.current) clearTimeout(controlsTimeout.current);
     controlsTimeout.current = setTimeout(() => {
-      if (activeDrawer === 'none') {
+      if (interactionRef.current.activeDrawer === 'none' && !interactionRef.current.showServerDropdown) {
         setShowControls(false);
         setShowServerDropdown(false);
       }
     }, 2800);
-  }, [activeDrawer]);
+  }, [setPlaybackTime]);
+
+  useEffect(() => {
+    showControlsTemp();
+  }, [activeDrawer, showServerDropdown, showControlsTemp]);
+
+  useEffect(() => () => {
+    clearTimeout(controlsTimeout.current);
+    clearTimeout(toastTimeout.current);
+    clearTimeout(doubleTapTimeoutRef.current);
+    clearTimeout(progressReadyTimerRef.current);
+    if (clickTimeoutRef.current) clearTimeout(clickTimeoutRef.current);
+    pendingSwitchRef.current = null;
+    usePlayerStore.getState().resetPlayback();
+  }, []);
 
   const toggleControlsManual = () => {
     if (showControls) {
@@ -831,20 +892,28 @@ export function PlayerPage() {
     }
   };
 
-  const togglePlay = (showHud: boolean | React.SyntheticEvent = true) => {
+  const togglePlay = useCallback((showHud: boolean | React.SyntheticEvent = true) => {
     const v = videoRef.current;
     if (!v) return;
-    if (isPlaying) {
+    if (!v.paused) {
       v.pause();
-      triggerCenterPulse('pause');
     } else {
       v.play().catch(() => {});
-      triggerCenterPulse('play');
     }
     if (typeof showHud === 'boolean' ? showHud : true) {
       showControlsTemp();
     }
-  };
+  }, [showControlsTemp]);
+
+  const handleCastPositionChange = useCallback((position: number) => {
+    playbackTimeRef.current = position;
+    setPlaybackTime(position);
+  }, [setPlaybackTime]);
+
+  const handleCastingStarted = useCallback(() => {
+    videoRef.current?.pause();
+    saveProgress();
+  }, [saveProgress]);
 
   const handleEnded = () => {
     setIsPlaying(false);
@@ -863,6 +932,9 @@ export function PlayerPage() {
     if (!ep) return;
 
     saveProgress();
+    ++serverRequestRef.current;
+    pendingSwitchRef.current = null;
+    resetPlayback();
 
     if (hlsRef.current) {
       hlsRef.current.destroy();
@@ -932,8 +1004,12 @@ export function PlayerPage() {
     }
   };
 
-  // Manejo de Clics en Pantalla (1 clic = HUD on/off, 2 clics = seek / pause sin HUD)
+  // Center clicks act immediately; only side taps wait for the double-seek gesture.
   const handleScreenClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (suppressTouchClickRef.current) {
+      suppressTouchClickRef.current = false;
+      return;
+    }
     const target = e.target as HTMLElement;
     if (
       activeDrawer !== 'none' ||
@@ -946,8 +1022,16 @@ export function PlayerPage() {
       return;
     }
 
-    const x = e.clientX;
-    const screenWidth = window.innerWidth;
+    const bounds = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - bounds.left;
+    const screenWidth = bounds.width;
+    if (x >= screenWidth * 0.33 && x <= screenWidth * 0.66) {
+      if (clickTimeoutRef.current) clearTimeout(clickTimeoutRef.current);
+      clickTimeoutRef.current = null;
+      lastTapTime.current = 0;
+      togglePlay();
+      return;
+    }
     const now = Date.now();
     const doubleTapDiff = now - lastTapTime.current;
 
@@ -962,15 +1046,14 @@ export function PlayerPage() {
         // Doble clic izquierda: -10s sin HUD
         seekRelative(-10, false);
         setDoubleTapSide('left');
-        setTimeout(() => setDoubleTapSide(null), 600);
+        clearTimeout(doubleTapTimeoutRef.current);
+        doubleTapTimeoutRef.current = setTimeout(() => setDoubleTapSide(null), 600);
       } else if (x > screenWidth * 0.66) {
         // Doble clic derecha: +10s sin HUD
         seekRelative(10, false);
         setDoubleTapSide('right');
-        setTimeout(() => setDoubleTapSide(null), 600);
-      } else {
-        // Doble clic centro: Pausar/Reanudar sin HUD
-        togglePlay(false);
+        clearTimeout(doubleTapTimeoutRef.current);
+        doubleTapTimeoutRef.current = setTimeout(() => setDoubleTapSide(null), 600);
       }
       lastTapTime.current = 0;
     } else {
@@ -988,6 +1071,7 @@ export function PlayerPage() {
 
   // Gestos táctiles
   const handleTouchStart = (e: React.TouchEvent) => {
+    suppressTouchClickRef.current = false;
     if (!document.fullscreenElement && !(document as any).webkitFullscreenElement) {
       enterFullscreen().catch(() => {});
     }
@@ -1035,6 +1119,7 @@ export function PlayerPage() {
       const change = deltaY / (screenHeight * 0.6);
 
       if (Math.abs(deltaY) > 10) {
+        suppressTouchClickRef.current = true;
         if (touchActionSide.current === 'left') {
           const newBri = Math.max(0.1, Math.min(1.5, initialBrightness.current + change));
           setBrightness(newBri);
@@ -1088,7 +1173,7 @@ export function PlayerPage() {
   // Atajos de teclado
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.target as HTMLElement).tagName === 'INPUT') return;
+      if ((e.target as HTMLElement).closest('input, select, textarea, button, [contenteditable="true"]')) return;
 
       switch (e.key.toLowerCase()) {
         case ' ':
@@ -1213,6 +1298,9 @@ export function PlayerPage() {
         cursor: showControls ? 'default' : 'none',
       }}
       onMouseMove={showControlsTemp}
+      onPointerDownCapture={event => {
+        if ((event.target as HTMLElement).closest('[data-interactive], button, input, select')) showControlsTemp();
+      }}
       onClick={handleScreenClick}
       onWheel={handleWheel}
       onTouchStart={handleTouchStart}
@@ -1261,6 +1349,7 @@ export function PlayerPage() {
             saveProgress();
           }}
           onLoadedMetadata={async () => {
+            const session = mediaSessionRef.current;
             const v = videoRef.current;
             if (v) {
               if (v.duration && v.duration > 0) {
@@ -1272,7 +1361,7 @@ export function PlayerPage() {
               if (playbackTimeRef.current > 2 && !hasResumedProgressRef.current) {
                 hasResumedProgressRef.current = true;
                 v.currentTime = playbackTimeRef.current;
-                setTimeout(() => { readyToSaveRef.current = true; }, 1500);
+                markProgressReady();
                 return;
               }
 
@@ -1283,6 +1372,7 @@ export function PlayerPage() {
                   const savedProg = pendingProgressPromiseRef.current
                     ? await pendingProgressPromiseRef.current
                     : await getEpisodeProgress(currentEpisodeRef.current.url, activeProfileId);
+                  if (session !== mediaSessionRef.current) return;
 
                   if (savedProg && savedProg > 0.01 && savedProg < 0.95 && v.duration > 0) {
                     const targetTime = savedProg * v.duration;
@@ -1290,11 +1380,12 @@ export function PlayerPage() {
                     setPlaybackTime(targetTime);
                     showToast({ icon: 'seek', text: `Reanudado al ${Math.round(savedProg * 100)}%` });
                     hasResumedProgressRef.current = true;
-                    setTimeout(() => { readyToSaveRef.current = true; }, 1500);
+                    markProgressReady();
                     return;
                   }
                   readyToSaveRef.current = true;
                 } catch (e) {
+                  if (session !== mediaSessionRef.current) return;
                   console.error('Error resuming progress in onLoadedMetadata:', e);
                   readyToSaveRef.current = true;
                 }
@@ -1306,8 +1397,12 @@ export function PlayerPage() {
           onTimeUpdate={() => {
             const v = videoRef.current;
             if (v) {
-              setPlaybackTime(v.currentTime);
               playbackTimeRef.current = v.currentTime;
+              const now = performance.now();
+              if (interactionRef.current.showControls && now - lastTimeUiUpdateRef.current >= 250) {
+                lastTimeUiUpdateRef.current = now;
+                setPlaybackTime(v.currentTime);
+              }
             }
           }}
           onDurationChange={() => {
@@ -1337,28 +1432,6 @@ export function PlayerPage() {
           />
         )}
       </div>
-
-      {/* Center Play/Pause Pulse Animation */}
-      <AnimatePresence>
-        {centerPlayPulse && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.6 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 1.3 }}
-            transition={{ duration: 0.3 }}
-            style={{
-              position: 'absolute',
-              width: 72, height: 72, borderRadius: '50%',
-              background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(16px)',
-              border: '1px solid rgba(255,255,255,0.2)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              color: 'white', zIndex: 25, pointerEvents: 'none',
-            }}
-          >
-            {centerPlayPulse === 'play' ? <Play size={32} fill="white" style={{ marginLeft: 3 }} /> : <Pause size={32} fill="white" />}
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       {/* Double Tap Seek Feedback */}
       <AnimatePresence>
@@ -1426,7 +1499,26 @@ export function PlayerPage() {
         </div>
       )}
 
-      {/* ── Overlay HUD Elegante y Limpio (Estilo C# / Imagen 3) ── */}
+      <button
+        type="button"
+        data-interactive
+        aria-label={isPlaying ? 'Pausar video' : 'Reproducir video'}
+        onClick={event => { event.stopPropagation(); togglePlay(); }}
+        onTouchStart={event => event.stopPropagation()}
+        onFocus={showControlsTemp}
+        style={{
+          position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)',
+          width: isMobile ? 72 : 88, height: isMobile ? 72 : 88, borderRadius: '50%',
+          display: activeDrawer === 'none' ? 'flex' : 'none', alignItems: 'center', justifyContent: 'center',
+          color: 'white', background: 'rgba(0,0,0,.45)', border: '1px solid rgba(255,255,255,.35)',
+          zIndex: 21, cursor: 'pointer', opacity: showControls ? 1 : 0, transition: 'opacity .2s',
+          touchAction: 'manipulation',
+        }}
+      >
+        {isPlaying ? <Pause size={36} fill="currentColor" /> : <Play size={36} fill="currentColor" />}
+      </button>
+
+      {/* HUD leaves the video surface reachable; only control bars intercept input. */}
       <AnimatePresence>
         {showControls && (
           <motion.div
@@ -1443,7 +1535,7 @@ export function PlayerPage() {
               paddingBottom: isMobile ? 'calc(12px + env(safe-area-inset-bottom, 0px))' : '18px',
               paddingLeft: isMobile ? 'calc(10px + env(safe-area-inset-left, 0px))' : '12px',
               paddingRight: isMobile ? 'calc(10px + env(safe-area-inset-right, 0px))' : '16px',
-              zIndex: 20, pointerEvents: 'auto',
+              zIndex: 20, pointerEvents: 'none',
             }}
             onWheel={e => e.stopPropagation()}
             onTouchStart={e => e.stopPropagation()}
@@ -1454,6 +1546,7 @@ export function PlayerPage() {
               data-interactive
               onClick={e => e.stopPropagation()}
               style={{
+                pointerEvents: 'auto',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
@@ -1509,108 +1602,41 @@ export function PlayerPage() {
                   </div>
                 )}
 
-                {/* Selector de Servidor */}
-                <div style={{ position: 'relative' }}>
-                  <button
-                    onClick={() => setShowServerDropdown(!showServerDropdown)}
-                    title="Seleccionar servidor de video"
-                    style={{
-                      background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.2)',
-                      borderRadius: 'var(--radius-full)', padding: isPortrait ? '5px 8px' : '5px 12px',
-                      color: 'white', fontSize: 11, fontWeight: 700, cursor: 'pointer',
-                      display: 'flex', alignItems: 'center', gap: 5, backdropFilter: 'blur(10px)',
-                    }}
-                  >
-                    <span>{selectedServer?.name || '1080p'}</span>
-                    {selectedServer && isVipServer(selectedServer.name) && (
-                      <Crown size={11} color="#fbbf24" style={{ flexShrink: 0 }} />
-                    )}
-                  </button>
-
-                  <AnimatePresence>
-                    {showServerDropdown && (
-                      <motion.div
-                        initial={{ opacity: 0, y: 8, scale: 0.95 }}
-                        animate={{ opacity: 1, y: 0, scale: 1 }}
-                        exit={{ opacity: 0, y: 8, scale: 0.95 }}
-                        style={{
-                          position: 'absolute', top: '120%', right: 0,
-                          background: 'rgba(15,16,22,0.96)', backdropFilter: 'blur(20px)',
-                          border: '1px solid var(--border-moderate)', borderRadius: 'var(--radius-lg)',
-                          padding: 8, zIndex: 50, display: 'flex', flexDirection: 'column', gap: 4,
-                          minWidth: 165, boxShadow: 'var(--shadow-lg)',
-                        }}
-                      >
-                        <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', padding: '4px 8px' }}>
-                          Servidores
-                        </span>
-                        {servers.map((srv, idx) => {
-                          const isSelected = selectedServer?.url === srv.url;
-                          const isTargetVip = isVipServer(srv.name);
-                          const isLocked = isTargetVip && FEATURE_FLAGS.SHOW_SUBSCRIPTION && !isVip;
-
-                          return (
-                            <button
-                              key={idx}
-                              onClick={() => {
-                                if (isLocked) {
-                                  showToast({
-                                    icon: 'vip',
-                                    text: `El servidor ${srv.name} requiere membresía VIP`,
-                                  });
-                                  openVipModal();
-                                } else {
-                                  handleSelectServer(srv);
-                                  setShowServerDropdown(false);
-                                }
-                              }}
-                              style={{
-                                padding: '6px 10px', borderRadius: 'var(--radius-sm)',
-                                background: isSelected
-                                  ? 'var(--accent-primary)'
-                                  : isLocked
-                                  ? 'rgba(245, 158, 11, 0.08)'
-                                  : 'transparent',
-                                border: isLocked ? '1px dashed rgba(245, 158, 11, 0.35)' : 'none',
-                                color: isSelected ? 'white' : (isLocked ? '#fbbf24' : 'var(--text-primary)'),
-                                fontSize: 12, fontWeight: isSelected ? 700 : 500, cursor: 'pointer',
-                                textAlign: 'left', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                                opacity: isLocked ? 0.9 : 1,
-                              }}
-                            >
-                              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                {srv.name}
-                              </span>
-                              {isTargetVip && (
-                                <span
-                                  style={{
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: 3,
-                                    fontSize: 9,
-                                    fontWeight: 800,
-                                    background: isLocked ? 'rgba(245, 158, 11, 0.2)' : 'linear-gradient(135deg, #f59e0b, #d97706)',
-                                    color: isLocked ? '#fbbf24' : '#000',
-                                    padding: '1px 5px',
-                                    borderRadius: '4px',
-                                  }}
-                                >
-                                  {isLocked ? <Lock size={8} /> : <Crown size={9} />}
-                                  VIP
-                                </span>
-                              )}
-                            </button>
-                          );
-                        })}
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
-
+                <ServerSelector
+                  servers={servers}
+                  selectedUrl={selectedServer?.url}
+                  selectedName={selectedServer?.name}
+                  isOpen={showServerDropdown}
+                  isResolving={isResolving}
+                  isPortrait={isPortrait}
+                  onOpenChange={setShowServerDropdown}
+                  onRefresh={refreshServers}
+                  onSelect={handleSelectServer}
+                  onAdd={addServer}
+                />
+                {isAndroid && <button
+                  type="button"
+                  data-interactive
+                  aria-label="Transmitir a Smart TV"
+                  title="Transmitir a Smart TV"
+                  disabled={isResolving || !resolvedMedia?.directUrl}
+                  onClick={() => setShowCastDialog(true)}
+                  style={{
+                    background: showCastDialog ? 'var(--accent-primary)' : 'rgba(255,255,255,0.12)',
+                    border: '1px solid rgba(255,255,255,0.2)',
+                    borderRadius: 'var(--radius-full)', width: isPortrait ? 30 : 34, height: isPortrait ? 30 : 34,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    color: 'white', cursor: isResolving || !resolvedMedia?.directUrl ? 'not-allowed' : 'pointer',
+                    opacity: isResolving || !resolvedMedia?.directUrl ? 0.45 : 1,
+                    backdropFilter: 'blur(10px)', flexShrink: 0,
+                  }}
+                >
+                  <Tv size={isPortrait ? 13 : 15} />
+                </button>}
                 {/* Botón Alternar / Cambiar Servidor Siguiente (Solo Desktop) */}
                 {!isMobile && (
                   <button
-                    onClick={tryFallbackServer}
+                    onClick={() => tryFallbackServer(true)}
                     title="Cambiar al siguiente servidor"
                     style={{
                       background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.2)',
@@ -1695,7 +1721,7 @@ export function PlayerPage() {
             <div
               data-interactive
               onClick={e => e.stopPropagation()}
-              style={{ display: 'flex', flexDirection: 'column', gap: isPortrait ? 6 : 10 }}
+              style={{ pointerEvents: 'auto', display: 'flex', flexDirection: 'column', gap: isPortrait ? 6 : 10 }}
             >
               {/* Barra de Progreso Interactiva Estilo MPV con Scrubbing / Arrastre Continuo */}
               {(() => {
@@ -1847,6 +1873,7 @@ export function PlayerPage() {
 
                       {/* Play / Pause Botón Circular */}
                       <button
+                        aria-label={isPlaying ? 'Pausar desde controles' : 'Reproducir desde controles'}
                         onClick={togglePlay}
                         style={{
                           width: 40, height: 40, borderRadius: '50%',
@@ -2007,6 +2034,7 @@ export function PlayerPage() {
 
                     {/* Play / Pause Botón Circular */}
                     <button
+                      aria-label={isPlaying ? 'Pausar desde controles' : 'Reproducir desde controles'}
                       onClick={togglePlay}
                       style={{
                         width: 38, height: 38, borderRadius: '50%',
@@ -2347,6 +2375,21 @@ export function PlayerPage() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {isAndroid && showCastDialog && resolvedMedia?.directUrl && currentEpisode && (
+        <CastDialog
+          isMobile={isMobile}
+          title={`${currentAnime.title} — Episodio ${currentEpisode.number}`}
+          streamUrl={resolvedMedia.directUrl}
+          localFilePath={currentAnime.source === 'local' || !/^https?:\/\//i.test(currentEpisode.url) ? currentEpisode.url : undefined}
+          mediaType={resolvedMedia.mediaType}
+          currentTime={videoRef.current?.currentTime ?? playbackTime}
+          isPlaying={isPlaying}
+          onClose={() => setShowCastDialog(false)}
+          onCast={handleCastingStarted}
+          onPositionChange={handleCastPositionChange}
+        />
+      )}
     </div>
   );
 }

@@ -82,11 +82,46 @@ pub trait AnimeExtractor: Send + Sync {
 // Factory de extractores
 // ──────────────────────────────────────────
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CustomSourceConfig {
+    pub name: String,
+    pub url: String,
+    #[serde(default)]
+    pub r#type: String,
+}
+
+pub fn get_custom_sources() -> Vec<CustomSourceConfig> {
+    crate::storage::get_setting("custom_sources")
+        .ok()
+        .flatten()
+        .and_then(|raw| serde_json::from_str::<Vec<CustomSourceConfig>>(&raw).ok())
+        .unwrap_or_default()
+}
+
 pub fn create_extractor(id: &str) -> Option<Box<dyn AnimeExtractor>> {
     match id {
         "jkanime" => Some(Box::new(JKAnimeExtractor::new())),
         "mundodonghua" => Some(Box::new(MundoDonghuaExtractor::new())),
         "otakustv" => Some(Box::new(OtakusTVExtractor::new())),
+        custom_id if custom_id.starts_with("custom_") => {
+            let custom_sources = get_custom_sources();
+            if let Some(idx_str) = custom_id.strip_prefix("custom_") {
+                if let Ok(idx) = idx_str.parse::<usize>() {
+                    if let Some(cfg) = custom_sources.get(idx) {
+                        let base = cfg.url.clone();
+                        let t = cfg.r#type.to_lowercase();
+                        return if t.contains("donghua") {
+                            Some(Box::new(MundoDonghuaExtractor::with_base_url(base)))
+                        } else if t.contains("otakustv") || t.contains("respaldo") {
+                            Some(Box::new(OtakusTVExtractor::with_base_url(base)))
+                        } else {
+                            Some(Box::new(JKAnimeExtractor::with_base_url(base)))
+                        };
+                    }
+                }
+            }
+            None
+        }
         _ => None,
     }
 }

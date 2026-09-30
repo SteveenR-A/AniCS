@@ -22,20 +22,20 @@ const navItems = [
   { to: '/favorites', icon: Heart,      label: 'Favoritos'    },
 ];
 
-/** Mapea el ID interno de la fuente a un label legible corto */
-function sourceLabel(id: string): string {
-  if (id === 'jkanime') return 'Anime';
-  if (id === 'mundodonghua') return 'Donghua';
-  if (id === 'otakustv') return 'Anime (Respaldo)';
-  return id;
+/** Mapea el ID interno o personalizado de la fuente a un label legible */
+function sourceLabel(s: import('@/types').Source): string {
+  if (s.id === 'jkanime') return 'Anime';
+  if (s.id === 'mundodonghua') return 'Donghua';
+  if (s.id === 'otakustv') return 'Anime (Respaldo)';
+  return s.name || s.id;
 }
 
 /** Letra/emoji para el icono compacto de fuente en sidebar colapsada */
-function sourceGlyph(id: string): string {
-  if (id === 'jkanime') return 'JK';
-  if (id === 'mundodonghua') return 'DH';
-  if (id === 'otakustv') return 'OT';
-  return id.slice(0, 2).toUpperCase();
+function sourceGlyph(s: import('@/types').Source): string {
+  if (s.id === 'jkanime') return 'JK';
+  if (s.id === 'mundodonghua') return 'DH';
+  if (s.id === 'otakustv') return 'OT';
+  return (s.name || s.id).slice(0, 2).toUpperCase();
 }
 
 export function DesktopSidebar() {
@@ -162,7 +162,7 @@ export function DesktopSidebar() {
                 <button
                   key={s.id}
                   onClick={() => setActiveSource(s.id)}
-                  title={collapsed ? sourceLabel(s.id) : undefined}
+                  title={collapsed ? sourceLabel(s) : undefined}
                   style={{
                     width: '100%',
                     display: 'flex',
@@ -183,7 +183,7 @@ export function DesktopSidebar() {
                     background: isActive ? 'var(--accent-primary)' : 'var(--text-muted)',
                     flexShrink: 0,
                   }} />
-                  {!collapsed ? sourceLabel(s.id) : sourceGlyph(s.id)}
+                  {!collapsed ? sourceLabel(s) : sourceGlyph(s)}
                 </button>
               );
             })}

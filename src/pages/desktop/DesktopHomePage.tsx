@@ -95,6 +95,7 @@ function SkeletonCard() {
 export function DesktopHomePage() {
   const navigate = useNavigate();
   const activeSource = useAnimeStore((s) => s.activeSource);
+  const sources = useAnimeStore((s) => s.sources);
   const setLatestEpisodes = useAnimeStore((s) => s.setLatestEpisodes);
   const setSchedule = useAnimeStore((s) => s.setSchedule);
 
@@ -197,6 +198,12 @@ export function DesktopHomePage() {
     });
   };
 
+  const currentSourceObj = sources.find(s => s.id === activeSource);
+  const currentCatalogLabel = activeSource === 'jkanime' ? 'Anime'
+    : activeSource === 'mundodonghua' ? 'Donghua'
+    : activeSource === 'otakustv' ? 'Anime (Respaldo)'
+    : (currentSourceObj?.name || 'Anime');
+
   const isDonghua = activeSource === 'mundodonghua';
 
   return (
@@ -224,13 +231,13 @@ export function DesktopHomePage() {
                 AniCS
               </span>
               <span style={{ fontSize: 20, fontWeight: 700, color: 'var(--text-secondary)', marginLeft: 10 }}>
-                · {isDonghua ? 'Donghua' : 'Anime'}
+                · {currentCatalogLabel}
               </span>
             </h1>
             <p style={{ color: 'var(--text-muted)', fontSize: 13, margin: '3px 0 0' }}>
               {isDonghua
                 ? 'Catálogo de Donghuas y animación en emisión · Actualizado al instante'
-                : 'Catálogo de Anime japonés en emisión · Actualizado al instante'}
+                : `Catálogo de ${currentCatalogLabel} en emisión · Actualizado al instante`}
             </p>
           </div>
         </div>

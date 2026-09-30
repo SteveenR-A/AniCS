@@ -39,6 +39,16 @@ pkg.version = targetVersion;
 fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n', 'utf8');
 console.log('  ✓ package.json actualizado');
 
+// Mantener los metadatos del lockfile alineados sin cambiar dependencias.
+const pkgLockPath = path.join(ROOT, 'package-lock.json');
+if (fs.existsSync(pkgLockPath)) {
+  const pkgLock = JSON.parse(fs.readFileSync(pkgLockPath, 'utf8'));
+  pkgLock.version = targetVersion;
+  if (pkgLock.packages?.['']) pkgLock.packages[''].version = targetVersion;
+  fs.writeFileSync(pkgLockPath, JSON.stringify(pkgLock, null, 2) + '\n', 'utf8');
+  console.log('  ✓ package-lock.json actualizado');
+}
+
 // 2. src-tauri/Cargo.toml
 const cargoPath = path.join(ROOT, 'src-tauri', 'Cargo.toml');
 let cargo = fs.readFileSync(cargoPath, 'utf8');
@@ -78,7 +88,7 @@ if (fs.existsSync(changelogPath)) {
 }
 
 const existingIndex = changelog.findIndex((e) => e.version === targetVersion);
-const today = new Date().toISOString().split('T')[0];
+const today = new Date().toLocaleDateString('en-CA');
 const highlights = highlightsRaw
   ? highlightsRaw.split('|').map((s) => s.trim()).filter(Boolean)
   : [`Actualización de mantenimiento y mejoras de estabilidad v${targetVersion}.`];
@@ -104,7 +114,7 @@ console.log('  ✓ src/data/changelog.json actualizado');
 const releaseNotesPath = path.join(ROOT, 'RELEASE_NOTES.md');
 const releaseNotesContent = `# AniCS v${targetVersion} — ${releaseTitle}\n\n` +
   `**Fecha de lanzamiento:** ${today}\n\n` +
-  `### 🚀 Novedades y Correcciones\n\n` +
+  `### Novedades y correcciones\n\n` +
   highlights.map((h) => `- ${h}`).join('\n') +
   `\n\n---\n*Para ver el historial acumulativo completo de todas las versiones, consulta [CHANGELOG.md](./CHANGELOG.md).*\n`;
 
@@ -114,7 +124,7 @@ console.log('  ✓ RELEASE_NOTES.md generado para GitHub Releases');
 // 7. CHANGELOG.md (Historial acumulativo global)
 const changelogMdPath = path.join(ROOT, 'CHANGELOG.md');
 if (fs.existsSync(changelogMdPath)) {
-  let changelogMd = fs.readFileSync(changelogMdPath, 'utf8');
+  let changelogMd = fs.readFileSync(changelogMdPath, 'utf8').replace(/\r\n/g, '\n');
   if (!changelogMd.includes(`## [${targetVersion}]`)) {
     const entryHeader = `## [${targetVersion}] - ${today}\n\n### ${releaseTitle}\n` +
       highlights.map((h) => `- ${h}`).join('\n') + '\n\n---\n\n';

@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
@@ -26,6 +27,20 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import java.io.File
 import java.lang.ref.WeakReference
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import org.json.JSONObject
+import com.google.android.gms.cast.MediaInfo
+import com.google.android.gms.cast.MediaLoadRequestData
+import com.google.android.gms.cast.MediaMetadata
+import com.google.android.gms.cast.MediaStatus
+import com.google.android.gms.cast.framework.CastButtonFactory
+import com.google.android.gms.cast.framework.CastContext
+import com.google.android.gms.cast.framework.CastSession
+import com.google.android.gms.cast.framework.SessionManager
+import com.google.android.gms.cast.framework.SessionManagerListener
+import com.google.android.gms.cast.framework.media.RemoteMediaClient
+import androidx.mediarouter.app.MediaRouteButton
 
 /**
  * Puente nativo JavaScript <-> Android para AniCS.
@@ -308,6 +323,41 @@ class AndroidNativeBridge(activity: Activity) {
             }
         }
     }
+
+    @JavascriptInterface
+    fun setWifiMulticast(enabled: Boolean) {
+        val act = activityRef.get() as? MainActivity ?: return
+        if (act.isFinishing || act.isDestroyed) return
+        act.runOnUiThread { act.setDlnaMulticastLock(enabled) }
+    }
+
+    @JavascriptInterface
+    fun openScreenCastSettings() {
+        val act = activityRef.get() ?: return
+        if (act.isFinishing || act.isDestroyed) return
+        act.runOnUiThread {
+            try { act.startActivity(Intent(Settings.ACTION_CAST_SETTINGS)) }
+            catch (e: Exception) { Log.w(TAG, "No se pudo abrir ajustes Cast: ${e.message}") }
+        }
+    }
+
+    @JavascriptInterface
+    fun requestGoogleCast(payload: String) {
+        val act = activityRef.get() as? MainActivity ?: return
+        if (act.isFinishing || act.isDestroyed) return
+        act.runOnUiThread { act.openGoogleCastPicker(payload) }
+    }
+
+    @JavascriptInterface
+    fun getGoogleCastPlaybackState(): String =
+        (activityRef.get() as? MainActivity)?.getGoogleCastStateJson() ?: "{}"
+
+    @JavascriptInterface
+    fun controlGoogleCastPlayback(action: String, positionSeconds: Double) {
+        val act = activityRef.get() as? MainActivity ?: return
+        if (act.isFinishing || act.isDestroyed) return
+        act.runOnUiThread { act.controlGoogleCast(action, positionSeconds) }
+    }
 }
 
 /**
@@ -327,6 +377,39 @@ class MainActivity : TauriActivity() {
     }
 
     private var isWebViewConfigured = false
+    private var multicastLock: WifiManager.MulticastLock? = null
+    private var castContext: CastContext? = null
+    private var castSessionManager: SessionManager? = null
+    private var pendingCastMedia: JSONObject? = null
+    @Volatile private var castConnecting = false
+    @Volatile private var cachedCastState = "{}"
+    private var castStateListener: RemoteMediaClient.Callback? = null
+    private val castSessionListener = object : SessionManagerListener<CastSession> {
+        override fun onSessionStarting(session: CastSession) { castConnecting = true; cachedCastState = "{\"status\":\"connecting\"}" }
+        override fun onSessionStarted(session: CastSession, sessionId: String) {
+            castConnecting = false
+            session.remoteMediaClient?.let { client ->
+                pendingCastMedia?.let { loadGoogleCastMedia(client, it) }
+                pendingCastMedia = null
+                attachCastStateListener(client)
+                refreshGoogleCastState(session, client)
+            }
+        }
+        override fun onSessionStartFailed(session: CastSession, error: Int) {
+            castConnecting = false
+            pendingCastMedia = null
+            cachedCastState = JSONObject().put("status", "error").put("error", "No se pudo iniciar Google Cast ($error)").toString()
+        }
+        override fun onSessionEnding(session: CastSession) { }
+        override fun onSessionEnded(session: CastSession, error: Int) { castConnecting = false; cachedCastState = "{}" }
+        override fun onSessionResuming(session: CastSession, sessionId: String) { castConnecting = true; cachedCastState = "{\"status\":\"connecting\"}" }
+        override fun onSessionResumed(session: CastSession, wasSuspended: Boolean) {
+            castConnecting = false
+            session.remoteMediaClient?.let { client -> attachCastStateListener(client); refreshGoogleCastState(session, client) }
+        }
+        override fun onSessionResumeFailed(session: CastSession, error: Int) { castConnecting = false; cachedCastState = "{}" }
+        override fun onSessionSuspended(session: CastSession, reason: Int) { castConnecting = false }
+    }
 
     // Launcher para permiso de notificaciones (Android 13+ / API 33+)
     private val notificationPermissionLauncher = registerForActivityResult(
@@ -343,6 +426,13 @@ class MainActivity : TauriActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        try {
+            castContext = CastContext.getSharedInstance(this)
+            castSessionManager = castContext?.sessionManager
+        } catch (e: Exception) {
+            Log.e(TAG, "No se pudo inicializar Google Cast", e)
+        }
 
         setupEdgeToEdge()
 
@@ -379,6 +469,150 @@ class MainActivity : TauriActivity() {
         super.onResume()
         if (!isWebViewConfigured) {
             findAndConfigureWebView()
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        castSessionManager?.addSessionManagerListener(castSessionListener, CastSession::class.java)
+    }
+
+    override fun onStop() {
+        castSessionManager?.removeSessionManagerListener(castSessionListener, CastSession::class.java)
+        super.onStop()
+    }
+
+    override fun onPause() {
+        releaseMulticastLock()
+        super.onPause()
+    }
+
+    private fun acquireMulticastLock() {
+        if (multicastLock?.isHeld == true) return
+        try {
+            val wifi = applicationContext.getSystemService(WIFI_SERVICE) as? WifiManager ?: return
+            multicastLock = wifi.createMulticastLock("AniCS-DLNA-discovery").apply {
+                setReferenceCounted(false)
+                acquire()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "No se pudo activar la recepción multicast DLNA: ${e.message}")
+        }
+    }
+
+    fun setDlnaMulticastLock(enabled: Boolean) {
+        if (enabled) acquireMulticastLock() else releaseMulticastLock()
+    }
+
+    fun openGoogleCastPicker(payload: String) {
+        try {
+            val media = JSONObject(payload)
+            val url = media.optString("streamUrl")
+            if (!url.startsWith("http://") && !url.startsWith("https://")) {
+                cachedCastState = JSONObject().put("status", "error").put("error", "El televisor necesita una URL HTTP accesible en la red local.").toString()
+                castConnecting = false
+                return
+            }
+            pendingCastMedia = media
+            castConnecting = true
+            cachedCastState = "{\"status\":\"connecting\"}"
+            val root = window.decorView as? ViewGroup ?: return
+            val button = MediaRouteButton(this).apply { alpha = 0f; isFocusable = false }
+            root.addView(button, ViewGroup.LayoutParams(1, 1))
+            CastButtonFactory.setUpMediaRouteButton(applicationContext, button)
+            button.post {
+                button.performClick()
+                button.postDelayed({ (button.parent as? ViewGroup)?.removeView(button) }, 60_000)
+            }
+        } catch (e: Exception) {
+            castConnecting = false
+            cachedCastState = JSONObject().put("status", "error").put("error", e.message ?: "Error al abrir Google Cast").toString()
+            Log.e(TAG, "No se pudo abrir el selector Google Cast", e)
+        }
+    }
+
+    private fun loadGoogleCastMedia(client: RemoteMediaClient, media: JSONObject) {
+        try {
+            val metadata = MediaMetadata(MediaMetadata.MEDIA_TYPE_MOVIE).apply {
+                putString(MediaMetadata.KEY_TITLE, media.optString("title", "AniCS"))
+            }
+            val info = MediaInfo.Builder(media.getString("streamUrl"))
+                .setStreamType(MediaInfo.STREAM_TYPE_BUFFERED)
+                .setContentType(if (media.optString("mediaType") == "hls") "application/vnd.apple.mpegurl" else "video/mp4")
+                .setMetadata(metadata)
+                .build()
+            val request = MediaLoadRequestData.Builder()
+                .setMediaInfo(info)
+                .setCurrentTime((media.optDouble("startPosition", 0.0).coerceAtLeast(0.0) * 1000).toLong())
+                .setAutoplay(media.optBoolean("startPlaying", true))
+                .build()
+            client.load(request)
+        } catch (e: Exception) {
+            castConnecting = false
+            cachedCastState = JSONObject().put("status", "error").put("error", e.message ?: "No se pudo cargar el video en Google Cast").toString()
+            Log.e(TAG, "Error cargando video en Google Cast", e)
+        }
+    }
+
+    fun controlGoogleCast(action: String, positionSeconds: Double) {
+        val client = castSessionManager?.currentCastSession?.remoteMediaClient ?: return
+        when (action) {
+            "play" -> client.play()
+            "pause" -> client.pause()
+            "seek" -> client.seek((positionSeconds.coerceAtLeast(0.0) * 1000).toLong())
+            "stop" -> { client.stop(); castSessionManager?.endCurrentSession(true) }
+        }
+    }
+
+    fun getGoogleCastStateJson(): String {
+        val latch = CountDownLatch(1)
+        var result = if (castConnecting) "{\"status\":\"connecting\"}" else cachedCastState
+        runOnUiThread {
+            val session = castSessionManager?.currentCastSession
+            val client = session?.remoteMediaClient
+            if (session != null && client != null) result = refreshGoogleCastState(session, client)
+            latch.countDown()
+        }
+        try { latch.await(350, TimeUnit.MILLISECONDS) } catch (_: InterruptedException) { Thread.currentThread().interrupt() }
+        return result
+    }
+
+    private fun attachCastStateListener(client: RemoteMediaClient) {
+        castStateListener?.let { client.unregisterCallback(it) }
+        castStateListener = object : RemoteMediaClient.Callback() {
+            override fun onStatusUpdated() {
+                castSessionManager?.currentCastSession?.let { refreshGoogleCastState(it, client) }
+            }
+            override fun onMetadataUpdated() {
+                castSessionManager?.currentCastSession?.let { refreshGoogleCastState(it, client) }
+            }
+        }
+        castStateListener?.let { client.registerCallback(it) }
+    }
+
+    private fun refreshGoogleCastState(session: CastSession, client: RemoteMediaClient): String {
+        val playerState = when (client.playerState) {
+            MediaStatus.PLAYER_STATE_PLAYING -> "PLAYING"
+            MediaStatus.PLAYER_STATE_PAUSED -> "PAUSED_PLAYBACK"
+            MediaStatus.PLAYER_STATE_BUFFERING -> "TRANSITIONING"
+            else -> "STOPPED"
+        }
+        return JSONObject()
+            .put("status", "connected")
+            .put("deviceName", session.castDevice?.friendlyName ?: "Google Cast")
+            .put("transportState", playerState)
+            .put("positionSeconds", client.approximateStreamPosition.coerceAtLeast(0L) / 1000.0)
+            .put("durationSeconds", client.streamDuration.coerceAtLeast(0L) / 1000.0)
+            .toString().also { cachedCastState = it }
+    }
+
+    private fun releaseMulticastLock() {
+        try {
+            multicastLock?.takeIf { it.isHeld }?.release()
+        } catch (e: Exception) {
+            Log.w(TAG, "No se pudo liberar el bloqueo multicast: ${e.message}")
+        } finally {
+            multicastLock = null
         }
     }
 

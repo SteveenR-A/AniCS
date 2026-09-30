@@ -19,7 +19,13 @@ pub async fn search_anime(
         }
         None => {
             // Buscar en todos los extractores de forma concurrente
-            let extractors = all_extractors();
+            let mut extractors = all_extractors();
+            let custom_sources = crate::scrapers::get_custom_sources();
+            for (idx, _) in custom_sources.iter().enumerate() {
+                if let Some(ext) = create_extractor(&format!("custom_{idx}")) {
+                    extractors.push(ext);
+                }
+            }
             let mut handles = vec![];
 
             for ext in extractors {
@@ -123,7 +129,7 @@ pub async fn get_genres(
 /// Obtener lista de extractores disponibles
 #[tauri::command]
 pub fn get_sources() -> Vec<serde_json::Value> {
-    all_extractors()
+    let mut list: Vec<serde_json::Value> = all_extractors()
         .iter()
         .map(|e| {
             serde_json::json!({
@@ -132,5 +138,17 @@ pub fn get_sources() -> Vec<serde_json::Value> {
                 "baseUrl": e.base_url(),
             })
         })
-        .collect()
+        .collect();
+
+    let custom_sources = crate::scrapers::get_custom_sources();
+    for (idx, cfg) in custom_sources.into_iter().enumerate() {
+        list.push(serde_json::json!({
+            "id": format!("custom_{}", idx),
+            "name": cfg.name,
+            "baseUrl": cfg.url,
+            "type": cfg.r#type,
+        }));
+    }
+
+    list
 }

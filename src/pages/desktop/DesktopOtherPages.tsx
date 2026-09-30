@@ -574,7 +574,7 @@ export function DesktopHistoryPage() {
       ) : (
         <div style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 220px), 1fr))',
           gap: 18,
         }}>
           {groupedAnimes.map((group) => {
@@ -609,12 +609,12 @@ export function DesktopHistoryPage() {
                       navigate(`/player?url=${encodeURIComponent(entry.episodeUrl)}&title=${encodeURIComponent(entry.animeTitle)}&ep=${entry.episodeNumber}&source=${entry.source}&animeUrl=${encodeURIComponent(entry.animeUrl)}`);
                     }
                   }}
-                  style={{ position: 'relative', height: 160, background: 'var(--bg-elevated)', cursor: 'pointer' }}
+                  style={{ position: 'relative', width: '100%', aspectRatio: '2 / 3', background: 'var(--bg-elevated)', cursor: 'pointer' }}
                 >
                   <CachedImage
                     src={entry.thumbnailUrl}
                     alt={entry.animeTitle}
-                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center top' }}
                   />
                   <div style={{
                     position: 'absolute', inset: 0,

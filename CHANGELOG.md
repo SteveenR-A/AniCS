@@ -5,6 +5,33 @@ El formato está basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1
 
 ---
 
+## [0.2.10] - 2026-09-29
+
+### Reproductor, portadas y transmisión en Android
+- Botón central de reproducir y pausar con un solo clic o toque, manteniendo el ocultamiento automático de controles.
+- Selector de servidores de video personalizados en PC y Android, con cambio de fuente conservando la posición exacta y el estado de reproducción.
+- Catálogos personalizados visibles y actualizados en los menús de navegación después de guardarlos.
+- Portadas verticales en el historial de PC y Android para mostrar mejor las imágenes de cada anime.
+- Soporte inicial de Google Cast en Android con selector nativo y controles de reproducción en televisores compatibles.
+- Transmisión DLNA/UPnP en Android, con soporte para videos locales mediante servidor de red con solicitudes HTTP Range.
+- Icono de transmisión oculto en PC, incluido el diseño de ventana pequeña.
+- Publicación en GitHub Actions con validación previa de versiones y limpieza automática de artefactos temporales después del release.
+
+---
+
+## [0.2.9] - 2026-09-28
+
+### Mejoras en Servidores de Respaldo, Desempaquetado y Navegación
+
+- Extractores dedicados para Mp4upload y Lulustream en fuente Respaldo (OtakusTV).
+- Corrección en desempaquetado JavaScript multilínea en MundoDonghua.
+- Solución a desmontaje prematuro de video en reproductor de JKAnime.
+- Persistencia de estado y caché al navegar hacia atrás en catálogos.
+- Ajustes ergonómicos en botón de volver y controles de reproductor.
+- Registro de hoja de ruta en TASKS.md.
+
+---
+
 ## [0.2.8] - 2026-09-27
 
 ### Selector móvil desplegable, mejoras de reproducción y control modular
@@ -427,4 +454,3 @@ El formato está basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1
   - **Sin emojis:** Uso exclusivo de iconos vectoriales modernos de **Lucide React**.
 - **CI/CD Automatizado con GitHub Actions:**
   - Generación automática de instaladores para Windows (**`.exe`**) y Android (**`.apk`**) al publicar una release en GitHub.
-

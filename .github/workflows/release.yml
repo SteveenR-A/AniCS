@@ -7,20 +7,45 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version (e.g. v0.1.0)'
+        description: 'Versión del código a publicar (vacío = package.json)'
         required: false
-        default: 'v0.1.0'
+        default: ''
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}-${{ github.event.inputs.version || 'current' }}
+  cancel-in-progress: false
 
 jobs:
+  prepare-release:
+    name: Validate release version
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Validate synchronized versions and patch notes
+        id: version
+        env:
+          REQUESTED_VERSION: ${{ github.event.inputs.version }}
+          RELEASE_EVENT: ${{ github.event_name }}
+          RELEASE_REF: ${{ github.ref }}
+        run: node scripts/validate-release.js
+
   # ──────────────────────────────────────────────────────────
   # 1. Build Windows (MSI & EXE/NSIS)
   # ──────────────────────────────────────────────────────────
   build-windows:
     name: Build Windows (MSI & EXE)
+    needs: prepare-release
     runs-on: windows-latest
+    outputs:
+      artifact-id: ${{ steps.windows-artifact.outputs.artifact-id }}
     permissions:
       contents: read
     steps:
@@ -44,24 +69,31 @@ jobs:
           workspaces: './src-tauri -> target'
 
       - name: Install frontend dependencies
-        run: npm install
+        run: npm ci
 
       - name: Build Tauri Windows application
         run: npx @tauri-apps/cli build --bundles nsis
 
       - name: Upload Windows EXE artifacts
+        id: windows-artifact
         uses: actions/upload-artifact@v4
         with:
           name: windows-binaries
           path: src-tauri/target/release/bundle/nsis/*.exe
           retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+          overwrite: true
 
   # ──────────────────────────────────────────────────────────
   # 2. Build Android (APK)
   # ──────────────────────────────────────────────────────────
   build-android:
     name: Build Android (APK)
+    needs: prepare-release
     runs-on: ubuntu-latest
+    outputs:
+      artifact-id: ${{ steps.android-artifact.outputs.artifact-id }}
     permissions:
       contents: read
     steps:
@@ -94,7 +126,7 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+          targets: aarch64-linux-android
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
@@ -102,11 +134,25 @@ jobs:
           workspaces: './src-tauri -> target'
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Build Android APK
         run: |
           npx @tauri-apps/cli android init --skip-targets-install || true
+
+          # Integrar el emisor oficial de Google Cast en Android.
+          APP_GRADLE=$(find src-tauri/gen/android/app -maxdepth 1 \( -name "build.gradle" -o -name "build.gradle.kts" \) | head -n 1)
+          if [ -z "$APP_GRADLE" ]; then
+            echo "No se encontró el archivo Gradle de la app Android"
+            exit 1
+          fi
+          if ! grep -q "play-services-cast-framework" "$APP_GRADLE"; then
+            if [[ "$APP_GRADLE" == *.kts ]]; then
+              sed -i '/dependencies {/a\    implementation("com.google.android.gms:play-services-cast-framework:22.3.0")' "$APP_GRADLE"
+            else
+              sed -i "/dependencies {/a\    implementation 'com.google.android.gms:play-services-cast-framework:22.3.0'" "$APP_GRADLE"
+            fi
+          fi
 
           # Sincronizar y asegurar iconos de la aplicación AniCS en Android
           npx @tauri-apps/cli icon app-icon.png || true
@@ -126,8 +172,14 @@ jobs:
           MANIFEST="src-tauri/gen/android/app/src/main/AndroidManifest.xml"
           if [ -f "$MANIFEST" ]; then
             if ! grep -q "MANAGE_EXTERNAL_STORAGE" "$MANIFEST"; then
-              sed -i 's|<application|<uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />\n    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />\n    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />\n    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />\n    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />\n    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />\n    <uses-permission android:name="android.permission.WAKE_LOCK" />\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />\n    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />\n    <application android:requestLegacyExternalStorage="true"|g' "$MANIFEST"
+              sed -i 's|<application|<uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />\n    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />\n    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />\n    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />\n    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />\n    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />\n    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />\n    <uses-permission android:name="android.permission.WAKE_LOCK" />\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />\n    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />\n    <application android:requestLegacyExternalStorage="true"|g' "$MANIFEST"
               echo "Permisos de almacenamiento añadidos al AndroidManifest.xml"
+            fi
+            if ! grep -q "CHANGE_WIFI_MULTICAST_STATE" "$MANIFEST"; then
+              sed -i 's|<application|<uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />\n    <application|g' "$MANIFEST"
+            fi
+            if ! grep -q "OPTIONS_PROVIDER_CLASS_NAME" "$MANIFEST"; then
+              sed -i 's|</application>|    <meta-data android:name="com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME" android:value="com.anics.app.GoogleCastOptionsProvider" />\n  </application>|' "$MANIFEST"
             fi
             if ! grep -q "androidx.core.content.FileProvider" "$MANIFEST"; then
               sed -i 's|</application>|    <provider\n        android:name="androidx.core.content.FileProvider"\n        android:authorities="${applicationId}.fileprovider"\n        android:exported="false"\n        android:grantUriPermissions="true">\n        <meta-data\n            android:name="android.support.FILE_PROVIDER_PATHS"\n            android:resource="@xml/file_paths" />\n    </provider>\n    <service\n        android:name=".DownloadService"\n        android:foregroundServiceType="dataSync"\n        android:exported="false" />\n  </application>|g' "$MANIFEST"
@@ -142,6 +194,9 @@ jobs:
             if [ -f "scripts/android/MainActivity.kt" ]; then
               echo "Copiando MainActivity.kt personalizado a $MAIN_ACTIVITY..."
               cp -f scripts/android/MainActivity.kt "$MAIN_ACTIVITY"
+            fi
+            if [ -f "scripts/android/GoogleCastOptionsProvider.kt" ]; then
+              cp -f scripts/android/GoogleCastOptionsProvider.kt "$KOTLIN_DIR/GoogleCastOptionsProvider.kt"
             fi
             if [ -f "scripts/android/DownloadService.kt" ]; then
               echo "Copiando DownloadService.kt a $KOTLIN_DIR/DownloadService.kt..."
@@ -187,22 +242,27 @@ jobs:
           ls -la release-apk/
 
       - name: Upload Android APK artifact
+        id: android-artifact
         uses: actions/upload-artifact@v4
         with:
           name: android-apk
           path: release-apk/AniCS.apk
           retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+          overwrite: true
 
   # ──────────────────────────────────────────────────────────
   # 3. Publish Unified GitHub Release
   # ──────────────────────────────────────────────────────────
   publish-release:
     name: Publish Release Assets
-    needs: [build-windows, build-android]
+    needs: [prepare-release, build-windows, build-android]
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -227,29 +287,18 @@ jobs:
       - name: Prepare release files
         run: |
           mkdir -p final-assets
-          find windows-release -name "*.exe" -exec cp {} final-assets/AniCS-setup.exe \; || true
-          find android-release -name "*.apk" -exec cp {} final-assets/AniCS.apk \; || true
+          find windows-release -name "*.exe" -exec cp {} final-assets/AniCS-setup.exe \;
+          find android-release -name "*.apk" -exec cp {} final-assets/AniCS.apk \;
+          test -s final-assets/AniCS-setup.exe
+          test -s final-assets/AniCS.apk
           ls -la final-assets/
-
-      - name: Determine Release Tag
-        id: release_tag
-        shell: bash
-        run: |
-          if [ -n "${{ github.event.inputs.version }}" ]; then
-            TAG="${{ github.event.inputs.version }}"
-          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            TAG="${{ github.ref_name }}"
-          else
-            VERSION=$(node -p "require('./package.json').version")
-            TAG="v$VERSION"
-          fi
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
 
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.prepare-release.outputs.tag }}
         run: |
-          TAG="${{ steps.release_tag.outputs.tag }}"
+          TAG="$RELEASE_TAG"
           TITLE="AniCS $TAG"
 
           echo "Publicando release con tag: $TAG"
@@ -268,15 +317,41 @@ jobs:
           if gh release view "$TAG" > /dev/null 2>&1; then
             echo "El release $TAG ya existe. Actualizando notas y reemplazando archivos..."
             if [ -n "$NOTES_FILE" ]; then
-              gh release edit "$TAG" --title "$TITLE" --notes-file "$NOTES_FILE" || true
+              gh release edit "$TAG" --title "$TITLE" --notes-file "$NOTES_FILE"
             fi
             gh release upload "$TAG" final-assets/* --clobber
           else
             echo "Creando nuevo release $TAG..."
             if [ -n "$NOTES_FILE" ]; then
-              gh release create "$TAG" final-assets/* --title "$TITLE" --notes-file "$NOTES_FILE"
+              gh release create "$TAG" final-assets/* --target "$GITHUB_SHA" --title "$TITLE" --notes-file "$NOTES_FILE"
             else
-              gh release create "$TAG" final-assets/* --title "$TITLE" --generate-notes
+              gh release create "$TAG" final-assets/* --target "$GITHUB_SHA" --title "$TITLE" --generate-notes
             fi
           fi
+
+      # Los instaladores quedan en Releases; borrar solo las copias temporales de este run.
+      - name: Delete published workflow artifacts
+        uses: actions/github-script@v7
+        # Si la API falla, las copias temporales caducan con retention-days: 1.
+        continue-on-error: true
+        env:
+          WINDOWS_ARTIFACT_ID: ${{ needs.build-windows.outputs.artifact-id }}
+          ANDROID_ARTIFACT_ID: ${{ needs.build-android.outputs.artifact-id }}
+        with:
+          script: |
+            for (const rawId of [process.env.WINDOWS_ARTIFACT_ID, process.env.ANDROID_ARTIFACT_ID]) {
+              const artifactId = Number(rawId);
+              if (!Number.isSafeInteger(artifactId) || artifactId <= 0) {
+                throw new Error(`Identificador de artefacto inválido: ${rawId}`);
+              }
+              try {
+                await github.rest.actions.deleteArtifact({
+                  ...context.repo,
+                  artifact_id: artifactId,
+                });
+                core.info(`Artefacto temporal eliminado: ${artifactId}`);
+              } catch (error) {
+                if (error.status !== 404) throw error;
+              }
+            }
 

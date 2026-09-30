@@ -124,6 +124,42 @@ describe('animeService', () => {
       expect(invoke).toHaveBeenCalledWith('get_sources');
       expect(result).toEqual(mockResult);
     });
+
+    it('appends custom sources from SQLite custom_sources setting', async () => {
+      const mockResult = [{ id: 'jkanime', name: 'JKAnime', baseUrl: 'https://jkanime.org' }];
+      vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_sources') return mockResult;
+        if (cmd === 'get_setting' && args?.key === 'custom_sources') {
+          return JSON.stringify([{ name: 'Mi Fuente', url: 'https://custom.org', type: 'Anime' }]);
+        }
+        return null;
+      });
+
+      const result = await animeService.getSources();
+
+      expect(result).toHaveLength(2);
+      expect(result[1]).toEqual({
+        id: 'custom_0',
+        name: 'Mi Fuente',
+        baseUrl: 'https://custom.org',
+      });
+    });
+
+    it('returns only built-in sources when custom sources are deleted', async () => {
+      const mockResult = [{ id: 'jkanime', name: 'JKAnime', baseUrl: 'https://jkanime.org' }];
+      vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_sources') return mockResult;
+        if (cmd === 'get_setting' && args?.key === 'custom_sources') {
+          return '[]';
+        }
+        return null;
+      });
+
+      const result = await animeService.getSources();
+
+      expect(result).toHaveLength(1);
+      expect(result[0].id).toBe('jkanime');
+    });
   });
 
   describe('getServers', () => {
@@ -139,6 +175,15 @@ describe('animeService', () => {
   });
 
   describe('resolveStream', () => {
+    it.each([
+      ['https://example.com/stream.m3u8?token=abc', 'hls'],
+      ['https://example.com/video.mp4', 'mp4'],
+    ])('plays a custom direct URL %s without requiring a catalog extractor', async (url, mediaType) => {
+      const result = await animeService.resolveStream({ name: 'Personalizado', url, isDirect: true }, 'custom');
+      expect(result).toMatchObject({ directUrl: url, mediaType, qualities: [] });
+      expect(invoke).not.toHaveBeenCalled();
+    });
+
     it('calls invoke with correct arguments', async () => {
       const server: VideoServer = { name: 'Server 1', url: 'http://test', isDirect: false };
       const mockResult = { url: 'http://direct', isM3u8: false };

@@ -573,9 +573,9 @@ export function MobileHistoryPage() {
                       if (isSelecting) toggleSelectId(entry.id);
                       else navigate(`/player?url=${encodeURIComponent(entry.episodeUrl)}&title=${encodeURIComponent(entry.animeTitle)}&ep=${entry.episodeNumber}&source=${entry.source}&animeUrl=${encodeURIComponent(entry.animeUrl)}`);
                     }}
-                    style={{ position: 'relative', width: 56, height: 56, borderRadius: 6, overflow: 'hidden', flexShrink: 0, cursor: 'pointer' }}
+                    style={{ position: 'relative', width: 72, aspectRatio: '2 / 3', borderRadius: 6, overflow: 'hidden', flexShrink: 0, cursor: 'pointer' }}
                   >
-                    <CachedImage src={entry.thumbnailUrl} alt={entry.animeTitle} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    <CachedImage src={entry.thumbnailUrl} alt={entry.animeTitle} style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center top' }} />
                     <div style={{
                       position: 'absolute', bottom: 0, left: 0, right: 0, height: 3,
                       background: 'rgba(255,255,255,0.2)',
