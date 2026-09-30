@@ -140,73 +140,8 @@ jobs:
         run: |
           npx @tauri-apps/cli android init --skip-targets-install
 
-          # Integrar el emisor oficial de Google Cast en Android
-          APP_GRADLE=$(find src-tauri/gen/android/app -maxdepth 1 \( -name "build.gradle" -o -name "build.gradle.kts" \) | head -n 1)
-          if [ -z "$APP_GRADLE" ]; then
-            echo "No se encontró el archivo Gradle de la app Android"
-            exit 1
-          fi
-          CAST_DEP="com.google.android.gms:play-services-cast-framework:21.5.0"
-          if ! grep -q "$CAST_DEP" "$APP_GRADLE"; then
-            if [[ "$APP_GRADLE" == *.kts ]]; then
-              sed -i "/dependencies[[:space:]]*{/a\\    implementation(\"$CAST_DEP\")" "$APP_GRADLE"
-            else
-              sed -i "/dependencies[[:space:]]*{/a\\    implementation '$CAST_DEP'" "$APP_GRADLE"
-            fi
-          fi
-          grep -q "play-services-cast-framework" "$APP_GRADLE" || {
-            echo "Error crítico: No se pudo inyectar play-services-cast-framework en $APP_GRADLE"
-            exit 1
-          }
-
-          # Forzar compatibilidad de versiones de Kotlin stdlib con Kotlin 1.9 de Tauri
-          ROOT_GRADLE="src-tauri/gen/android/build.gradle.kts"
-          if [ -f "$ROOT_GRADLE" ] && ! grep -q "resolutionStrategy" "$ROOT_GRADLE"; then
-            cat << 'EOF' >> "$ROOT_GRADLE"
-
-allprojects {
-    configurations.all {
-        resolutionStrategy {
-            force("org.jetbrains.kotlin:kotlin-stdlib:1.9.25")
-            force("org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.25")
-            force("org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.25")
-            force("org.jetbrains.kotlin:kotlin-stdlib-common:1.9.25")
-            force("org.jetbrains.kotlin:kotlin-reflect:1.9.25")
-        }
-    }
-}
-EOF
-          fi
-
-          if ! grep -q "resolutionStrategy" "$APP_GRADLE"; then
-            if [[ "$APP_GRADLE" == *.kts ]]; then
-              cat << 'EOF' >> "$APP_GRADLE"
-
-configurations.all {
-    resolutionStrategy {
-        force("org.jetbrains.kotlin:kotlin-stdlib:1.9.25")
-        force("org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.25")
-        force("org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.25")
-        force("org.jetbrains.kotlin:kotlin-stdlib-common:1.9.25")
-        force("org.jetbrains.kotlin:kotlin-reflect:1.9.25")
-    }
-}
-EOF
-            else
-              cat << 'EOF' >> "$APP_GRADLE"
-
-configurations.all {
-    resolutionStrategy {
-        force 'org.jetbrains.kotlin:kotlin-stdlib:1.9.25'
-        force 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.25'
-        force 'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.25'
-        force 'org.jetbrains.kotlin:kotlin-stdlib-common:1.9.25'
-        force 'org.jetbrains.kotlin:kotlin-reflect:1.9.25'
-    }
-}
-EOF
-            fi
-          fi
+          # Parchear Gradle de Android (inyección de Google Cast 21.5.0 y forzado de compatibilidad Kotlin 1.9)
+          node scripts/android/patch-gradle.js
 
           # Sincronizar y asegurar iconos de la aplicación AniCS en Android
           npx @tauri-apps/cli icon app-icon.png || true
