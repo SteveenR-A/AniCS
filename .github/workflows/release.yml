@@ -138,21 +138,26 @@ jobs:
 
       - name: Build Android APK
         run: |
-          npx @tauri-apps/cli android init --skip-targets-install || true
+          npx @tauri-apps/cli android init --skip-targets-install
 
-          # Integrar el emisor oficial de Google Cast en Android.
+          # Integrar el emisor oficial de Google Cast en Android
           APP_GRADLE=$(find src-tauri/gen/android/app -maxdepth 1 \( -name "build.gradle" -o -name "build.gradle.kts" \) | head -n 1)
           if [ -z "$APP_GRADLE" ]; then
             echo "No se encontró el archivo Gradle de la app Android"
             exit 1
           fi
-          if ! grep -q "play-services-cast-framework" "$APP_GRADLE"; then
+          CAST_DEP="com.google.android.gms:play-services-cast-framework:22.3.0"
+          if ! grep -q "$CAST_DEP" "$APP_GRADLE"; then
             if [[ "$APP_GRADLE" == *.kts ]]; then
-              sed -i '/dependencies {/a\    implementation("com.google.android.gms:play-services-cast-framework:22.3.0")' "$APP_GRADLE"
+              sed -i "/dependencies[[:space:]]*{/a\\    implementation(\"$CAST_DEP\")" "$APP_GRADLE"
             else
-              sed -i "/dependencies {/a\    implementation 'com.google.android.gms:play-services-cast-framework:22.3.0'" "$APP_GRADLE"
+              sed -i "/dependencies[[:space:]]*{/a\\    implementation '$CAST_DEP'" "$APP_GRADLE"
             fi
           fi
+          grep -q "play-services-cast-framework" "$APP_GRADLE" || {
+            echo "Error crítico: No se pudo inyectar play-services-cast-framework en $APP_GRADLE"
+            exit 1
+          }
 
           # Sincronizar y asegurar iconos de la aplicación AniCS en Android
           npx @tauri-apps/cli icon app-icon.png || true
@@ -168,6 +173,20 @@ jobs:
             cp -f scripts/android/res/xml/file_paths.xml src-tauri/gen/android/app/src/main/res/xml/file_paths.xml
           fi
 
+          # Localizar MainActivity.kt generado y resolver el paquete Android
+          MAIN_ACTIVITY=$(find src-tauri/gen/android -name "MainActivity.kt" | head -n 1)
+          if [ -z "$MAIN_ACTIVITY" ]; then
+            echo "Error crítico: No se encontró MainActivity.kt generado por Tauri"
+            exit 1
+          fi
+          KOTLIN_DIR=$(dirname "$MAIN_ACTIVITY")
+          PACKAGE_NAME=$(sed -n 's/^package[[:space:]]\+//p' "$MAIN_ACTIVITY" | tr -d '\r;' | head -n 1)
+          if [ -z "$PACKAGE_NAME" ]; then
+            echo "Error crítico: No se pudo determinar el paquete Android desde $MAIN_ACTIVITY"
+            exit 1
+          fi
+          echo "Paquete Android detectado: $PACKAGE_NAME"
+
           # Añadir permisos de Android, almacenamiento y FileProvider al AndroidManifest.xml generado
           MANIFEST="src-tauri/gen/android/app/src/main/AndroidManifest.xml"
           if [ -f "$MANIFEST" ]; then
@@ -179,7 +198,7 @@ jobs:
               sed -i 's|<application|<uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />\n    <application|g' "$MANIFEST"
             fi
             if ! grep -q "OPTIONS_PROVIDER_CLASS_NAME" "$MANIFEST"; then
-              sed -i 's|</application>|    <meta-data android:name="com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME" android:value="com.anics.app.GoogleCastOptionsProvider" />\n  </application>|' "$MANIFEST"
+              sed -i "s|</application>|    <meta-data android:name=\"com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME\" android:value=\"${PACKAGE_NAME}.GoogleCastOptionsProvider\" />\\n  </application>|" "$MANIFEST"
             fi
             if ! grep -q "androidx.core.content.FileProvider" "$MANIFEST"; then
               sed -i 's|</application>|    <provider\n        android:name="androidx.core.content.FileProvider"\n        android:authorities="${applicationId}.fileprovider"\n        android:exported="false"\n        android:grantUriPermissions="true">\n        <meta-data\n            android:name="android.support.FILE_PROVIDER_PATHS"\n            android:resource="@xml/file_paths" />\n    </provider>\n    <service\n        android:name=".DownloadService"\n        android:foregroundServiceType="dataSync"\n        android:exported="false" />\n  </application>|g' "$MANIFEST"
@@ -187,24 +206,15 @@ jobs:
             fi
           fi
 
-          # Configurar MainActivity.kt y DownloadService.kt para Foreground Service y UI inmersiva
-          MAIN_ACTIVITY=$(find src-tauri/gen/android -name "MainActivity.kt" | head -n 1)
-          if [ -n "$MAIN_ACTIVITY" ]; then
-            KOTLIN_DIR=$(dirname "$MAIN_ACTIVITY")
-            if [ -f "scripts/android/MainActivity.kt" ]; then
-              echo "Copiando MainActivity.kt personalizado a $MAIN_ACTIVITY..."
-              cp -f scripts/android/MainActivity.kt "$MAIN_ACTIVITY"
+          # Copiar fuentes Kotlin personalizadas garantizando el paquete sincronizado
+          for file in MainActivity.kt GoogleCastOptionsProvider.kt DownloadService.kt; do
+            if [ -f "scripts/android/$file" ]; then
+              echo "Copiando $file a $KOTLIN_DIR con paquete $PACKAGE_NAME..."
+              sed "s/^package .*/package $PACKAGE_NAME/" "scripts/android/$file" > "$KOTLIN_DIR/$file"
             fi
-            if [ -f "scripts/android/GoogleCastOptionsProvider.kt" ]; then
-              cp -f scripts/android/GoogleCastOptionsProvider.kt "$KOTLIN_DIR/GoogleCastOptionsProvider.kt"
-            fi
-            if [ -f "scripts/android/DownloadService.kt" ]; then
-              echo "Copiando DownloadService.kt a $KOTLIN_DIR/DownloadService.kt..."
-              cp -f scripts/android/DownloadService.kt "$KOTLIN_DIR/DownloadService.kt"
-            fi
-          fi
+          done
 
-          npx @tauri-apps/cli android build --apk --target aarch64 --ci
+          npx @tauri-apps/cli android build --apk --target aarch64 --ci --verbose
 
       - name: Sign APK (Release Keystore)
         env:
