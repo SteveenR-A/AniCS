@@ -36,6 +36,10 @@ vi.mock('firebase/firestore', () => ({
 }));
 
 describe('syncService - Merge Engine & Migrations', () => {
+  it('keeps a favorite added again after its tombstone', () => {
+    const favorite = { url: 'https://example.com/anime', title: 'Anime', source: 'jkanime', thumbnailUrl: '', profileId: 'default', addedAt: '2026-10-01T12:01:00Z' };
+    expect(mergeFavoritesWithTombstones([favorite], [], [{ url: favorite.url, profileId: 'default', deletedAt: '2026-10-01T12:00:00Z' }])).toEqual([favorite]);
+  });
   it('preserva múltiples episodios vistos de un mismo anime', () => {
     const local: HistoryEntry[] = [
       {

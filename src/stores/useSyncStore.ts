@@ -675,16 +675,21 @@ async function handleUserAuthSubscription(user: { uid: string; email?: string | 
         cachedRemoteSettingsMobile = remotePayload.settingsMobile || {};
         cachedRemoteDevices = remotePayload.syncMeta?.devices || {};
 
+        const remoteIsEncrypted = Boolean(remotePayload.syncMeta?.pbkdf2Salt);
+        const localIsEncrypted = Boolean(config.encryptionEnabled);
+        const encryptionStateChanged = localIsEncrypted !== remoteIsEncrypted;
+
         // Caso 1: Los datos locales y remotos son idénticos -> No-op
-        if (areHashesEqual(localHashes, remoteHashes)) {
+        if (areHashesEqual(localHashes, remoteHashes) && !encryptionStateChanged) {
           await setSyncConfig('last_synced_hashes', JSON.stringify(localHashes));
           await get().updateConfig({ lastSyncAt: getCalibratedTimestamp() });
           set({ isSyncing: false, syncStatus: 'not_modified' });
           return;
         }
 
-        // Caso 2: El dispositivo local está vacío o no tenía cambios pendientes -> Solo descargar e importar
-        if (isLocalEmpty || !hasLocalPendingChanges) {
+        // Caso 2: El dispositivo local está vacío o no tenía cambios pendientes (y sin tombstones pendientes ni cambio de cifrado) -> Solo descargar e importar
+        const hasLocalTombstones = tombstones.length > 0;
+        if ((isLocalEmpty || !hasLocalPendingChanges) && !hasLocalTombstones && !encryptionStateChanged) {
           for (const p of remotePayload.profiles) {
             await upsertProfile(p);
           }

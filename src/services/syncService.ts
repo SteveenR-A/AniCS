@@ -249,7 +249,8 @@ export function mergeFavoritesWithTombstones(
     const pid = (fav as any).profileId || 'default';
     const key = `${fav.url.toLowerCase().trim()}::${pid}`;
     const deletedTime = tombstoneMap.get(key);
-    if (!deletedTime) {
+    const addedTime = (fav as any).addedAt ? new Date((fav as any).addedAt).getTime() : 0;
+    if (!deletedTime || (addedTime > 0 && addedTime > deletedTime)) {
       result.set(key, fav);
     }
   }
@@ -258,8 +259,11 @@ export function mergeFavoritesWithTombstones(
     const pid = (fav as any).profileId || 'default';
     const key = `${fav.url.toLowerCase().trim()}::${pid}`;
     const deletedTime = tombstoneMap.get(key);
-    if (!deletedTime) {
-      result.set(key, fav);
+    const addedTime = (fav as any).addedAt ? new Date((fav as any).addedAt).getTime() : 0;
+    if (!deletedTime || (addedTime > 0 && addedTime > deletedTime)) {
+      if (!result.has(key)) {
+        result.set(key, fav);
+      }
     }
   }
 
