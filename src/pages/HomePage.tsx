@@ -1,8 +1,14 @@
-import { useResponsive } from '@/hooks/useResponsive';
-import { DesktopHomePage } from './desktop/DesktopHomePage';
-import { MobileHomePage } from './mobile/MobileHomePage';
+import { lazy, Suspense } from "react";
+import { useResponsive } from "@/hooks/useResponsive";
+
+const DesktopHomePage = lazy(() => import("./desktop/DesktopHomePage").then(m => ({ default: m.DesktopHomePage })));
+const MobileHomePage = lazy(() => import("./mobile/MobileHomePage").then(m => ({ default: m.MobileHomePage })));
 
 export function HomePage() {
   const { isMobile } = useResponsive();
-  return isMobile ? <MobileHomePage /> : <DesktopHomePage />;
+  return (
+    <Suspense fallback={null}>
+      {isMobile ? <MobileHomePage /> : <DesktopHomePage />}
+    </Suspense>
+  );
 }

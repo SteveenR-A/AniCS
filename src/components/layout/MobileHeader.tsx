@@ -7,7 +7,7 @@ import { useProfileStore } from '@/stores/useProfileStore';
 import { useSubscriptionStore } from '@/stores/useSubscriptionStore';
 import { FEATURE_FLAGS } from '@/config/features';
 import { ProfileSelectorModal, getProfileAvatarIcon } from '@/components/ProfileSelectorModal';
-import { SubscriptionModal } from '@/components/SubscriptionModal';
+
 
 export function MobileHeader() {
   const navigate = useNavigate();
@@ -310,7 +310,7 @@ export function MobileHeader() {
         isOpen={isProfileModalOpen}
         onClose={() => setIsProfileModalOpen(false)}
       />
-      <SubscriptionModal />
+      
     </>
   );
 }

@@ -1,13 +1,13 @@
 # Guía: Cómo Desactivar Suscripciones, Login de Firebase y Enmascaramiento de Servidores
 
-Esta guía explica cómo controlar las características comerciales, el sistema de cuentas en la nube y la visualización de servidores mediante las **Feature Flags** de **AniCS** en [`src/config/features.ts`](file:///c:/Documentos/AniCS/src/config/features.ts).
+Esta guía explica cómo controlar las características comerciales, el sistema de cuentas en la nube y la visualización de servidores mediante las **Feature Flags** de **AniCS** en [`src/config/features.ts`](file:///c:/dev/AniCS/src/config/features.ts).
 
 ---
 
 ## ⚡ Configuración Central de Flags (`features.ts`)
 
 Abre el archivo:
-📁 **[`src/config/features.ts`](file:///c:/Documentos/AniCS/src/config/features.ts)**
+📁 **[`src/config/features.ts`](file:///c:/dev/AniCS/src/config/features.ts)**
 
 Allí encontrarás los tres interruptores principales:
 
@@ -66,5 +66,5 @@ Para evitar que los botones de **Favoritos** y **Ajustes** queden cortados u ocu
 ---
 
 ## 🔄 Cómo Volver a Activar Cualquier Función
-En cualquier momento puedes reactivar cualquier característica simplemente cambiando su valor a `true` en [`src/config/features.ts`](file:///c:/Documentos/AniCS/src/config/features.ts). Todo el código subyacente se mantiene intacto.
+En cualquier momento puedes reactivar cualquier característica simplemente cambiando su valor a `true` en [`src/config/features.ts`](file:///c:/dev/AniCS/src/config/features.ts). Todo el código subyacente se mantiene intacto.
 

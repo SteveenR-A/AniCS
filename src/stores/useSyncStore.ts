@@ -29,6 +29,7 @@ import {
   batchUpsertHistory,
   batchAddFavorites,
   removeFavorite,
+  removeHistoryBatch,
 } from '@/services/storageService';
 import {
   CURRENT_SCHEMA_VERSION,
@@ -45,6 +46,8 @@ import {
   getCurrentDevicePlatform,
   getCalibratedTimestamp,
   isLocalFileHistory,
+  makeHistoryAnimeKey,
+  makeHistoryCanonicalKey,
 } from '@/services/syncService';
 import {
   loginWithGoogle as fbLoginGoogle,
@@ -163,7 +166,7 @@ async function applyDeletedHistoryTombstonesLocally(
       continue;
     }
 
-    const { makeHistoryAnimeKey, makeHistoryCanonicalKey } = await import('@/services/syncService');
+
     const animeKey = makeHistoryAnimeKey(h);
     const animeTime = maxAnimeTimeByKey.get(animeKey);
     if (animeTime && wTime <= animeTime) {
@@ -180,7 +183,7 @@ async function applyDeletedHistoryTombstonesLocally(
   }
 
   if (idsToDelete.length > 0) {
-    const { removeHistoryBatch } = await import('@/services/storageService');
+
     await removeHistoryBatch(idsToDelete);
   }
 }

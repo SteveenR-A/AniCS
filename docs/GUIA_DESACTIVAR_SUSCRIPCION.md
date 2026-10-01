@@ -7,7 +7,7 @@ Este documento explica de forma rápida y sencilla cómo desactivar por completo
 ## 🚀 Método Inmediato (Flags de Configuración)
 
 Abre el archivo de configuración:
-📁 [`src/config/features.ts`](file:///c:/Documentos/AniCS/src/config/features.ts)
+📁 [`src/config/features.ts`](file:///c:/dev/AniCS/src/config/features.ts)
 
 Ajusta los valores según tu preferencia:
 

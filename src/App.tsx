@@ -1,18 +1,18 @@
 import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, lazy, Suspense } from 'react';
 import { AppShell } from '@/components/layout/AppShell';
 import { HomePage } from '@/pages/HomePage';
 import { SearchPage } from '@/pages/SearchPage';
 import { DetailsPage } from '@/pages/DetailsPage';
-import { PlayerPage } from '@/pages/PlayerPage';
+const PlayerPage = lazy(() => import('@/pages/PlayerPage').then(m => ({ default: m.PlayerPage })));
 import { SchedulePage } from '@/pages/SchedulePage';
 import { TopAnimePage } from '@/pages/TopAnimePage';
 import { HistoryPage, FavoritesPage, DownloadsPage } from '@/pages/OtherPages';
 import { SettingsPage } from '@/pages/SettingsPage';
-import { ChangelogModal } from '@/components/ChangelogModal';
-import { UpdateAnnouncementModal } from '@/components/UpdateAnnouncementModal';
-import { PinDialogModal } from '@/components/PinDialogModal';
-import { SubscriptionModal } from '@/components/SubscriptionModal';
+const ChangelogModal = lazy(() => import('@/components/ChangelogModal').then(m => ({ default: m.ChangelogModal })));
+const UpdateAnnouncementModal = lazy(() => import('@/components/UpdateAnnouncementModal').then(m => ({ default: m.UpdateAnnouncementModal })));
+const PinDialogModal = lazy(() => import('@/components/PinDialogModal').then(m => ({ default: m.PinDialogModal })));
+const SubscriptionModal = lazy(() => import('@/components/SubscriptionModal').then(m => ({ default: m.SubscriptionModal })));
 import { useAnimeStore } from '@/stores/useAnimeStore';
 import { useDownloadStore } from '@/stores/useDownloadStore';
 import { useThemeStore } from '@/stores/useThemeStore';
@@ -36,7 +36,7 @@ function AppRoutes() {
         <Route path="/settings" element={<SettingsPage />} />
       </Route>
       {/* El reproductor ocupa pantalla completa, fuera del AppShell */}
-      <Route path="/player" element={<PlayerPage />} />
+      <Route path="/player" element={<Suspense fallback={null}><PlayerPage /></Suspense>} />
     </Routes>
   );
 }
@@ -129,15 +129,17 @@ function AppContent() {
   return (
     <>
       <AppRoutes />
-      <ChangelogModal isOpen={showPatchNotes} onClose={handleClosePatchNotes} />
-      <UpdateAnnouncementModal
-        isOpen={Boolean(availableUpdate)}
-        release={availableUpdate}
-        onClose={handleCloseUpdateModal}
-        onUpdate={handleGoToUpdate}
-      />
-      <PinDialogModal />
-      <SubscriptionModal />
+      <Suspense fallback={null}>
+        <ChangelogModal isOpen={showPatchNotes} onClose={handleClosePatchNotes} />
+        <UpdateAnnouncementModal
+          isOpen={Boolean(availableUpdate)}
+          release={availableUpdate}
+          onClose={handleCloseUpdateModal}
+          onUpdate={handleGoToUpdate}
+        />
+        <PinDialogModal />
+        <SubscriptionModal />
+      </Suspense>
     </>
   );
 }

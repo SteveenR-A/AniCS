@@ -1,8 +1,14 @@
-import { useResponsive } from '@/hooks/useResponsive';
-import { DesktopSearchPage } from './desktop/DesktopSearchPage';
-import { MobileSearchPage } from './mobile/MobileSearchPage';
+import { lazy, Suspense } from "react";
+import { useResponsive } from "@/hooks/useResponsive";
+
+const DesktopSearchPage = lazy(() => import("./desktop/DesktopSearchPage").then(m => ({ default: m.DesktopSearchPage })));
+const MobileSearchPage = lazy(() => import("./mobile/MobileSearchPage").then(m => ({ default: m.MobileSearchPage })));
 
 export function SearchPage() {
   const { isMobile } = useResponsive();
-  return isMobile ? <MobileSearchPage /> : <DesktopSearchPage />;
+  return (
+    <Suspense fallback={null}>
+      {isMobile ? <MobileSearchPage /> : <DesktopSearchPage />}
+    </Suspense>
+  );
 }

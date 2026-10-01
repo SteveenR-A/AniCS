@@ -1,8 +1,14 @@
-import { useResponsive } from '@/hooks/useResponsive';
-import { DesktopSchedulePage } from './desktop/DesktopSchedulePage';
-import { MobileSchedulePage } from './mobile/MobileSchedulePage';
+import { lazy, Suspense } from "react";
+import { useResponsive } from "@/hooks/useResponsive";
+
+const DesktopSchedulePage = lazy(() => import("./desktop/DesktopSchedulePage").then(m => ({ default: m.DesktopSchedulePage })));
+const MobileSchedulePage = lazy(() => import("./mobile/MobileSchedulePage").then(m => ({ default: m.MobileSchedulePage })));
 
 export function SchedulePage() {
   const { isMobile } = useResponsive();
-  return isMobile ? <MobileSchedulePage /> : <DesktopSchedulePage />;
+  return (
+    <Suspense fallback={null}>
+      {isMobile ? <MobileSchedulePage /> : <DesktopSchedulePage />}
+    </Suspense>
+  );
 }

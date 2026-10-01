@@ -10,7 +10,7 @@ import { useProfileStore } from '@/stores/useProfileStore';
 import { useSubscriptionStore } from '@/stores/useSubscriptionStore';
 import { FEATURE_FLAGS } from '@/config/features';
 import { ProfileSelectorModal, getProfileAvatarIcon } from '@/components/ProfileSelectorModal';
-import { SubscriptionModal } from '@/components/SubscriptionModal';
+
 
 const navItems = [
   { to: '/',          icon: Home,       label: 'Inicio'       },
@@ -323,7 +323,7 @@ export function DesktopSidebar() {
         isOpen={isProfileModalOpen}
         onClose={() => setIsProfileModalOpen(false)}
       />
-      <SubscriptionModal />
+      
     </>
   );
 }
