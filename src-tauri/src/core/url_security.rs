@@ -195,13 +195,13 @@ pub async fn validate_url_cached(raw_url: &str) -> AppResult<Url> {
     let local_media_token = crate::downloader::media_server::get_media_token();
 
     if (host_str == "127.0.0.1" || host_str == "localhost") && local_media_port > 0 && port == local_media_port {
-        let provided_token = parsed
+        let tokens: Vec<_> = parsed
             .query_pairs()
-            .find(|(k, _)| k == "token")
+            .filter(|(k, _)| k == "token")
             .map(|(_, v)| v.to_string())
-            .unwrap_or_default();
+            .collect();
 
-        if !local_media_token.is_empty() && crate::downloader::media_server::verify_token_constant_time(local_media_token.as_bytes(), provided_token.as_bytes()) {
+        if parsed.path() == "/video" && tokens.len() == 1 && !local_media_token.is_empty() && crate::downloader::media_server::verify_token_constant_time(local_media_token.as_bytes(), tokens[0].as_bytes()) {
             return Ok(parsed);
         } else {
             return Err(AppError::Security("Acceso a loopback bloqueado: token de sesión local inválido o ausente".to_string()));

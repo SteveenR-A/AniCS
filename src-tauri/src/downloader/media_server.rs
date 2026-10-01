@@ -1,8 +1,9 @@
 use std::io::SeekFrom;
 use std::net::{IpAddr, SocketAddr, UdpSocket};
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU16, Ordering};
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
+use subtle::ConstantTimeEq;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
@@ -11,6 +12,12 @@ use parking_lot::Mutex;
 
 static SERVER_PORT: AtomicU16 = AtomicU16::new(0);
 static DLNA_PORT: AtomicU16 = AtomicU16::new(0);
+static MEDIA_TOKEN: Lazy<String> = Lazy::new(|| {
+    let mut bytes = [0u8; 32];
+    getrandom::fill(&mut bytes).expect("Unable to initialize media authentication");
+    hex::encode(bytes)
+});
+static MEDIA_ROOTS: Lazy<Mutex<Vec<PathBuf>>> = Lazy::new(|| Mutex::new(Vec::new()));
 static DLNA_FILE: Lazy<Mutex<Option<DlnaFile>>> = Lazy::new(|| Mutex::new(None));
 
 #[derive(Clone)]
@@ -31,9 +38,9 @@ pub struct AuthCallbackData {
 
 static PENDING_AUTH: Lazy<Mutex<Option<AuthCallbackData>>> = Lazy::new(|| Mutex::new(None));
 
-/// Compara tokens (función de compatibilidad para evitar roturas de compilación)
-pub fn verify_token_constant_time(_expected: &[u8], _provided: &[u8]) -> bool {
-    true
+/// Compares session credentials without branching on matching bytes.
+pub fn verify_token_constant_time(expected: &[u8], provided: &[u8]) -> bool {
+    !expected.is_empty() && bool::from(expected.ct_eq(provided))
 }
 
 /// Obtiene el puerto asignado al servidor local de streaming
@@ -41,9 +48,35 @@ pub fn get_server_port() -> u16 {
     SERVER_PORT.load(Ordering::Relaxed)
 }
 
-/// Obtiene el token de sesión (cadena vacía ya que en 0.1.22 no se restringe por token)
+/// Credential shared only with the application's local media URL generator.
 pub fn get_media_token() -> &'static str {
-    ""
+    MEDIA_TOKEN.as_str()
+}
+
+pub fn register_download_root(root: &Path) {
+    if let Ok(root) = root.canonicalize() {
+        if root.is_dir() && root.parent().is_some() {
+            let mut roots = MEDIA_ROOTS.lock();
+            if !roots.contains(&root) { roots.push(root); }
+        }
+    }
+}
+
+fn authorized_media_path(path: &str) -> Option<PathBuf> {
+    let path = Path::new(path);
+    if !path.is_absolute() || path.components().any(|part| part == Component::ParentDir) {
+        return None;
+    }
+    let canonical = path.canonicalize().ok()?;
+    if !canonical.is_file() { return None; }
+    let mut roots = MEDIA_ROOTS.lock().clone();
+    // Settings can change through the generic settings command during playback.
+    if let Ok(Some(root)) = crate::storage::get_setting("download_dir") {
+        if let Ok(root) = Path::new(&root).canonicalize() {
+            if root.parent().is_some() { roots.push(root); }
+        }
+    }
+    roots.iter().any(|root| canonical.starts_with(root)).then_some(canonical)
 }
 
 /// Genera una URL de streaming local compatible con HTML5 <video>
@@ -51,14 +84,27 @@ pub fn get_media_stream_url(file_path: &str) -> String {
     let port = get_server_port();
     let encoded_path = urlencoding::encode(file_path);
     if port > 0 {
-        format!("http://127.0.0.1:{}/video?path={}", port, encoded_path)
+        format!("http://127.0.0.1:{}/video?path={}&token={}", port, encoded_path, get_media_token())
     } else {
         file_path.to_string()
     }
 }
 
 /// Inicia el servidor HTTP de streaming local en segundo plano
-pub async fn start_media_server(_app_handle: AppHandle) -> Result<u16, Box<dyn std::error::Error + Send + Sync>> {
+pub async fn start_media_server(app_handle: AppHandle) -> Result<u16, Box<dyn std::error::Error + Send + Sync>> {
+    Lazy::force(&MEDIA_TOKEN);
+    if let Ok(root) = crate::commands::download_cmd::get_default_download_dir(app_handle.clone()) {
+        register_download_root(Path::new(&root));
+    }
+    #[cfg(not(target_os = "android"))]
+    for root in [app_handle.path().video_dir(), app_handle.path().download_dir()].into_iter().flatten() {
+        register_download_root(&root.join("AniCS"));
+    }
+    #[cfg(target_os = "android")]
+    {
+        register_download_root(Path::new("/storage/emulated/0/Anime"));
+        if let Ok(root) = app_handle.path().app_data_dir() { register_download_root(&root.join("Anime")); }
+    }
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let local_addr = listener.local_addr()?;
     let port = local_addr.port();
@@ -261,6 +307,18 @@ Access-Control-Max-Age: 86400\r\n\
         return;
     }
 
+    let parsed = url::Url::parse(&format!("http://localhost{uri}")).ok();
+    let tokens: Vec<_> = parsed.as_ref().map(|url| url.query_pairs().filter(|(key, _)| key == "token").map(|(_, value)| value.into_owned()).collect()).unwrap_or_default();
+    if uri.split('?').next() != Some("/video") || tokens.len() != 1 ||
+        !verify_token_constant_time(get_media_token().as_bytes(), tokens[0].as_bytes()) {
+        let _ = stream.write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await;
+        return;
+    }
+    let paths = parsed.as_ref().unwrap().query_pairs().filter(|(key, _)| key == "path").count();
+    if paths != 1 {
+        let _ = stream.write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await;
+        return;
+    }
     // Extraer parámetro `path` de la URL /video?path=...
     let file_path_str = match extract_query_param(uri, "path") {
         Some(p) => match urlencoding::decode(&p) {
@@ -274,7 +332,10 @@ Access-Control-Max-Age: 86400\r\n\
         }
     };
 
-    let file_path = PathBuf::from(&file_path_str);
+    let Some(file_path) = authorized_media_path(&file_path_str) else {
+        let _ = stream.write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await;
+        return;
+    };
     let metadata = match tokio::fs::metadata(&file_path).await {
         Ok(m) => m,
         Err(e) => {
@@ -655,5 +716,70 @@ mod tests {
     #[test]
     fn test_verify_token_constant_time() {
         assert!(verify_token_constant_time(b"any", b"any"));
+        assert!(!verify_token_constant_time(b"any", b"bad"));
+        assert!(!verify_token_constant_time(b"any", b""));
+    }
+
+    #[tokio::test]
+    async fn media_authorization_regression() {
+        let base = std::env::temp_dir().join(format!("anics_media_{}", uuid::Uuid::new_v4()));
+        let allowed = base.join("downloads");
+        std::fs::create_dir_all(&allowed).unwrap();
+        register_download_root(&allowed);
+        let video = allowed.join("video.mp4");
+        let outside = base.join("private.txt");
+        std::fs::write(&video, b"0123456789").unwrap();
+        std::fs::write(&outside, b"private").unwrap();
+        async fn request(uri: &str, range: &str) -> String {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let worker = tokio::spawn(async move {
+                let (socket, peer) = listener.accept().await.unwrap();
+                handle_connection(socket, peer).await;
+            });
+            let mut client = TcpStream::connect(address).await.unwrap();
+            client.write_all(format!("GET {uri} HTTP/1.1\r\nHost: localhost\r\n{range}\r\n").as_bytes()).await.unwrap();
+            let mut response = Vec::new();
+            client.read_to_end(&mut response).await.unwrap();
+            worker.await.unwrap();
+            String::from_utf8(response).unwrap()
+        }
+        let path = urlencoding::encode(video.to_str().unwrap());
+        assert!(request(&format!("/video?path={path}"), "").await.starts_with("HTTP/1.1 403"));
+        assert!(request(&format!("/video?path={path}&token=wrong"), "").await.starts_with("HTTP/1.1 403"));
+        let token = get_media_token();
+        assert_eq!(hex::decode(token).unwrap().len(), 32);
+        let url = format!("/video?path={path}&token={token}");
+        let complete = request(&url, "").await;
+        assert!(complete.starts_with("HTTP/1.1 200"));
+        assert!(complete.ends_with("0123456789"));
+        assert!(request(&format!("{url}&token={token}"), "").await.starts_with("HTTP/1.1 403"));
+        let partial = request(&url, "Range: bytes=2-4\r\n").await;
+        assert!(partial.starts_with("HTTP/1.1 206"));
+        assert!(partial.ends_with("234"));
+        for denied in [outside.clone(), allowed.join("../private.txt")] {
+            let path = urlencoding::encode(denied.to_str().unwrap());
+            assert!(request(&format!("/video?path={path}&token={token}"), "").await.starts_with("HTTP/1.1 403"));
+        }
+        let link = allowed.join("escape");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&base, &link).unwrap();
+        #[cfg(windows)]
+        {
+            let result = std::process::Command::new("cmd").args(["/c", "mklink", "/J"]).arg(&link).arg(&base).output().unwrap();
+            assert!(result.status.success(), "Unable to create test junction");
+        }
+        let path = urlencoding::encode(link.join("private.txt").to_str().unwrap()).into_owned();
+        assert!(request(&format!("/video?path={path}&token={token}"), "").await.starts_with("HTTP/1.1 403"));
+        #[cfg(windows)]
+        std::fs::remove_dir(&link).unwrap();
+        #[cfg(unix)]
+        std::fs::remove_file(&link).unwrap();
+        SERVER_PORT.store(54321, Ordering::Relaxed);
+        let local_url = get_media_stream_url(video.to_str().unwrap());
+        assert!(crate::core::validate_url_cached(&local_url).await.is_ok());
+        assert!(crate::core::validate_url_cached(&local_url.replace(token, "wrong")).await.is_err());
+        SERVER_PORT.store(0, Ordering::Relaxed);
+        std::fs::remove_dir_all(base).unwrap();
     }
 }

@@ -64,6 +64,7 @@ dependencies = [
  "chrono",
  "env_logger",
  "futures",
+ "getrandom 0.3.4",
  "hex",
  "keyring",
  "log",

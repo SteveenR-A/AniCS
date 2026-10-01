@@ -574,6 +574,7 @@ async fn start_download_internal(
     }
 
     let output_path = anime_folder.join(format!("Ep{:03}.mp4", episode_number));
+    crate::downloader::media_server::register_download_root(&base_dir);
     let output_path_str = output_path.to_string_lossy().to_string();
 
     let task_record = DownloadTask {
@@ -1303,6 +1304,8 @@ pub async fn scan_local_downloads(
         let _ = fs::create_dir_all(&base_dir);
         return Ok(vec![]);
     }
+
+    crate::downloader::media_server::register_download_root(&base_dir);
 
     // Mapa: (Ruta Canónica, Nombre Anime) -> (Ruta Real, Lista de Episodios)
     // Deduplica robustamente por ruta física canónica y título para evitar colisiones

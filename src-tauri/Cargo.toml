@@ -52,6 +52,7 @@ keyring = { version = "3", features = ["windows-native", "apple-native", "sync-s
 sha2 = "0.10"
 subtle = "2.6"
 hex = "0.4"
+getrandom = "0.3"
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
