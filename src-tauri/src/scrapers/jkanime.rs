@@ -887,7 +887,27 @@ impl AnimeExtractor for JKAnimeExtractor {
     async fn resolve_stream(&self, server: &VideoServer) -> AppResult<ResolvedMedia> {
         let url = &server.url;
 
-        // 1. Mediafire Direct Resolver
+        // 1. Direct Streams (.mp4 / .m3u8)
+        if url.ends_with(".mp4") {
+            return Ok(ResolvedMedia {
+                direct_url: url.clone(),
+                media_type: MediaType::Mp4,
+                referer: server.referer.clone(),
+                user_agent: None,
+                qualities: vec![],
+            });
+        }
+        if url.contains(".m3u8") {
+            return Ok(ResolvedMedia {
+                direct_url: url.clone(),
+                media_type: MediaType::Hls,
+                referer: server.referer.clone(),
+                user_agent: None,
+                qualities: vec![],
+            });
+        }
+
+        // 2. Mediafire Direct Resolver
         if url.contains("mediafire.com") {
             if let Some(dl_url) = resolve_mediafire(url).await {
                 return Ok(ResolvedMedia {
@@ -900,7 +920,26 @@ impl AnimeExtractor for JKAnimeExtractor {
             }
         }
 
-        // 2. JKPlayer Embebed (Magi / Desu / c1 / c2)
+        // 3. Mp4upload (extraer video.mp4 directo)
+        if url.contains("mp4upload") {
+            static MP4UPLOAD_SRC_RE: Lazy<Regex> = Lazy::new(|| {
+                Regex::new(r#"(?i)src\s*:\s*["'](https?://[^"']+\.mp4[^"']*)["']"#).unwrap()
+            });
+            if let Ok(html) = fetch_html(url, server.referer.as_deref().or(Some("https://jkanime.net/"))).await {
+                if let Some(cap) = MP4UPLOAD_SRC_RE.captures(&html) {
+                    let stream_url = cap[1].to_string();
+                    return Ok(ResolvedMedia {
+                        direct_url: stream_url,
+                        media_type: MediaType::Mp4,
+                        referer: Some("https://www.mp4upload.com/".to_string()),
+                        user_agent: None,
+                        qualities: vec![],
+                    });
+                }
+            }
+        }
+
+        // 4. JKPlayer Embebed (Magi / Desu / c1 / c2)
         if url.contains("/jkplayer") || url.contains("desu.php") || url.contains("magi")
             || url.contains("c1.php") || url.contains("c2.php") || url.contains("jkanime.")
         {
@@ -961,6 +1000,46 @@ impl AnimeExtractor for JKAnimeExtractor {
                         qualities: vec![],
                     });
                 }
+            }
+        }
+
+        // 5. Servidores embebidos externos (Streamwish, Vidhide, Uqload, Lulustream, Fmoon, etc.)
+        if let Ok(html) = fetch_html(url, server.referer.as_deref().or(Some("https://jkanime.net/"))).await {
+            if url.contains("uqload") {
+                static UQLOAD_SRC_RE: Lazy<Regex> = Lazy::new(|| {
+                    Regex::new(r#"sources\s*:\s*\[\s*['"](https?://[^'"]+)['"]"#).unwrap()
+                });
+                if let Some(cap) = UQLOAD_SRC_RE.captures(&html) {
+                    let stream_url = cap[1].to_string();
+                    let media_type = detect_media_type(&stream_url);
+                    return Ok(ResolvedMedia {
+                        direct_url: stream_url,
+                        media_type,
+                        referer: Some(url.clone()),
+                        user_agent: None,
+                        qualities: vec![],
+                    });
+                }
+            }
+
+            if let Some(stream_url) = JsUnpacker::extract_stream_url(&html) {
+                let media_type = detect_media_type(&stream_url);
+                let stream_referer = if url.contains("vidhide") {
+                    Some("https://vidhidepro.com/".to_string())
+                } else if url.contains("streamwish") || url.contains("embedwish") || url.contains("sfastwish") {
+                    Some("https://embedwish.com/".to_string())
+                } else if url.contains("fmoon") || url.contains("bysekoze") {
+                    Some("https://bysekoze.com/".to_string())
+                } else {
+                    Some(url.clone())
+                };
+                return Ok(ResolvedMedia {
+                    direct_url: stream_url,
+                    media_type,
+                    referer: stream_referer,
+                    user_agent: None,
+                    qualities: vec![],
+                });
             }
         }
 

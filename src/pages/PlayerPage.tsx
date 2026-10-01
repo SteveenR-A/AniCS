@@ -821,7 +821,7 @@ export function PlayerPage() {
       video.removeAttribute('src');
       video.load();
     };
-  }, [resolvedMedia, isLoadingInitial]);
+  }, [resolvedMedia]);
 
   // Guardar progreso en el historial de SQLite
   const saveProgress = useCallback((overrideProgress?: number) => {
