@@ -482,18 +482,21 @@ export function PlayerPage() {
   // Selección y resolución automática del primer servidor funcional disponible
   const autoResolveWorkingServer = useCallback(async (
     candidateServers: VideoServer[],
-    source: string
+    source: string,
+    expectedRequestId?: number
   ): Promise<boolean> => {
     if (!candidateServers || candidateServers.length === 0) {
       return false;
     }
+    const isObsolete = () => typeof expectedRequestId === "number" && expectedRequestId !== serverRequestRef.current;
+    if (isObsolete()) return false;
 
     const isUserVip = !FEATURE_FLAGS.SHOW_SUBSCRIPTION || isVip;
     const allowed = isUserVip
       ? [...candidateServers]
       : candidateServers.filter(s => !isVipServer(s.name));
 
-    if (allowed.length === 0) {
+    if (allowed.length === 0 || isObsolete()) {
       return false;
     }
 
@@ -501,6 +504,7 @@ export function PlayerPage() {
     allowed.sort((a, b) => getServerPriority(b) - getServerPriority(a));
 
     for (const candidate of allowed) {
+      if (isObsolete()) return false;
       if (failedServersRef.current.has(candidate.url)) {
         continue;
       }
@@ -508,11 +512,13 @@ export function PlayerPage() {
         setIsResolving(true);
         setSelectedServer(candidate);
         const media = await resolveStream(candidate, source);
+        if (isObsolete()) return false;
         if (media && media.directUrl) {
           setResolvedMedia(media);
           return true;
         }
       } catch (err) {
+        if (isObsolete()) return false;
         console.warn(`[AniCS Player] Servidor ${candidate.name} (${candidate.url}) no resolvió stream:`, err);
         failedServersRef.current.add(candidate.url);
       }
@@ -534,7 +540,7 @@ export function PlayerPage() {
       }
 
       currentLoadedKey.current = loadKey;
-      ++serverRequestRef.current;
+      const requestId = ++serverRequestRef.current;
       pendingSwitchRef.current = null;
       resetPlayback();
       setIsLoadingInitial(true);
@@ -549,8 +555,10 @@ export function PlayerPage() {
         let details = getCachedDetails(targetAnimeUrl);
         if (!details || details.url !== targetAnimeUrl) {
           details = await getDetails(targetAnimeUrl, querySource);
+          if (requestId !== serverRequestRef.current) return;
           cacheDetails(details);
         }
+        if (requestId !== serverRequestRef.current) return;
 
         setCurrentAnime(details);
         const targetEp = details.episodes.find(e => e.number === epNum) || details.episodes[0] || {
@@ -567,6 +575,7 @@ export function PlayerPage() {
         if (querySource === 'local' || details.source === 'local' || (!targetEp.url.startsWith('http://') && !targetEp.url.startsWith('https://'))) {
           try {
             const streamUrl = await getLocalMediaUrl(targetEp.url);
+            if (requestId !== serverRequestRef.current) return;
             const isTs = targetEp.url.toLowerCase().endsWith('.ts');
             setResolvedMedia({
               directUrl: streamUrl,
@@ -578,20 +587,27 @@ export function PlayerPage() {
           }
         } else {
           const srvs = await getServers(targetEp.url, querySource);
+          if (requestId !== serverRequestRef.current) return;
           setServers(srvs);
           failedServersRef.current.clear();
 
-          const ok = await autoResolveWorkingServer(srvs, querySource);
+          const ok = await autoResolveWorkingServer(srvs, querySource, requestId);
+          if (requestId !== serverRequestRef.current) return;
           if (!ok) {
             setLoadError('No se encontró ningún servidor con transmisión disponible para este episodio');
           }
         }
-        setIsResolving(false);
+        if (requestId === serverRequestRef.current) {
+          setIsResolving(false);
+        }
       } catch (err: any) {
+        if (requestId !== serverRequestRef.current) return;
         console.error('Failed to init player from URL params:', err);
         setLoadError(err?.message || 'No se pudo cargar el anime');
       } finally {
-        setIsLoadingInitial(false);
+        if (requestId === serverRequestRef.current) {
+          setIsLoadingInitial(false);
+        }
       }
     };
 
@@ -801,6 +817,9 @@ export function PlayerPage() {
       }
       hlsRef.current?.destroy();
       hlsRef.current = null;
+      video.pause();
+      video.removeAttribute('src');
+      video.load();
     };
   }, [resolvedMedia, isLoadingInitial]);
 
@@ -879,7 +898,14 @@ export function PlayerPage() {
     clearTimeout(progressReadyTimerRef.current);
     if (clickTimeoutRef.current) clearTimeout(clickTimeoutRef.current);
     pendingSwitchRef.current = null;
+    ++serverRequestRef.current;
     usePlayerStore.getState().resetPlayback();
+    const v = videoRef.current;
+    if (v) {
+      v.pause();
+      v.removeAttribute("src");
+      v.load();
+    }
   }, []);
 
   const toggleControlsManual = () => {

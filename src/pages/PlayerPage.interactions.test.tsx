@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useNavigate } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PlayerPage } from './PlayerPage';
 import { usePlayerStore } from '@/stores/usePlayerStore';
@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
   hlsSupported: false,
   hlsInstances: [] as { emit: (event: string, data?: unknown) => void }[],
   resolve: vi.fn(),
+  getServers: vi.fn(),
+  getDetails: vi.fn(),
   getProgress: vi.fn().mockResolvedValue(null),
 }));
 vi.mock('@/hooks/useResponsive', () => ({ useResponsive: () => ({ isMobile: mocks.mobile }) }));
@@ -17,7 +19,7 @@ vi.mock('@/stores/useAnimeStore', () => ({ useAnimeStore: () => ({ getCachedDeta
 vi.mock('@/stores/useProfileStore', () => ({ useProfileStore: { getState: () => ({ activeProfile: { id: 'default' } }) } }));
 vi.mock('@/stores/useSyncStore', () => ({ useSyncStore: { getState: () => ({ triggerDebouncedSync: vi.fn() }) } }));
 vi.mock('@/stores/useSubscriptionStore', () => ({ useSubscriptionStore: () => ({ isVip: false, openModal: vi.fn() }) }));
-vi.mock('@/services/animeService', () => ({ resolveStream: mocks.resolve, getServers: vi.fn(), getDetails: vi.fn() }));
+vi.mock('@/services/animeService', () => ({ resolveStream: mocks.resolve, getServers: mocks.getServers, getDetails: mocks.getDetails }));
 vi.mock('@/services/storageService', () => ({
   getAllSettings: () => Promise.resolve(mocks.settings),
   setSetting: (key: string, value: string) => { mocks.settings[key] = value; return Promise.resolve(); },
@@ -94,6 +96,33 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); });
 
 describe('Player interactions', () => {
+  it('does not replace a newer episode with a late automatic resolution', async () => {
+    const pending = new Map<string, (value: any) => void>();
+    mocks.getDetails.mockResolvedValue(usePlayerStore.getState().currentAnime);
+    mocks.getServers.mockImplementation(async (url: string) => [{ name: url, url, isDirect: true }]);
+    mocks.resolve.mockImplementation((server: { url: string }) => new Promise(resolve => pending.set(server.url, resolve)));
+    const anime = usePlayerStore.getState().currentAnime!;
+    mocks.getDetails.mockResolvedValue({ ...anime, episodes: [1, 2].map(number => ({ number, url: `https://example.com/ep${number}`, watched: false })) });
+    function Navigation() {
+      const navigate = useNavigate();
+      return <button onClick={() => navigate('/player?url=https://example.com/anime&ep=2&source=jkanime')}>Next route</button>;
+    }
+    render(<MemoryRouter initialEntries={['/player?url=https://example.com/anime&ep=1&source=jkanime']}><Navigation /><PlayerPage /></MemoryRouter>);
+    await act(async () => {});
+    fireEvent.click(screen.getByText('Next route'));
+    await act(async () => {});
+    await act(async () => pending.get('https://example.com/ep2')!({ directUrl: 'https://example.com/new.mp4', mediaType: 'mp4', qualities: [] }));
+    await act(async () => pending.get('https://example.com/ep1')!({ directUrl: 'https://example.com/old.mp4', mediaType: 'mp4', qualities: [] }));
+    expect(usePlayerStore.getState().resolvedMedia?.directUrl).toBe('https://example.com/new.mp4');
+  });
+
+  it('releases the native video on unmount', async () => {
+    const { video, unmount } = await mountPlayer();
+    video.src = 'https://example.com/video.mp4';
+    unmount();
+    expect(video.paused).toBe(true);
+    expect(video.hasAttribute('src')).toBe(false);
+  });
   it.each([false, true])('hides casting on Windows even with mobile layout=%s', async mobile => {
     mocks.mobile = mobile;
     vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Windows NT 10.0; Win64; x64)');
