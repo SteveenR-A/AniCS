@@ -969,7 +969,7 @@ async fn download_direct_mp4(
     url: &str,
     referer: Option<&str>,
     output_path: &Path,
-    already_downloaded: u64,
+    _already_downloaded: u64,
     progress_tx: &mpsc::UnboundedSender<DownloadProgress>,
     cancel_rx: &mut oneshot::Receiver<()>,
 ) -> AppResult<PauseReason> {
@@ -977,8 +977,8 @@ async fn download_direct_mp4(
     use tokio::io::AsyncWriteExt;
     use futures::StreamExt;
     use std::time::Instant;
-    let mut downloaded = already_downloaded;
-    let mut total_bytes: Option<u64> = None;
+    let mut downloaded: u64;
+    let mut received_bytes = 0u64;
     let mut consecutive_stalls = 0u32;
     const MAX_STALL_RETRIES: u32 = 6;
     let start_time = Instant::now();
@@ -995,7 +995,8 @@ async fn download_direct_mp4(
 
         let part_path = PathBuf::from(format!("{}.part", output_path.to_string_lossy()));
 
-        let offset = if downloaded > 0 && part_path.exists() {
+        downloaded = tokio::fs::metadata(&part_path).await.map(|meta| meta.len()).unwrap_or(0);
+        let offset = if downloaded > 0 {
             req = req.header(header::RANGE, format!("bytes={}-", downloaded));
             downloaded
         } else {
@@ -1051,11 +1052,22 @@ async fn download_direct_mp4(
             ));
         }
 
-        if total_bytes.is_none() {
-            if let Some(len) = resp.content_length() {
-                total_bytes = Some(if supports_range { len + offset } else { len });
+        let total_bytes = if supports_range {
+            let range = resp.headers().get(header::CONTENT_RANGE).and_then(|value| value.to_str().ok());
+            let parsed = range.and_then(|value| value.strip_prefix("bytes "))
+                .and_then(|value| value.split_once('/'))
+                .and_then(|(span, total)| {
+                    let (start, end) = span.split_once('-')?;
+                    Some((start.parse::<u64>().ok()?, end.parse::<u64>().ok()?, total.parse::<u64>().ok()?))
+                });
+            match parsed {
+                Some((start, end, total)) if start == offset && end >= start && end < total &&
+                    resp.content_length().map_or(true, |length| length == end - start + 1) => Some(total),
+                _ => return Err(AppError::Download("Content-Range incompatible con el archivo parcial".to_string())),
             }
-        }
+        } else {
+            resp.content_length()
+        };
 
         let mut file = if supports_range && offset > 0 {
             tokio::fs::OpenOptions::new()
@@ -1109,6 +1121,9 @@ async fn download_direct_mp4(
                             file.flush().await.map_err(AppError::Io)?;
                             drop(file);
 
+                            if total_bytes.is_some_and(|total| downloaded != total) {
+                                return Err(AppError::Download("La descarga no contiene todos los bytes esperados".to_string()));
+                            }
                             if downloaded < 10240 {
                                 let _ = tokio::fs::remove_file(&part_path).await;
                                 return Err(AppError::Download(
@@ -1137,11 +1152,12 @@ async fn download_direct_mp4(
                             let chunk_len = chunk.len() as u64;
                             file.write_all(&chunk).await.map_err(AppError::Io)?;
                             downloaded += chunk_len;
+                            received_bytes += chunk_len;
 
                             if last_emit.elapsed().as_millis() >= 300 {
                                 let elapsed = start_time.elapsed().as_secs_f64();
                                 let speed = if elapsed > 0.0 {
-                                    ((downloaded - already_downloaded) as f64 / 1024.0) / elapsed
+                                    (received_bytes as f64 / 1024.0) / elapsed
                                 } else {
                                     0.0
                                 };
@@ -2120,6 +2136,58 @@ pub async fn get_storage_space_info(app_handle: AppHandle) -> Result<StorageSpac
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    async fn resume_fixture(status: u16, range_start: usize) -> (AppResult<PauseReason>, Vec<u8>, String) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let root = std::env::temp_dir().join(format!("anics_resume_{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("video.mp4");
+        let original: Vec<u8> = (0..18000).map(|i| (i % 251) as u8).collect();
+        fs::write(root.join("video.mp4.part"), &original[..8000]).unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/video.mp4", listener.local_addr().unwrap());
+        let source = original.clone();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buffer = [0u8; 4096];
+            let n = socket.read(&mut buffer).await.unwrap();
+            let request = String::from_utf8_lossy(&buffer[..n]).into_owned();
+            let body = if status == 206 { &source[range_start..] } else { &source[..] };
+            let range = if status == 206 { format!("Content-Range: bytes {}-17999/18000\r\n", range_start) } else { String::new() };
+            socket.write_all(format!("HTTP/1.1 {status} OK\r\nContent-Type: video/mp4\r\nContent-Length: {}\r\n{range}Connection: close\r\n\r\n", body.len()).as_bytes()).await.unwrap();
+            let _ = socket.write_all(body).await;
+            request
+        });
+        let (progress, _) = mpsc::unbounded_channel();
+        let (_cancel, mut receiver) = oneshot::channel();
+        let result = download_direct_mp4("test", &url, None, &path, 4000, &progress, &mut receiver).await;
+        let request = server.await.unwrap();
+        let bytes = fs::read(&path).unwrap_or_default();
+        fs::remove_dir_all(root).unwrap();
+        (result, bytes, request)
+    }
+
+    #[tokio::test]
+    async fn resume_uses_disk_offset() {
+        let (result, bytes, request) = resume_fixture(206, 8000).await;
+        assert!(result.is_ok());
+        assert!(request.to_ascii_lowercase().contains("range: bytes=8000-"));
+        assert_eq!(bytes, (0..18000).map(|i| (i % 251) as u8).collect::<Vec<_>>());
+    }
+
+    #[tokio::test]
+    async fn resume_rejects_mismatched_content_range() {
+        let (result, bytes, _) = resume_fixture(206, 6000).await;
+        assert!(result.is_err());
+        assert!(bytes.is_empty());
+    }
+
+    #[tokio::test]
+    async fn resume_restarts_when_range_is_ignored() {
+        let (result, bytes, _) = resume_fixture(200, 0).await;
+        assert!(result.is_ok());
+        assert_eq!(bytes, (0..18000).map(|i| (i % 251) as u8).collect::<Vec<_>>());
+    }
 
     #[test]
     fn test_calculate_dir_size() {
