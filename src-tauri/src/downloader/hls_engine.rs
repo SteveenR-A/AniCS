@@ -3,7 +3,6 @@ use futures::future::join_all;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::{mpsc, Mutex};
 use reqwest::header;
@@ -320,20 +319,48 @@ impl HlsEngine {
             }
         }
 
-        // 3. Ensamblar todos los fragmentos en orden secuencial en el archivo .part final
+        self.assemble_segments(total_segments).await
+    }
+
+    async fn assemble_segments(&self, total_segments: usize) -> AppResult<crate::commands::download_cmd::PauseReason> {
+        let parts_dir = PathBuf::from(format!("{}.hls_parts", self.output_path.to_string_lossy()));
         let part_path = PathBuf::from(format!("{}.part", self.output_path.to_string_lossy()));
-        let mut final_file = File::create(&part_path).await.map_err(AppError::Io)?;
+        let count_path = parts_dir.join("assembled_count");
+
+        let assembled_count: usize = if let Ok(content) = tokio::fs::read_to_string(&count_path).await {
+            content.trim().parse().unwrap_or(0)
+        } else {
+            0
+        };
+
+        let mut final_file = tokio::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&part_path)
+            .await
+            .map_err(AppError::Io)?;
 
         for seg_idx in 0..total_segments {
             let seg_path = parts_dir.join(format!("seg_{:05}.ts", seg_idx));
+            if seg_idx < assembled_count {
+                if tokio::fs::try_exists(&seg_path).await.unwrap_or(false) {
+                    let _ = tokio::fs::remove_file(&seg_path).await;
+                }
+                continue;
+            }
+
             let seg_bytes = tokio::fs::read(&seg_path).await.map_err(AppError::Io)?;
             final_file.write_all(&seg_bytes).await.map_err(AppError::Io)?;
+            final_file.flush().await.map_err(AppError::Io)?;
+
+            let _ = tokio::fs::write(&count_path, (seg_idx + 1).to_string()).await;
+            let _ = tokio::fs::remove_file(&seg_path).await;
         }
 
         final_file.flush().await.map_err(AppError::Io)?;
         drop(final_file);
 
-        let final_bytes = *downloaded_bytes.lock().await;
+        let final_bytes = tokio::fs::metadata(&part_path).await.map_err(AppError::Io)?.len();
         if final_bytes < 10240 {
             let _ = tokio::fs::remove_file(&part_path).await;
             return Err(AppError::Download(
@@ -350,7 +377,7 @@ impl HlsEngine {
         // Limpiar la carpeta temporal de fragmentos solo al completarse el 100%
         let _ = tokio::fs::remove_dir_all(&parts_dir).await;
 
-        Ok(PauseReason::Completed)
+        Ok(crate::commands::download_cmd::PauseReason::Completed)
     }
 
     async fn fetch_url(&self, url: &str) -> AppResult<String> {
@@ -420,6 +447,29 @@ impl HlsEngine {
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod assembly_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn assembly_reclaims_segments_and_resumes_after_failure() {
+        let root = std::env::temp_dir().join(format!("anics_hls_{}", uuid::Uuid::new_v4()));
+        let output = root.join("video.mp4");
+        let parts = root.join("video.mp4.hls_parts");
+        tokio::fs::create_dir_all(&parts).await.unwrap();
+        tokio::fs::write(parts.join("seg_00000.ts"), vec![1u8; 12000]).await.unwrap();
+        let (tx, _) = mpsc::unbounded_channel();
+        let engine = HlsEngine::new("test", "https://example.com/video.m3u8", None, output.clone(), tx);
+        assert!(engine.assemble_segments(2).await.is_err());
+        assert!(!parts.join("seg_00000.ts").exists(), "Confirmed segments must release disk space");
+        tokio::fs::write(parts.join("seg_00001.ts"), vec![2u8; 12000]).await.unwrap();
+        assert!(engine.assemble_segments(2).await.is_ok());
+        let expected: Vec<_> = vec![1u8; 12000].into_iter().chain(vec![2u8; 12000]).collect();
+        assert_eq!(tokio::fs::read(output).await.unwrap(), expected);
+        tokio::fs::remove_dir_all(root).await.unwrap();
+    }
+}
 
 /// Sanitiza URLs de CDN con problemas conocidos de timeout (ej: cdn2/cdn5 de ducvomes a cdn1)
 fn sanitize_segment_url(url: &str) -> String {
