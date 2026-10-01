@@ -15,6 +15,21 @@ const UNSUPPORTED_DOMAINS = [
   'fembed',
   'movearnpre',
   'dhcplay',
+  'streamwish',
+  'sfastwish',
+  'embedwish',
+  'swish',
+  'mp4upload',
+  'voe.sx',
+  'voe',
+  'mixdrop',
+  'streamtape',
+  'doodstream',
+  'dooodster',
+  'd-s.io',
+  'filemoon',
+  'bysesukior',
+  'bysekoze',
 ];
 
 /**
@@ -36,19 +51,13 @@ export function getServerPriority(server: VideoServer): number {
   if (name.includes('magi')) return 100;
   if (name.includes('desu') && !name.includes('desuka')) return 95;
 
-  // 2. Servidores HLS principales y streams directos
-  if (name.includes('asura') || url.includes('redirector.php') || url.includes('.m3u8') || name.includes('m3u8')) return 90;
-  if (name.includes('uqload') || url.includes('uqload')) return 88;
-  if (name.includes('lulustream') || url.includes('luluvdo')) return 85;
-  if (name.includes('mp4upload') || url.includes('mp4upload')) return 82;
-  if (name.includes('mediafire') || url.includes('mediafire')) return 75;
+  // 2. Servidores HLS y MP4 verificados de alta velocidad y estabilidad
+  if (name.includes('mediafire') || url.includes('mediafire')) return 90;
+  if (name.includes('vidhide') || url.includes('vidhide')) return 88;
+  if (name.includes('asura') || url.includes('redirector.php') || url.includes('.m3u8') || name.includes('m3u8')) return 85;
+  if (name.includes('uqload') || url.includes('uqload')) return 82;
+  if (name.includes('lulustream') || url.includes('luluvdo')) return 80;
   if (server.isDirect || url.endsWith('.mp4')) return 70;
-
-  // 3. Otros servidores de streaming conocidos
-  if (name.includes('voe') || url.includes('voe.sx')) return 65;
-  if (name.includes('streamwish') || url.includes('streamwish') || url.includes('swish')) return 60;
-  if (name.includes('filemoon') || url.includes('filemoon') || url.includes('fmoon') || url.includes('bysesukior')) return 50;
-  if (name.includes('vidhide') || url.includes('vidhide')) return 30;
 
   return 10;
 }

@@ -1516,12 +1516,18 @@ export function PlayerPage() {
       {/* Loading Stream Overlay */}
       {isResolving && (
         <div style={{
-          position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(8px)',
+          position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(8px)',
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-          gap: 12, zIndex: 15, pointerEvents: 'none',
+          gap: 12, zIndex: 25, pointerEvents: 'none',
         }}>
-          <Loader2 size={36} className="animate-spin" color="var(--accent-primary)" />
-          <span style={{ color: 'white', fontSize: 13, fontWeight: 600 }}>Cargando servidor...</span>
+          <div style={{
+            width: isMobile ? 64 : 76, height: isMobile ? 64 : 76, borderRadius: '50%',
+            background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <Loader2 size={32} className="animate-spin" color="var(--accent-primary)" />
+          </div>
+          <span style={{ color: 'white', fontSize: 13, fontWeight: 600, letterSpacing: '0.01em' }}>Cargando servidor...</span>
         </div>
       )}
 
@@ -1535,7 +1541,8 @@ export function PlayerPage() {
         style={{
           position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)',
           width: isMobile ? 72 : 88, height: isMobile ? 72 : 88, borderRadius: '50%',
-          display: activeDrawer === 'none' ? 'flex' : 'none', alignItems: 'center', justifyContent: 'center',
+          display: activeDrawer === 'none' && !isResolving && !isLoadingInitial ? 'flex' : 'none',
+          alignItems: 'center', justifyContent: 'center',
           color: 'white', background: 'rgba(0,0,0,.45)', border: '1px solid rgba(255,255,255,.35)',
           zIndex: 21, cursor: 'pointer', opacity: showControls ? 1 : 0, transition: 'opacity .2s',
           touchAction: 'manipulation',

@@ -57,14 +57,14 @@ describe('serverUtils', () => {
         { name: 'Magi', url: 'https://magi.example.com/hls/1', isDirect: false },
         { name: 'Desu', url: 'https://desu.example.com/hls/2', isDirect: false },
         { name: 'Mediafire', url: 'https://download.example.com/file.mp4', isDirect: false },
-        { name: 'Streamwish', url: 'https://streamwish.to/e/123', isDirect: false },
+        { name: 'Vidhide', url: 'https://vidhide.com/v/123', isDirect: false },
       ];
 
       const result = maskAndFilterServers(input, false);
       expect(result[0].name).toBe('Magi');
       expect(result[1].name).toBe('Desu');
       expect(result[2].name).toBe('Mediafire');
-      expect(result[3].name).toBe('Streamwish');
+      expect(result[3].name).toBe('Vidhide');
     });
 
     it('masks known server types with clean professional names when forceMask is true', () => {
@@ -73,8 +73,6 @@ describe('serverUtils', () => {
         { name: 'Desu', url: 'https://desu.example.com/hls/2', isDirect: false },
         { name: 'Asura M3U8', url: 'https://redirector.php?url=abc', isDirect: false },
         { name: 'Mediafire', url: 'https://download.example.com/file.mp4', isDirect: false },
-        { name: 'Voe', url: 'https://voe.sx/e/123', isDirect: false },
-        { name: 'Streamwish', url: 'https://streamwish.to/e/123', isDirect: false },
         { name: 'Vidhide', url: 'https://vidhide.com/v/123', isDirect: false },
         { name: 'Other CDN', url: 'https://othercdn.com/stream', isDirect: false },
       ];
@@ -82,12 +80,10 @@ describe('serverUtils', () => {
       const result = maskAndFilterServers(input, true);
       expect(result[0].name).toBe('Servidor Dedicado VIP (1080p Ultra HD)');
       expect(result[1].name).toBe('Servidor Alta Velocidad (1080p)');
-      expect(result[2].name).toBe('Servidor Principal HLS (1080p)');
-      expect(result[3].name).toBe('Servidor Espejo (MP4 Directo)');
-      expect(result[4].name).toBe('Servidor Rápido (720p HD)');
-      expect(result[5].name).toBe('Servidor Alternativo CDN');
-      expect(result[6].name).toBe('Servidor Respaldo CDN');
-      expect(result[7].name).toBe('Servidor CDN 1');
+      expect(result[2].name).toBe('Servidor Espejo (MP4 Directo)');
+      expect(result[3].name).toBe('Servidor Respaldo CDN');
+      expect(result[4].name).toBe('Servidor Principal HLS (1080p)');
+      expect(result[5].name).toBe('Servidor CDN 1');
     });
 
     it('discards entries with no URL', () => {
