@@ -474,7 +474,7 @@ export function MobileSearchPage() {
       }}>
         {[
           { id: 'jkanime', label: 'JKAnime' },
-          { id: 'animejl', label: 'Anime-JL' },
+          { id: 'otakustv', label: 'OtakusTV' },
           { id: 'mundodonghua', label: 'Donghua' },
         ].map((src) => (
           <button

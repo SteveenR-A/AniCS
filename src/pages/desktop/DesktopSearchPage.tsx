@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { useAnimeStore } from '@/stores/useAnimeStore';
 import { advancedSearch } from '@/services/animeService';
+import { useLatestRequest } from '@/hooks/useLatestRequest';
 import { CachedImage } from '@/components/CachedImage';
 import { PaginationBar } from '@/components/PaginationBar';
 import type { AnimeResult, SearchFilters } from '@/types';
@@ -99,6 +100,7 @@ const CURRENT_YEAR = new Date().getFullYear();
 const AVAILABLE_YEARS = Array.from({ length: CURRENT_YEAR - 1980 + 1 }, (_, i) => String(CURRENT_YEAR - i));
 
 export function DesktopSearchPage() {
+  const { start: startRequest, cancel: cancelSearch } = useLatestRequest();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const {
@@ -177,6 +179,7 @@ export function DesktopSearchPage() {
     page: number = 1
   ) => {
     const currentSource = activeSource;
+    const request = startRequest();
     setIsSearching(true);
 
     try {
@@ -192,7 +195,7 @@ export function DesktopSearchPage() {
 
       const res = await advancedSearch(filters, currentSource);
 
-      if (useAnimeStore.getState().activeSource !== currentSource) {
+      if (!request.isLatest() || useAnimeStore.getState().activeSource !== currentSource) {
         return;
       }
 
@@ -220,6 +223,7 @@ export function DesktopSearchPage() {
         addRecentSearch(q.trim());
       }
     } catch (e) {
+      if (!request.isLatest()) return;
       console.error('Search execution failed', e);
       if (useAnimeStore.getState().activeSource === currentSource) {
         setSearchResults([], q, currentSource);
@@ -227,11 +231,11 @@ export function DesktopSearchPage() {
         setHasNextPage(false);
       }
     } finally {
-      if (useAnimeStore.getState().activeSource === currentSource) {
+      if (request.isLatest() && useAnimeStore.getState().activeSource === currentSource) {
         setIsSearching(false);
       }
     }
-  }, [activeSource, setSearchResults, setIsSearching, saveSearchSession, addRecentSearch]);
+  }, [activeSource, setSearchResults, setIsSearching, saveSearchSession, addRecentSearch, startRequest]);
 
   const lastExecutedKey = useRef<string>('');
 
@@ -417,7 +421,7 @@ export function DesktopSearchPage() {
         }}>
           {[
             { id: 'jkanime', label: 'JKAnime' },
-            { id: 'animejl', label: 'Anime-JL' },
+            { id: 'otakustv', label: 'OtakusTV' },
             { id: 'mundodonghua', label: 'Donghua' },
           ].map((src) => (
             <button
