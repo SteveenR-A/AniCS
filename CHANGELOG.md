@@ -5,6 +5,19 @@ El formato está basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1
 
 ---
 
+## [0.2.11] - 2026-10-01
+
+### Estabilidad de Streaming, Auditoría de Seguridad y Optimización de Rendimiento
+- Autenticación por token de sesión local en servidor de medios HTTP
+- Reanudación y pausa segura de descargas sin duplicación de espacio en disco
+- Resolución de condiciones de carrera en reproductor y búsqueda
+- Fusión bidireccional y preservación de lápidas en sincronización Gist
+- Code-splitting por plataforma y reducción del bundle inicial en más del 70%
+- Soporte para extracción directa de Vidhide y filtrado de servidores no reproducibles
+- Corrección visual del botón de reproducción superpuesto durante la carga de video
+
+---
+
 ## [0.2.10] - 2026-09-29
 
 ### Reproductor, portadas y transmisión en Android

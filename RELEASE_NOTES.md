@@ -1,23 +1,16 @@
-# AniCS v0.2.10 — Reproductor, portadas y transmisión en Android
+# AniCS v0.2.11 — Estabilidad de Streaming, Auditoría de Seguridad y Optimización de Rendimiento
 
-**Fecha de lanzamiento:** 2026-09-29
+**Fecha de lanzamiento:** 2026-10-01
 
 ### Novedades y correcciones
 
-- Botón central de reproducir y pausar con un solo clic o toque, manteniendo el ocultamiento automático de controles.
-- Selector de servidores de video personalizados en PC y Android, con cambio de fuente conservando la posición exacta y el estado de reproducción.
-- Catálogos personalizados visibles y actualizados en los menús de navegación después de guardarlos.
-- Portadas verticales en el historial de PC y Android para mostrar mejor las imágenes de cada anime.
-- Soporte inicial de Google Cast en Android con selector nativo y controles de reproducción en televisores compatibles.
-- Transmisión DLNA/UPnP en Android, con soporte para videos locales mediante servidor de red con solicitudes HTTP Range.
-- Icono de transmisión oculto en PC, incluido el diseño de ventana pequeña.
-- Publicación en GitHub Actions con validación previa de versiones y limpieza automática de artefactos temporales después del release.
-
-### Compatibilidad de transmisión
-
-- La opción de transmitir a TV está disponible en Android.
-- Google Cast requiere un enlace de video compatible y accesible desde el televisor. Los enlaces que necesitan cookies o cabeceras del sitio pueden fallar.
-- Los videos descargados se pueden enviar a televisores que ofrezcan DLNA/UPnP. El envío de archivos locales mediante Google Cast queda pendiente.
+- Autenticación por token de sesión local en servidor de medios HTTP
+- Reanudación y pausa segura de descargas sin duplicación de espacio en disco
+- Resolución de condiciones de carrera en reproductor y búsqueda
+- Fusión bidireccional y preservación de lápidas en sincronización Gist
+- Code-splitting por plataforma y reducción del bundle inicial en más del 70%
+- Soporte para extracción directa de Vidhide y filtrado de servidores no reproducibles
+- Corrección visual del botón de reproducción superpuesto durante la carga de video
 
 ---
 *Para ver el historial acumulativo completo de todas las versiones, consulta [CHANGELOG.md](./CHANGELOG.md).*

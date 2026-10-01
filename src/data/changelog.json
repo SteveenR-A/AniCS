@@ -1,5 +1,20 @@
 [
   {
+    "version": "0.2.11",
+    "date": "2026-10-01",
+    "title": "Estabilidad de Streaming, Auditoría de Seguridad y Optimización de Rendimiento",
+    "type": "patch",
+    "highlights": [
+      "Autenticación por token de sesión local en servidor de medios HTTP",
+      "Reanudación y pausa segura de descargas sin duplicación de espacio en disco",
+      "Resolución de condiciones de carrera en reproductor y búsqueda",
+      "Fusión bidireccional y preservación de lápidas en sincronización Gist",
+      "Code-splitting por plataforma y reducción del bundle inicial en más del 70%",
+      "Soporte para extracción directa de Vidhide y filtrado de servidores no reproducibles",
+      "Corrección visual del botón de reproducción superpuesto durante la carga de video"
+    ]
+  },
+  {
     "version": "0.2.10",
     "date": "2026-09-29",
     "title": "Reproductor, portadas y transmisión en Android",
