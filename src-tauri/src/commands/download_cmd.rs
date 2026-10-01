@@ -27,6 +27,7 @@ pub struct DownloadManager {
     pub tasks: DownloadMap,
     pub active_slots: Arc<AtomicUsize>,
     pub slot_notify: Arc<Notify>,
+    operation_locks: Mutex<HashMap<String, std::sync::Weak<Mutex<()>>>>,
 }
 
 impl DownloadManager {
@@ -35,7 +36,24 @@ impl DownloadManager {
             tasks: Arc::new(Mutex::new(HashMap::new())),
             active_slots: Arc::new(AtomicUsize::new(0)),
             slot_notify: Arc::new(Notify::new()),
+            operation_locks: Mutex::new(HashMap::new()),
         }
+    }
+
+    async fn lock_task(&self, id: &str) -> tokio::sync::OwnedMutexGuard<()> {
+        let lock = {
+            let mut locks = self.operation_locks.lock().await;
+            locks.retain(|_, lock| lock.strong_count() > 0);
+            match locks.get(id).and_then(|lock| lock.upgrade()) {
+                Some(lock) => lock,
+                None => {
+                    let lock = Arc::new(Mutex::new(()));
+                    locks.insert(id.to_string(), Arc::downgrade(&lock));
+                    lock
+                }
+            }
+        };
+        lock.lock_owned().await
     }
 }
 
@@ -329,7 +347,7 @@ fn spawn_download(
     let dl_id_cleanup = download_id.clone();
 
     // Reenviar eventos de progreso hacia Tauri Event y actualizar DB periódicamente
-    tokio::spawn(async move {
+    let progress_forwarder = tokio::spawn(async move {
         let mut last_db_update = std::time::Instant::now();
         while let Some(progress) = progress_rx.recv().await {
             let _ = app_handle_clone.emit("download-progress", &progress);
@@ -391,6 +409,8 @@ fn spawn_download(
                     None,
                 );
                 let _ = app_handle_finish.emit("download-paused", serde_json::json!({ "id": dl_id_task }));
+                drop(progress_tx);
+                let _ = progress_forwarder.await;
                 tasks_map.lock().await.remove(&dl_id_cleanup);
                 return;
             }
@@ -542,6 +562,8 @@ fn spawn_download(
             }
         }
 
+        drop(progress_tx);
+        let _ = progress_forwarder.await;
         tasks_map.lock().await.remove(&dl_id_cleanup);
     })
 }
@@ -737,14 +759,20 @@ pub async fn pause_download(
     download_id: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let mut tasks = state.download_manager.tasks.lock().await;
-    if let Some(handle) = tasks.remove(&download_id) {
+    pause_download_task(&state.download_manager, &download_id).await;
+    Ok(())
+}
+
+async fn pause_download_task(manager: &DownloadManager, download_id: &str) {
+    let _operation = manager.lock_task(download_id).await;
+    let handle = manager.tasks.lock().await.remove(download_id);
+    if let Some(handle) = handle {
         let _ = handle.cancel_tx.send(());
+        let _ = handle.task.await;
     } else {
         // Si no estaba en el mapa de tareas en memoria, actualizar directamente en SQLite
         let _ = storage::update_download_progress_db(&download_id, "paused", 0.0, 0, None, None);
     }
-    Ok(())
 }
 
 /// Pausar todas las descargas activas (e.g. al salir del foco de la app)
@@ -752,11 +780,10 @@ pub async fn pause_download(
 pub async fn pause_all_downloads(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let mut tasks = state.download_manager.tasks.lock().await;
-    for (_id, handle) in tasks.drain() {
-        let _ = handle.cancel_tx.send(());
+    let ids: Vec<_> = state.download_manager.tasks.lock().await.keys().cloned().collect();
+    for id in ids {
+        pause_download_task(&state.download_manager, &id).await;
     }
-    drop(tasks);
     let _ = storage::mark_active_downloads_as_paused_db();
     Ok(())
 }
@@ -768,6 +795,7 @@ pub async fn resume_download(
     app_handle: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    let _operation = state.download_manager.lock_task(&download_id).await;
     let all = storage::get_all_downloads_db().map_err(|e| e.to_string())?;
     let task_record = all.into_iter()
         .find(|t| t.id == download_id)
@@ -807,6 +835,8 @@ pub async fn retry_download(
     app_handle: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    let _operation = state.download_manager.lock_task(&download_id).await;
+    if state.download_manager.tasks.lock().await.contains_key(&download_id) { return Ok(()); }
     let all = storage::get_all_downloads_db().map_err(|e| e.to_string())?;
     let task_record = all.into_iter()
         .find(|t| t.id == download_id)
@@ -852,6 +882,7 @@ pub async fn cancel_download(
     app_handle: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    let _operation = state.download_manager.lock_task(&download_id).await;
     // 1. Obtener registro de la tarea antes de eliminarla para conocer rutas
     let task_opt = storage::get_all_downloads_db().ok().and_then(|all| {
         all.into_iter().find(|t| t.id == download_id)
@@ -865,7 +896,7 @@ pub async fn cancel_download(
 
     if let Some(handle) = handle_opt {
         let _ = handle.cancel_tx.send(());
-        let _ = tokio::time::timeout(std::time::Duration::from_millis(1500), handle.task).await;
+        let _ = handle.task.await;
     }
 
     // 3. Limpiar archivos parciales o corruptos en disco
@@ -914,6 +945,7 @@ pub async fn delete_download_record(
     app_handle: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    let _operation = state.download_manager.lock_task(&download_id).await;
     let task_opt = storage::get_all_downloads_db().ok().and_then(|all| {
         all.into_iter().find(|t| t.id == download_id)
     });
@@ -925,7 +957,7 @@ pub async fn delete_download_record(
 
     if let Some(handle) = handle_opt {
         let _ = handle.cancel_tx.send(());
-        let _ = tokio::time::timeout(std::time::Duration::from_millis(1500), handle.task).await;
+        let _ = handle.task.await;
     }
 
     if let Some(ref task) = task_opt {
@@ -2136,6 +2168,22 @@ pub async fn get_storage_space_info(app_handle: AppHandle) -> Result<StorageSpac
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn pause_waits_for_worker_before_returning() {
+        let manager = DownloadManager::new();
+        let (cancel_tx, cancel_rx) = oneshot::channel();
+        let stopped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let worker_stopped = stopped.clone();
+        let task = tokio::spawn(async move {
+            let _ = cancel_rx.await;
+            tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+            worker_stopped.store(true, Ordering::Release);
+        });
+        manager.tasks.lock().await.insert("test".to_string(), DownloadHandle { task, cancel_tx });
+        pause_download_task(&manager, "test").await;
+        assert!(stopped.load(Ordering::Acquire), "A resumed worker could still race the previous writer");
+    }
 
     async fn resume_fixture(status: u16, range_start: usize) -> (AppResult<PauseReason>, Vec<u8>, String) {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
