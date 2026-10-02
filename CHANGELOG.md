@@ -5,6 +5,15 @@ El formato está basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1
 
 ---
 
+## [0.3.1] - 2026-10-02
+
+### Mejoras de paridad nativa y correcciones
+- Paridad completa en la versión nativa de Android (temas, búsqueda con filtros, descargas locales y servidor HTTP de streaming)
+- Soporte de importación de respaldos Room y lápidas tombstones para sincronización
+- Correcciones en scrapers de catálogo y optimización de ciclo de vida del reproductor
+
+---
+
 ## [0.3.0] - 2026-10-02
 
 ### Arquitectura Multiplataforma y Núcleo Rust Desacoplado

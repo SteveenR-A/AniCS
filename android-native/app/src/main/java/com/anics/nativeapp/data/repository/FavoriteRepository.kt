@@ -3,8 +3,12 @@ package com.anics.nativeapp.data.repository
 import com.anics.nativeapp.data.local.FavoriteDao
 import com.anics.nativeapp.data.local.FavoriteEntity
 import kotlinx.coroutines.flow.Flow
+import androidx.room.withTransaction
+import com.anics.nativeapp.data.local.TombstoneEntity
+import kotlinx.serialization.json.*
 
-class FavoriteRepository(private val favoriteDao: FavoriteDao) {
+class FavoriteRepository(private val database: com.anics.nativeapp.data.local.AppDatabase) {
+    private val favoriteDao = database.favoriteDao()
 
     fun getFavoritesForProfile(profileId: String): Flow<List<FavoriteEntity>> {
         return favoriteDao.getFavoritesForProfile(profileId)
@@ -23,7 +27,7 @@ class FavoriteRepository(private val favoriteDao: FavoriteDao) {
     ): Boolean {
         val current = favoriteDao.isFavorite(profileId, url)
         return if (current) {
-            favoriteDao.deleteFavorite(profileId, url)
+            removeFavorite(profileId, url)
             false
         } else {
             favoriteDao.upsert(
@@ -41,6 +45,10 @@ class FavoriteRepository(private val favoriteDao: FavoriteDao) {
     }
 
     suspend fun removeFavorite(profileId: String, animeUrl: String) {
-        favoriteDao.deleteFavorite(profileId, animeUrl)
+        database.withTransaction {
+            val payload = buildJsonObject { put("url", animeUrl); put("profileId", profileId); put("deletedAt", com.anics.nativeapp.sync.SyncContract.iso(System.currentTimeMillis())) }
+            database.tombstoneDao().upsert(TombstoneEntity("favorite:$profileId:$animeUrl", "deletedFavorites", payload.toString()))
+            favoriteDao.deleteFavorite(profileId, animeUrl)
+        }
     }
 }

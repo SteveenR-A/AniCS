@@ -22,7 +22,11 @@ data class HistoryEntity(
     val progressSeconds: Long = 0L,
     val durationSeconds: Long = 0L,
     val completed: Boolean = false,
-    val lastWatchedAt: Long = System.currentTimeMillis()
+    val lastWatchedAt: Long = System.currentTimeMillis(),
+    @androidx.room.ColumnInfo(defaultValue = "''")
+    val cloudJson: String = "",
+    @androidx.room.ColumnInfo(defaultValue = "NULL")
+    val watchProgress: Double? = null
 ) {
     constructor(
         profileId: String,
@@ -54,6 +58,9 @@ data class HistoryEntity(
 
 @Dao
 interface HistoryDao {
+    @Query("DELETE FROM history")
+    suspend fun deleteAll()
+
     @Query("SELECT * FROM history WHERE profileId = :profileId ORDER BY lastWatchedAt DESC")
     fun getHistoryForProfile(profileId: String): Flow<List<HistoryEntity>>
 

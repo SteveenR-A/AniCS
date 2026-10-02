@@ -17,7 +17,9 @@ data class FavoriteEntity(
     val url: String,
     val thumbnailUrl: String = "",
     val source: String = "jkanime",
-    val addedAt: Long = System.currentTimeMillis()
+    val addedAt: Long = System.currentTimeMillis(),
+    @androidx.room.ColumnInfo(defaultValue = "''")
+    val cloudJson: String = ""
 ) {
     constructor(
         profileId: String,
@@ -39,6 +41,9 @@ data class FavoriteEntity(
 
 @Dao
 interface FavoriteDao {
+    @Query("DELETE FROM favorites")
+    suspend fun deleteAll()
+
     @Query("SELECT * FROM favorites WHERE profileId = :profileId ORDER BY addedAt DESC")
     fun getFavoritesForProfile(profileId: String): Flow<List<FavoriteEntity>>
 

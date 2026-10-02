@@ -416,7 +416,7 @@ impl AnimeExtractor for JKAnimeExtractor {
         let q_trimmed = filters.query.as_deref().unwrap_or("").trim();
 
         // Si hay una búsqueda por texto directo (nombre del anime) sin filtros adicionales
-        if !q_trimmed.is_empty() && active_genre.is_none() && filters.status.is_none() && filters.anime_type.is_none() {
+        if !q_trimmed.is_empty() && active_genre.is_none() && filters.status.is_none() && filters.anime_type.is_none() && filters.year.is_none() && filters.order_by.is_none() {
             let search_results = self.search(q_trimmed).await.unwrap_or_default();
             if !search_results.is_empty() {
                 return Ok(SearchResultPage {

@@ -53,11 +53,11 @@ class DetailsViewModel(
 
                 // Enriquecer episodios con progreso del historial local
                 val enrichedEpisodes = details.episodes.map { ep ->
-                    val historyItem = historyRepository.getHistoryItem(activeProfile.id, ep.url)
+                    val historyItem = historyRepository.getHistoryItem(activeProfile.id, ep.url) ?: historyRepository.getEpisodeProgress(activeProfile.id, details.title, ep.number.toInt())
                     if (historyItem != null) {
                         ep.copy(
                             watched = historyItem.completed,
-                            watchProgress = if (historyItem.durationSeconds > 0) {
+                            watchProgress = historyItem.watchProgress ?: if (historyItem.durationSeconds > 0) {
                                 historyItem.progressSeconds.toDouble() / historyItem.durationSeconds.toDouble()
                             } else null
                         )
@@ -80,6 +80,8 @@ class DetailsViewModel(
             }
         }
     }
+
+    fun reportError(message: String) { _uiState.value = _uiState.value.copy(error = message) }
 
     fun toggleFavorite() {
         val details = _uiState.value.details ?: return

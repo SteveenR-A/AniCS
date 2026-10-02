@@ -1,6 +1,11 @@
 package com.anics.nativeapp.player
 
 import androidx.annotation.OptIn
+import androidx.activity.compose.BackHandler
+import kotlinx.coroutines.delay
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -31,6 +36,8 @@ fun PlayerScreen(
     episodeText: String,
     controller: PlayerController,
     onBack: () -> Unit,
+    onProgress: (Long, Long) -> Unit = { _, _ -> },
+    onEnded: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -39,8 +46,31 @@ fun PlayerScreen(
 
     val exoPlayer = remember { controller.initializePlayer() }
 
-    DisposableEffect(Unit) {
+    val progressCallback by rememberUpdatedState(onProgress)
+    val lifecycleOwner = LocalLifecycleOwner.current
+    BackHandler(onBack = onBack)
+    LaunchedEffect(playbackState.ended) { if (playbackState.ended) onEnded() }
+    LaunchedEffect(title, episodeText) {
+        var ticks = 0
+        while (true) {
+            val (position, duration) = controller.updatePosition()
+            if (++ticks % 40 == 0 && duration > 0) progressCallback(position, duration)
+            delay(250)
+        }
+    }
+    DisposableEffect(lifecycleOwner, controller) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) {
+                val (position, duration) = controller.updatePosition()
+                if (duration > 0) progressCallback(position, duration)
+                controller.pause()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
+            val (position, duration) = controller.updatePosition()
+            if (duration > 0) progressCallback(position, duration)
+            lifecycleOwner.lifecycle.removeObserver(observer)
             controller.resetPlayback()
         }
     }
@@ -91,6 +121,8 @@ fun PlayerScreen(
                 modifier = Modifier.align(Alignment.Center)
             )
         }
+
+        playbackState.error?.let { Text(it, color = Color.White, modifier = Modifier.align(Alignment.Center).padding(24.dp)) }
 
         // HUD Controls Overlay
         AnimatedVisibility(

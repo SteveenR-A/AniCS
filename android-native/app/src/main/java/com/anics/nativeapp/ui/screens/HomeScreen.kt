@@ -1,6 +1,10 @@
 package com.anics.nativeapp.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -11,7 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -26,10 +30,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.anics.nativeapp.ffi.NativeAnimeResult
-import com.anics.nativeapp.ui.theme.DarkSurface
-import com.anics.nativeapp.ui.theme.DarkSurfaceVariant
-import com.anics.nativeapp.ui.theme.TextMuted
-import com.anics.nativeapp.ui.theme.TextSecondary
 import com.anics.nativeapp.ui.viewmodels.HomeViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -58,14 +58,14 @@ fun HomeScreen(
                         Icon(
                             imageVector = Icons.Default.Search,
                             contentDescription = "Buscar",
-                            tint = Color.White
+                            tint = MaterialTheme.colorScheme.onSurface
                         )
                     }
                     IconButton(onClick = { viewModel.refresh() }) {
                         Icon(
                             imageVector = Icons.Default.Refresh,
                             contentDescription = "Actualizar",
-                            tint = Color.White
+                            tint = MaterialTheme.colorScheme.onSurface
                         )
                     }
                 },
@@ -87,7 +87,7 @@ fun HomeScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                        .horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     uiState.availableSources.forEach { source ->
@@ -98,15 +98,25 @@ fun HomeScreen(
                             label = { Text(source.name) },
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = MaterialTheme.colorScheme.primary,
-                                selectedLabelColor = Color.White,
-                                containerColor = DarkSurfaceVariant,
-                                labelColor = TextSecondary
+                                selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                labelColor = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         )
                     }
                 }
             }
 
+            if (uiState.continueWatching.isNotEmpty()) {
+                Text("Continuar viendo", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 16.dp))
+                LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(uiState.continueWatching) { item ->
+                        Card(onClick = { onAnimeClick(item.animeUrl, item.source) }, modifier = Modifier.width(180.dp).padding(vertical = 8.dp)) {
+                            Column(Modifier.padding(12.dp)) { Text(item.animeTitle, maxLines = 1, overflow = TextOverflow.Ellipsis); Text("Episodio " + item.episodeNumber, style = MaterialTheme.typography.bodySmall) }
+                        }
+                    }
+                }
+            }
             // Main Content Area
             when {
                 uiState.isLoading -> {
@@ -146,7 +156,7 @@ fun HomeScreen(
                     ) {
                         Text(
                             text = "No hay animes disponibles en esta fuente",
-                            color = TextMuted,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodyMedium
                         )
                     }
@@ -184,7 +194,7 @@ fun AnimeCard(
             .fillMaxWidth()
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = DarkSurface)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column {
             Box(
@@ -222,7 +232,7 @@ fun AnimeCard(
                     ) {
                         Text(
                             text = "Ep. $ep",
-                            color = Color.White,
+                            color = MaterialTheme.colorScheme.onSurface,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
@@ -234,7 +244,7 @@ fun AnimeCard(
             Column(modifier = Modifier.padding(10.dp)) {
                 Text(
                     text = anime.title,
-                    color = Color.White,
+                    color = MaterialTheme.colorScheme.onSurface,
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 14.sp,
                     maxLines = 2,
@@ -248,7 +258,7 @@ fun AnimeCard(
                 ) {
                     Text(
                         text = anime.source.uppercase(),
-                        color = TextMuted,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Medium
                     )

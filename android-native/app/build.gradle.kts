@@ -6,6 +6,13 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+val releaseVersion = (groovy.json.JsonSlurper().parse(rootProject.file("../package.json")) as Map<*, *>)["version"] as String
+val versionParts = releaseVersion.split('.').map { it.toInt() }
+val firebaseEnv = rootProject.file("../.env.local").takeIf { it.exists() }?.readLines()
+    ?.filter { it.startsWith("VITE_") && it.contains('=') }
+    ?.associate { it.substringBefore('=') to it.substringAfter('=').trim().trim('"', '\'') } ?: emptyMap()
+fun firebaseValue(key: String) = "\"" + (System.getenv(key) ?: firebaseEnv[key] ?: "").replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+
 android {
     namespace = "com.anics.nativeapp"
     compileSdk = 34
@@ -14,8 +21,13 @@ android {
         applicationId = "com.anics.app.preview"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.3.0-preview"
+        versionCode = versionParts[0] * 1_000_000 + versionParts[1] * 1_000 + versionParts[2]
+        versionName = "$releaseVersion-preview"
+        buildConfigField("boolean", "ENABLE_FIREBASE_AUTH", "false")
+        buildConfigField("String", "FIREBASE_API_KEY", firebaseValue("VITE_FIREBASE_API_KEY"))
+        buildConfigField("String", "FIREBASE_PROJECT_ID", firebaseValue("VITE_FIREBASE_PROJECT_ID"))
+        buildConfigField("String", "FIREBASE_APP_ID", firebaseValue("VITE_FIREBASE_APP_ID"))
+        buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", firebaseValue("VITE_GOOGLE_WEB_CLIENT_ID"))
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -27,8 +39,20 @@ android {
         }
     }
 
+    signingConfigs {
+        val nativeKeystore = System.getenv("ANICS_NATIVE_KEYSTORE")
+        if (!nativeKeystore.isNullOrBlank()) {
+            create("nativeRelease") {
+                storeFile = file(nativeKeystore)
+                storePassword = System.getenv("ANICS_NATIVE_STORE_PASSWORD")
+                keyAlias = System.getenv("ANICS_NATIVE_KEY_ALIAS")
+                keyPassword = System.getenv("ANICS_NATIVE_KEY_PASSWORD")
+            }
+        }
+    }
     buildTypes {
         release {
+            signingConfig = signingConfigs.findByName("nativeRelease")
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -51,6 +75,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     packaging {
@@ -63,6 +88,9 @@ android {
     }
 
     sourceSets {
+        getByName("test") {
+            resources.srcDir(rootProject.file("../docs/android-native/fixtures"))
+        }
         getByName("main") {
             jniLibs.srcDirs("src/main/jniLibs")
         }
@@ -100,6 +128,13 @@ dependencies {
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
+    implementation(platform("com.google.firebase:firebase-bom:33.5.1"))
+    implementation("com.google.firebase:firebase-auth")
+    implementation("com.google.firebase:firebase-firestore")
+    implementation("androidx.credentials:credentials:1.3.0")
+    implementation("androidx.credentials:credentials-play-services-auth:1.3.0")
+    implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
 
     // Image Loading
     implementation(libs.coil.compose)

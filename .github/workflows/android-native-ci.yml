@@ -79,9 +79,21 @@ jobs:
           echo "ndk.dir=$ANDROID_NDK_ROOT" >> android-native/local.properties
 
       - name: Build Android Native APK
+        env:
+          ANICS_NATIVE_KEYSTORE_BASE64: ${{ secrets.ANICS_NATIVE_KEYSTORE_BASE64 }}
+          ANICS_NATIVE_STORE_PASSWORD: ${{ secrets.ANICS_NATIVE_STORE_PASSWORD }}
+          ANICS_NATIVE_KEY_ALIAS: ${{ secrets.ANICS_NATIVE_KEY_ALIAS }}
+          ANICS_NATIVE_KEY_PASSWORD: ${{ secrets.ANICS_NATIVE_KEY_PASSWORD }}
         run: |
           cd android-native
-          gradle assembleDebug --no-daemon --stacktrace
+          gradle testDebugUnitTest --no-daemon --stacktrace
+          if [ -n "$ANICS_NATIVE_KEYSTORE_BASE64" ]; then
+            printf '%s' "$ANICS_NATIVE_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/anics-native.jks"
+            export ANICS_NATIVE_KEYSTORE="$RUNNER_TEMP/anics-native.jks"
+            gradle assembleRelease --no-daemon --stacktrace
+          else
+            gradle assembleDebug --no-daemon --stacktrace
+          fi
 
       - name: Prepare and Rename Artifact
         run: |

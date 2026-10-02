@@ -6,7 +6,9 @@
     or building the host platform library for desktop testing.
 #>
 param(
-    [string]$Target = "all", # "aarch64", "x86_64", "host", or "all"
+    [ValidateSet("aarch64", "x86_64", "host", "all")]
+    [string]$Target = "all",
+    [ValidateSet("release", "debug")]
     [string]$Configuration = "release"
 )
 
@@ -21,7 +23,6 @@ Write-Host "FFI Crate: $FfiDir"
 Write-Host "Output JNI: $JniLibsDir"
 
 $IsRelease = ($Configuration -eq "release")
-$BuildFlag = if ($IsRelease) { "--release" } else { "" }
 $TargetDir = "$FfiDir\target"
 
 function Build-AndroidAbi {
@@ -39,18 +40,19 @@ function Build-AndroidAbi {
     # Verify if cargo-ndk is installed
     $hasCargoNdk = Get-Command "cargo-ndk" -ErrorAction SilentlyContinue
     if ($hasCargoNdk) {
-        $cmd = "cargo ndk --target $Triple build $BuildFlag"
-        Write-Host "Executing: $cmd in $FfiDir"
+        $cargoArguments = @("ndk", "--target", $Triple, "--platform", "26", "build")
+        if ($IsRelease) { $cargoArguments += "--release" }
         Push-Location $FfiDir
         try {
-            Invoke-Expression $cmd
+            & cargo @cargoArguments
+            if ($LASTEXITCODE -ne 0) { throw "Android build failed for ${Triple}" }
             $Subfolder = if ($IsRelease) { "release" } else { "debug" }
             $SrcSo = "$TargetDir\$Triple\$Subfolder\libanics_ffi.so"
             if (Test-Path $SrcSo) {
                 Copy-Item $SrcSo -Destination "$DestDir\libanics_ffi.so" -Force
                 Write-Host "Copied: $SrcSo -> $DestDir\libanics_ffi.so" -ForegroundColor Green
             } else {
-                Write-Warning "Could not find compiled .so at $SrcSo"
+                throw "Could not find compiled .so at $SrcSo"
             }
         } finally {
             Pop-Location
@@ -59,16 +61,18 @@ function Build-AndroidAbi {
         Write-Warning "cargo-ndk is not installed in current environment. Using standard cargo build --target $Triple"
         Push-Location $FfiDir
         try {
-            $cmd = "cargo build --target $Triple $BuildFlag"
-            Invoke-Expression $cmd
+            $cargoArguments = @("build", "--target", $Triple)
+            if ($IsRelease) { $cargoArguments += "--release" }
+            & cargo @cargoArguments
+            if ($LASTEXITCODE -ne 0) { throw "Android build failed for ${Triple}" }
             $Subfolder = if ($IsRelease) { "release" } else { "debug" }
             $SrcSo = "$TargetDir\$Triple\$Subfolder\libanics_ffi.so"
             if (Test-Path $SrcSo) {
                 Copy-Item $SrcSo -Destination "$DestDir\libanics_ffi.so" -Force
                 Write-Host "Copied: $SrcSo -> $DestDir\libanics_ffi.so" -ForegroundColor Green
+            } else {
+                throw "Could not find compiled .so at $SrcSo"
             }
-        } catch {
-            Write-Warning "Failed to compile $Triple: $_"
         } finally {
             Pop-Location
         }
@@ -84,6 +88,7 @@ if ($Target -eq "host" -or $Target -eq "all") {
         } else {
             cargo build
         }
+        if ($LASTEXITCODE -ne 0) { throw "Host library build failed" }
         Write-Host "Host library build succeeded." -ForegroundColor Green
     } finally {
         Pop-Location

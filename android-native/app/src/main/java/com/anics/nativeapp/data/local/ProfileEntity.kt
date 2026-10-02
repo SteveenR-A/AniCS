@@ -18,11 +18,16 @@ data class ProfileEntity(
     val avatar: String = "user",
     val color: String = "#6366F1",
     val isActive: Boolean = true,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    @androidx.room.ColumnInfo(defaultValue = "''")
+    val cloudJson: String = ""
 )
 
 @Dao
 interface ProfileDao {
+    @Query("DELETE FROM profiles")
+    suspend fun deleteAll()
+
     @Query("SELECT * FROM profiles ORDER BY createdAt ASC")
     fun getAllProfiles(): Flow<List<ProfileEntity>>
 

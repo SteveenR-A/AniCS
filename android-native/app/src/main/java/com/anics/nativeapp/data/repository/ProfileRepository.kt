@@ -3,15 +3,23 @@ package com.anics.nativeapp.data.repository
 import com.anics.nativeapp.data.local.ProfileDao
 import com.anics.nativeapp.data.local.ProfileEntity
 import kotlinx.coroutines.flow.Flow
+import androidx.room.withTransaction
+import kotlinx.serialization.json.*
+import com.anics.nativeapp.data.local.TombstoneEntity
 
-class ProfileRepository(private val profileDao: ProfileDao) {
+class ProfileRepository(private val database: com.anics.nativeapp.data.local.AppDatabase) {
+    private val profileDao = database.profileDao()
+    val activeProfile = profileDao.getActiveProfileFlow()
 
     fun getAllProfiles(): Flow<List<ProfileEntity>> {
         return profileDao.getAllProfiles()
     }
 
     suspend fun getActiveProfile(): ProfileEntity {
-        return profileDao.getActiveProfile() ?: run {
+        return profileDao.getActiveProfile() ?: profileDao.getAllProfilesSync().firstOrNull()?.let {
+            profileDao.setActiveProfile(it.id)
+            it.copy(isActive = true)
+        } ?: run {
             val default = ProfileEntity(
                 id = "default",
                 name = "Principal",
@@ -42,7 +50,11 @@ class ProfileRepository(private val profileDao: ProfileDao) {
 
     suspend fun deleteProfile(profileId: String) {
         if (profileId != "default") {
-            profileDao.deleteProfile(profileId)
+            database.withTransaction {
+                val payload = buildJsonObject { put("profileId", profileId); put("deletedAt", com.anics.nativeapp.sync.SyncContract.iso(System.currentTimeMillis())) }
+                database.tombstoneDao().upsert(TombstoneEntity("profile:$profileId", "deletedProfiles", payload.toString()))
+                profileDao.deleteProfile(profileId)
+            }
             val active = profileDao.getActiveProfile()
             if (active == null) {
                 profileDao.setActiveProfile("default")

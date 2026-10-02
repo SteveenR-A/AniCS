@@ -333,7 +333,9 @@ pub struct NativeCatalogClient {
     config: RwLock<CoreConfig>,
 }
 
-#[uniffi::export]
+// Kotlin supplies an executor, but reqwest, DNS, timers and spawned searches
+// still need Tokio. UniFFI enters its shared Tokio runtime when polling these futures.
+#[uniffi::export(async_runtime = "tokio")]
 impl NativeCatalogClient {
     #[uniffi::constructor]
     pub fn new(settings_json: Option<String>) -> Self {

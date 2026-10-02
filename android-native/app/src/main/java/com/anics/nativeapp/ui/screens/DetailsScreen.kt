@@ -7,6 +7,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Favorite
@@ -27,10 +28,6 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.anics.nativeapp.ffi.NativeEpisode
 import com.anics.nativeapp.ffi.NativeResolvedMedia
-import com.anics.nativeapp.ui.theme.DarkSurface
-import com.anics.nativeapp.ui.theme.DarkSurfaceVariant
-import com.anics.nativeapp.ui.theme.TextMuted
-import com.anics.nativeapp.ui.theme.TextSecondary
 import com.anics.nativeapp.ui.viewmodels.DetailsViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -41,6 +38,7 @@ fun DetailsScreen(
     viewModel: DetailsViewModel,
     onBack: () -> Unit,
     onPlayEpisode: (media: NativeResolvedMedia, animeTitle: String, episodeNumber: Int) -> Unit,
+    onDownloadEpisode: (NativeResolvedMedia, String, Int) -> Unit = { _, _, _ -> },
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -60,7 +58,7 @@ fun DetailsScreen(
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Volver",
-                            tint = Color.White
+                            tint = MaterialTheme.colorScheme.onSurface
                         )
                     }
                 },
@@ -69,7 +67,7 @@ fun DetailsScreen(
                         Icon(
                             imageVector = if (uiState.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                             contentDescription = "Favorito",
-                            tint = if (uiState.isFavorite) MaterialTheme.colorScheme.primary else Color.White
+                            tint = if (uiState.isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                         )
                     }
                 },
@@ -146,7 +144,7 @@ fun DetailsScreen(
                             ) {
                                 Text(
                                     text = details.title,
-                                    color = Color.White,
+                                    color = MaterialTheme.colorScheme.onSurface,
                                     fontSize = 22.sp,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -159,11 +157,11 @@ fun DetailsScreen(
                                         Text(it, color = MaterialTheme.colorScheme.primary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
                                     }
                                     details.year?.let {
-                                        Text("•", color = TextMuted)
-                                        Text(it, color = TextSecondary, fontSize = 12.sp)
+                                        Text("•", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                                     }
-                                    Text("•", color = TextMuted)
-                                    Text(details.source.uppercase(), color = TextSecondary, fontSize = 12.sp)
+                                    Text("•", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(details.source.uppercase(), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                                 }
                             }
                         }
@@ -180,12 +178,12 @@ fun DetailsScreen(
                                 ) {
                                     details.genres.take(4).forEach { genre ->
                                         Surface(
-                                            color = DarkSurfaceVariant,
+                                            color = MaterialTheme.colorScheme.surfaceVariant,
                                             shape = RoundedCornerShape(16.dp)
                                         ) {
                                             Text(
                                                 text = genre,
-                                                color = TextSecondary,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                 fontSize = 11.sp,
                                                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                                             )
@@ -198,7 +196,7 @@ fun DetailsScreen(
                             // Synopsis
                             Text(
                                 text = details.synopsis,
-                                color = TextSecondary,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 13.sp,
                                 lineHeight = 18.sp,
                                 maxLines = if (isExpandedSynopsis) Int.MAX_VALUE else 3,
@@ -209,7 +207,7 @@ fun DetailsScreen(
                             Spacer(modifier = Modifier.height(16.dp))
                             Text(
                                 text = "Episodios (${details.episodes.size})",
-                                color = Color.White,
+                                color = MaterialTheme.colorScheme.onSurface,
                                 fontSize = 18.sp,
                                 fontWeight = FontWeight.Bold
                             )
@@ -235,8 +233,8 @@ fun DetailsScreen(
         if (showServerSheet && uiState.selectedEpisode != null) {
             ModalBottomSheet(
                 onDismissRequest = { showServerSheet = false },
-                containerColor = DarkSurface,
-                dragHandle = { BottomSheetDefaults.DragHandle(color = TextMuted) }
+                containerColor = MaterialTheme.colorScheme.surface,
+                dragHandle = { BottomSheetDefaults.DragHandle(color = MaterialTheme.colorScheme.onSurfaceVariant) }
             ) {
                 Column(
                     modifier = Modifier
@@ -246,12 +244,13 @@ fun DetailsScreen(
                 ) {
                     Text(
                         text = "Episodio ${uiState.selectedEpisode?.number} - Seleccionar Servidor",
-                        color = Color.White,
+                        color = MaterialTheme.colorScheme.onSurface,
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(modifier = Modifier.height(12.dp))
 
+                    uiState.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                     when {
                         uiState.isLoadingServers -> {
                             Box(
@@ -274,7 +273,7 @@ fun DetailsScreen(
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                     CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                                     Spacer(modifier = Modifier.height(8.dp))
-                                    Text("Resolviendo stream...", color = TextSecondary, fontSize = 13.sp)
+                                    Text("Resolviendo stream...", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
                                 }
                             }
                         }
@@ -282,7 +281,7 @@ fun DetailsScreen(
                         uiState.servers.isEmpty() -> {
                             Text(
                                 text = "No se encontraron servidores disponibles para este episodio",
-                                color = TextMuted,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 13.sp,
                                 modifier = Modifier.padding(vertical = 16.dp)
                             )
@@ -305,7 +304,7 @@ fun DetailsScreen(
                                             }
                                         },
                                     shape = RoundedCornerShape(8.dp),
-                                    colors = CardDefaults.cardColors(containerColor = DarkSurfaceVariant)
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
                                 ) {
                                     Row(
                                         modifier = Modifier
@@ -316,10 +315,16 @@ fun DetailsScreen(
                                     ) {
                                         Text(
                                             text = server.name,
-                                            color = Color.White,
+                                            color = MaterialTheme.colorScheme.onSurface,
                                             fontWeight = FontWeight.Medium,
                                             fontSize = 14.sp
                                         )
+                                        IconButton(onClick = {
+                                            viewModel.resolveServer(server) { resolved ->
+                                                if (resolved.mediaType == com.anics.nativeapp.ffi.NativeMediaType.HLS) viewModel.reportError("Para descargar, elige un servidor MP4. La descarga HLS todavía no está disponible.")
+                                                else { onDownloadEpisode(resolved, uiState.details?.title ?: "Anime", uiState.selectedEpisode?.number?.toInt() ?: 1); showServerSheet = false }
+                                            }
+                                        }) { Icon(Icons.Default.Download, "Descargar MP4") }
                                         Icon(
                                             imageVector = Icons.Default.PlayArrow,
                                             contentDescription = "Reproducir",
@@ -349,7 +354,7 @@ fun EpisodeItem(
             .padding(horizontal = 16.dp, vertical = 4.dp)
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = DarkSurface)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Row(
@@ -363,7 +368,7 @@ fun EpisodeItem(
                 ) {
                     Text(
                         text = "Episodio ${episode.number}",
-                        color = Color.White,
+                        color = MaterialTheme.colorScheme.onSurface,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Medium
                     )
@@ -379,7 +384,7 @@ fun EpisodeItem(
                 Icon(
                     imageVector = Icons.Default.PlayArrow,
                     contentDescription = "Reproducir",
-                    tint = TextSecondary,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(20.dp)
                 )
             }
@@ -391,7 +396,7 @@ fun EpisodeItem(
                 LinearProgressIndicator(
                     progress = { progress.toFloat() },
                     color = MaterialTheme.colorScheme.primary,
-                    trackColor = DarkSurfaceVariant,
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(3.dp)

@@ -30,11 +30,10 @@ class FavoritesViewModel(
 
     private fun loadFavorites() {
         viewModelScope.launch {
-            val activeProfile = profileRepository.getActiveProfile()
-            _uiState.value = _uiState.value.copy(profileName = activeProfile.name)
-
-            favoriteRepository.getFavoritesForProfile(activeProfile.id)
-                .collect { list ->
+            profileRepository.activeProfile.filterNotNull().flatMapLatest { activeProfile ->
+                _uiState.update { it.copy(profileName = activeProfile.name) }
+                favoriteRepository.getFavoritesForProfile(activeProfile.id)
+            }.collect { list ->
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
                         favorites = list

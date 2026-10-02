@@ -64,9 +64,11 @@ for (const cPath of cargoPaths) {
 const androidGradlePath = path.join(ROOT, 'android-native', 'app', 'build.gradle.kts');
 if (fs.existsSync(androidGradlePath)) {
   let gCode = fs.readFileSync(androidGradlePath, 'utf8');
-  gCode = gCode.replace(/versionName = "[^"]+"/, `versionName = "${targetVersion}-preview"`);
-  fs.writeFileSync(androidGradlePath, gCode, 'utf8');
-  console.log('  ✓ android-native/app/build.gradle.kts actualizado');
+  if (!gCode.includes('$releaseVersion')) {
+    gCode = gCode.replace(/versionName = "[^"]+"/, `versionName = "${targetVersion}-preview"`);
+    fs.writeFileSync(androidGradlePath, gCode, 'utf8');
+  }
+  console.log('  ✓ android-native/app/build.gradle.kts sincronizado');
 }
 
 // 3. src-tauri/tauri.conf.json

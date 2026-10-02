@@ -9,7 +9,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -23,9 +23,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.anics.nativeapp.data.local.FavoriteEntity
-import com.anics.nativeapp.ui.theme.DarkSurface
-import com.anics.nativeapp.ui.theme.TextMuted
-import com.anics.nativeapp.ui.theme.TextSecondary
 import com.anics.nativeapp.ui.viewmodels.FavoritesViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -46,13 +43,13 @@ fun FavoritesScreen(
                             text = "Favoritos",
                             fontWeight = FontWeight.Bold,
                             fontSize = 20.sp,
-                            color = Color.White
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                         if (uiState.profileName.isNotBlank()) {
                             Text(
                                 text = "Perfil: ${uiState.profileName}",
                                 fontSize = 12.sp,
-                                color = TextSecondary
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
@@ -86,7 +83,7 @@ fun FavoritesScreen(
                 ) {
                     Text(
                         text = "Aún no tienes animes en favoritos",
-                        color = TextMuted,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodyMedium
                     )
                 }
@@ -127,7 +124,7 @@ fun FavoriteCard(
             .fillMaxWidth()
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = DarkSurface)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column {
             Box(
@@ -152,7 +149,7 @@ fun FavoriteCard(
                     Icon(
                         imageVector = Icons.Default.Delete,
                         contentDescription = "Eliminar de favoritos",
-                        tint = Color.White.copy(alpha = 0.85f),
+                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -161,7 +158,7 @@ fun FavoriteCard(
             Column(modifier = Modifier.padding(10.dp)) {
                 Text(
                     text = favorite.title,
-                    color = Color.White,
+                    color = MaterialTheme.colorScheme.onSurface,
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 14.sp,
                     maxLines = 2,
@@ -170,7 +167,7 @@ fun FavoriteCard(
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = favorite.source.uppercase(),
-                    color = TextMuted,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Medium
                 )

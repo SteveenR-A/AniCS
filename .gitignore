@@ -72,6 +72,7 @@ packaging/arch/AniCS/
 # Android Native & Gradle
 .gradle/
 android-native/.gradle/
+android-native/.kotlin/
 android-native/build/
 android-native/app/build/
 android-native/app/src/main/jniLibs/

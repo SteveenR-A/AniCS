@@ -20,13 +20,15 @@ data class PlaybackState(
     val isLoading: Boolean = true,
     val currentPositionMs: Long = 0L,
     val durationMs: Long = 0L,
-    val error: String? = null
+    val error: String? = null,
+    val ended: Boolean = false
 )
 
 @OptIn(UnstableApi::class)
 class PlayerController(private val context: Context) {
 
     private var exoPlayer: ExoPlayer? = null
+    private var pendingResumeFraction: Double? = null
 
     private val _playbackState = MutableStateFlow(PlaybackState())
     val playbackState: StateFlow<PlaybackState> = _playbackState.asStateFlow()
@@ -41,9 +43,14 @@ class PlayerController(private val context: Context) {
                     }
 
                     override fun onPlaybackStateChanged(playbackState: Int) {
+                        if (playbackState == Player.STATE_READY && duration > 0) {
+                            pendingResumeFraction?.let { seekTo((duration * it).toLong()) }
+                            pendingResumeFraction = null
+                        }
                         val isLoading = playbackState == Player.STATE_BUFFERING
                         _playbackState.value = _playbackState.value.copy(
                             isLoading = isLoading,
+                            ended = playbackState == Player.STATE_ENDED,
                             durationMs = duration.coerceAtLeast(0L),
                             currentPositionMs = currentPosition.coerceAtLeast(0L)
                         )
@@ -67,8 +74,11 @@ class PlayerController(private val context: Context) {
         isHls: Boolean,
         referer: String? = null,
         userAgent: String? = null,
-        startPositionMs: Long = 0L
+        startPositionMs: Long = 0L,
+        resumeFraction: Double? = null
     ) {
+        resetPlayback()
+        pendingResumeFraction = resumeFraction?.takeIf { it > 0 && it < 0.9 }
         val player = initializePlayer()
 
         val httpDataSourceFactory = DefaultHttpDataSource.Factory()
@@ -94,6 +104,14 @@ class PlayerController(private val context: Context) {
         player.play()
     }
 
+    fun updatePosition(): Pair<Long, Long> {
+        val position = exoPlayer?.currentPosition?.coerceAtLeast(0) ?: 0L
+        val duration = exoPlayer?.duration?.coerceAtLeast(0) ?: 0L
+        _playbackState.value = _playbackState.value.copy(currentPositionMs = position, durationMs = duration)
+        return position to duration
+    }
+    fun reportError(message: String) { _playbackState.value = _playbackState.value.copy(error = message, isLoading = false) }
+    fun pause() { exoPlayer?.pause() }
     fun togglePlayPause() {
         exoPlayer?.let {
             if (it.isPlaying) it.pause() else it.play()
@@ -116,6 +134,7 @@ class PlayerController(private val context: Context) {
     }
 
     fun resetPlayback() {
+        pendingResumeFraction = null
         exoPlayer?.stop()
         exoPlayer?.clearMediaItems()
         _playbackState.value = PlaybackState()

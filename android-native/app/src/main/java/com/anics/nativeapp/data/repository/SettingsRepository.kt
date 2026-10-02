@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.serialization.json.*
 
 val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "anics_settings")
 
@@ -25,6 +26,32 @@ data class AppSettings(
 )
 
 class SettingsRepository(private val context: Context) {
+
+    private val cloudSettingsKey = stringPreferencesKey("compatible_settings")
+    val syncSettings: Flow<Map<String, String>> = context.dataStore.data.map { prefs ->
+        prefs[cloudSettingsKey]?.let { raw ->
+            Json.parseToJsonElement(raw).jsonObject.mapValues { it.value.jsonPrimitive.content }
+        } ?: emptyMap()
+    }
+
+    suspend fun applySyncSettings(values: Map<String, String>) {
+        context.dataStore.edit { prefs ->
+            val safe = values.filter { (key, value) -> key != "download_dir" || !Regex("^[a-zA-Z]:").containsMatchIn(value) }
+            val current = prefs[cloudSettingsKey]?.let { Json.parseToJsonElement(it).jsonObject } ?: JsonObject(emptyMap())
+            prefs[cloudSettingsKey] = JsonObject(current + safe.mapValues { JsonPrimitive(it.value) }).toString()
+            safe["app_theme"]?.let { prefs[PreferencesKeys.THEME_MODE] = it }
+            safe["default_source"]?.let { prefs[PreferencesKeys.DEFAULT_SOURCE] = it }
+            safe["auto_play_next"]?.toBooleanStrictOrNull()?.let { prefs[PreferencesKeys.AUTO_PLAY_NEXT] = it }
+            safe["default_quality"]?.let { prefs[PreferencesKeys.DEFAULT_QUALITY] = it }
+            safe["preferred_server"]?.let { prefs[PreferencesKeys.PREFERRED_SERVER] = it }
+            safe["allow_fallback"]?.toBooleanStrictOrNull()?.let { prefs[PreferencesKeys.ALLOW_FALLBACK] = it }
+        }
+    }
+
+    suspend fun updateTheme(theme: String) {
+        context.dataStore.edit { it[PreferencesKeys.THEME_MODE] = theme }
+        applySyncSettings(mapOf("app_theme" to theme))
+    }
 
     private object PreferencesKeys {
         val DEFAULT_SOURCE = stringPreferencesKey("default_source")
@@ -54,14 +81,17 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun updateDefaultSource(source: String) {
         context.dataStore.edit { it[PreferencesKeys.DEFAULT_SOURCE] = source }
+        applySyncSettings(mapOf("default_source" to source.toString()))
     }
 
     suspend fun updateAutoPlayNext(enabled: Boolean) {
         context.dataStore.edit { it[PreferencesKeys.AUTO_PLAY_NEXT] = enabled }
+        applySyncSettings(mapOf("auto_play_next" to enabled.toString()))
     }
 
     suspend fun updateDefaultQuality(quality: String) {
         context.dataStore.edit { it[PreferencesKeys.DEFAULT_QUALITY] = quality }
+        applySyncSettings(mapOf("default_quality" to quality.toString()))
     }
 
     suspend fun updateDownloadFolderUri(uri: String) {
@@ -70,10 +100,12 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun updatePreferredServer(server: String) {
         context.dataStore.edit { it[PreferencesKeys.PREFERRED_SERVER] = server }
+        applySyncSettings(mapOf("preferred_server" to server.toString()))
     }
 
     suspend fun updateAllowFallback(allow: Boolean) {
         context.dataStore.edit { it[PreferencesKeys.ALLOW_FALLBACK] = allow }
+        applySyncSettings(mapOf("allow_fallback" to allow.toString()))
     }
 
     suspend fun updateCloudSync(enabled: Boolean, userId: String = "") {
