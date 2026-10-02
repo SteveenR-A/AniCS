@@ -45,6 +45,7 @@ jobs:
           sdkmanager --install "ndk;26.1.10909125" "build-tools;34.0.0" "platforms;android-34"
           echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/26.1.10909125" >> $GITHUB_ENV
           echo "NDK_HOME=$ANDROID_HOME/ndk/26.1.10909125" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> $GITHUB_ENV
 
       - name: Setup Rust Stable
         uses: dtolnay/rust-toolchain@stable
@@ -67,13 +68,20 @@ jobs:
           ls -la android-native/app/src/main/jniLibs/arm64-v8a/
           ls -la android-native/app/src/main/jniLibs/x86_64/
 
-      - name: Grant execute permission for gradlew
-        run: chmod +x android-native/gradlew
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+
+      - name: Configure Android SDK properties
+        run: |
+          echo "sdk.dir=$ANDROID_HOME" > android-native/local.properties
+          echo "ndk.dir=$ANDROID_NDK_ROOT" >> android-native/local.properties
 
       - name: Build Android Native APK
         run: |
           cd android-native
-          ./gradlew assembleDebug --no-daemon
+          gradle assembleDebug --no-daemon --stacktrace
 
       - name: Prepare and Rename Artifact
         run: |
