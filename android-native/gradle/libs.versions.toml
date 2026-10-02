@@ -54,7 +54,7 @@ kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-
 coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
 
 # UniFFI / JNA runtime
-jna = { group = "net.java.dev.jna", name = "jna", version.ref = "jna", classifier = "aar" }
+jna = { group = "net.java.dev.jna", name = "jna", version.ref = "jna" }
 
 # Testing
 junit = { group = "junit", name = "junit", version.ref = "junit" }

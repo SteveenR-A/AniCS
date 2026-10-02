@@ -12,7 +12,8 @@ on:
         default: ''
 
 permissions:
-  contents: read
+  contents: write
+  actions: write
 
 concurrency:
   group: release-${{ github.ref }}-${{ github.event.inputs.version || 'current' }}

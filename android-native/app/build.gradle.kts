@@ -103,8 +103,8 @@ dependencies {
     // Image Loading
     implementation(libs.coil.compose)
 
-    // UniFFI / JNA runtime
-    implementation(libs.jna)
+    // UniFFI / JNA runtime (aar includes libjnidispatch.so for Android)
+    implementation("net.java.dev.jna:jna:${libs.versions.jna.get()}@aar")
 
     // Testing
     testImplementation(libs.junit)
