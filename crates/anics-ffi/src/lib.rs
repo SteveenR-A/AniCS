@@ -9,22 +9,22 @@ uniffi::setup_scaffolding!();
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum NativeFfiError {
-    #[error("Network error: {message}")]
-    Network { message: String },
-    #[error("Timeout error: {message}")]
-    Timeout { message: String },
-    #[error("Parse error: {message}")]
-    Parse { message: String },
+    #[error("Network error: {msg}")]
+    Network { msg: String },
+    #[error("Timeout error: {msg}")]
+    Timeout { msg: String },
+    #[error("Parse error: {msg}")]
+    Parse { msg: String },
     #[error("Source not found: {source_id}")]
     SourceNotFound { source_id: String },
-    #[error("Server unavailable: {message}")]
-    ServerUnavailable { message: String },
-    #[error("Security violation: {message}")]
-    Security { message: String },
+    #[error("Server unavailable: {msg}")]
+    ServerUnavailable { msg: String },
+    #[error("Security violation: {msg}")]
+    Security { msg: String },
     #[error("Operation cancelled")]
     Cancelled,
-    #[error("Error: {message}")]
-    Generic { message: String },
+    #[error("Error: {msg}")]
+    Generic { msg: String },
 }
 
 impl From<anics_core::error::CoreError> for NativeFfiError {
@@ -33,28 +33,28 @@ impl From<anics_core::error::CoreError> for NativeFfiError {
             anics_core::error::CoreError::Network(err) => {
                 if err.is_timeout() {
                     NativeFfiError::Timeout {
-                        message: err.to_string(),
+                        msg: err.to_string(),
                     }
                 } else {
                     NativeFfiError::Network {
-                        message: err.to_string(),
+                        msg: err.to_string(),
                     }
                 }
             }
-            anics_core::error::CoreError::Timeout(msg) => NativeFfiError::Timeout { message: msg },
-            anics_core::error::CoreError::Parse(msg) => NativeFfiError::Parse { message: msg },
-            anics_core::error::CoreError::Scraper(msg) => NativeFfiError::Parse { message: msg },
+            anics_core::error::CoreError::Timeout(msg) => NativeFfiError::Timeout { msg },
+            anics_core::error::CoreError::Parse(msg) => NativeFfiError::Parse { msg },
+            anics_core::error::CoreError::Scraper(msg) => NativeFfiError::Parse { msg },
             anics_core::error::CoreError::NotFound(msg) => {
                 NativeFfiError::SourceNotFound { source_id: msg }
             }
             anics_core::error::CoreError::Resolver(msg) => {
-                NativeFfiError::ServerUnavailable { message: msg }
+                NativeFfiError::ServerUnavailable { msg }
             }
-            anics_core::error::CoreError::Security(msg) => NativeFfiError::Security { message: msg },
+            anics_core::error::CoreError::Security(msg) => NativeFfiError::Security { msg },
             anics_core::error::CoreError::Cancelled => NativeFfiError::Cancelled,
-            anics_core::error::CoreError::RateLimit(msg) => NativeFfiError::Network { message: msg },
-            anics_core::error::CoreError::Download(msg) => NativeFfiError::Network { message: msg },
-            anics_core::error::CoreError::Generic(msg) => NativeFfiError::Generic { message: msg },
+            anics_core::error::CoreError::RateLimit(msg) => NativeFfiError::Network { msg: msg },
+            anics_core::error::CoreError::Download(msg) => NativeFfiError::Network { msg: msg },
+            anics_core::error::CoreError::Generic(msg) => NativeFfiError::Generic { msg },
         }
     }
 }

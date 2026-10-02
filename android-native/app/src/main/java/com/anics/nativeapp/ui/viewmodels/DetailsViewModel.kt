@@ -57,7 +57,7 @@ class DetailsViewModel(
                     if (historyItem != null) {
                         ep.copy(
                             watched = historyItem.completed,
-                            watch_progress = if (historyItem.durationSeconds > 0) {
+                            watchProgress = if (historyItem.durationSeconds > 0) {
                                 historyItem.progressSeconds.toDouble() / historyItem.durationSeconds.toDouble()
                             } else null
                         )
@@ -89,7 +89,7 @@ class DetailsViewModel(
                 profileId = activeProfile.id,
                 title = details.title,
                 url = details.url,
-                thumbnailUrl = details.thumbnail_url,
+                thumbnailUrl = details.thumbnailUrl,
                 source = details.source
             )
             _uiState.value = _uiState.value.copy(isFavorite = newFavStatus)

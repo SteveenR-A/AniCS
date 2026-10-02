@@ -194,7 +194,7 @@ fun AnimeCard(
                     .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp))
             ) {
                 AsyncImage(
-                    model = anime.thumbnail_url,
+                    model = anime.thumbnailUrl,
                     contentDescription = anime.title,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize()
@@ -213,7 +213,8 @@ fun AnimeCard(
                 )
 
                 // Episode badge if present
-                anime.episode?.let { ep ->
+                val ep = anime.episode
+                if (!ep.isNullOrBlank()) {
                     Surface(
                         color = MaterialTheme.colorScheme.primary,
                         shape = RoundedCornerShape(bottomStart = 8.dp),
@@ -251,7 +252,8 @@ fun AnimeCard(
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Medium
                     )
-                    anime.anime_type?.let { type ->
+                    val type = anime.animeType
+                    if (!type.isNullOrBlank()) {
                         Text(
                             text = type,
                             color = MaterialTheme.colorScheme.secondary,

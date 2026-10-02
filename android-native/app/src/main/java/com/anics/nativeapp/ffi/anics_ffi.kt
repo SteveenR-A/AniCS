@@ -2311,26 +2311,26 @@ sealed class NativeFfiException: kotlin.Exception() {
     
     class Network(
         
-        val `message`: kotlin.String
+        val `msg`: kotlin.String
         ) : NativeFfiException() {
         override val message
-            get() = "message=${ `message` }"
+            get() = "msg=${ `msg` }"
     }
     
     class Timeout(
         
-        val `message`: kotlin.String
+        val `msg`: kotlin.String
         ) : NativeFfiException() {
         override val message
-            get() = "message=${ `message` }"
+            get() = "msg=${ `msg` }"
     }
     
     class Parse(
         
-        val `message`: kotlin.String
+        val `msg`: kotlin.String
         ) : NativeFfiException() {
         override val message
-            get() = "message=${ `message` }"
+            get() = "msg=${ `msg` }"
     }
     
     class SourceNotFound(
@@ -2343,18 +2343,18 @@ sealed class NativeFfiException: kotlin.Exception() {
     
     class ServerUnavailable(
         
-        val `message`: kotlin.String
+        val `msg`: kotlin.String
         ) : NativeFfiException() {
         override val message
-            get() = "message=${ `message` }"
+            get() = "msg=${ `msg` }"
     }
     
     class Security(
         
-        val `message`: kotlin.String
+        val `msg`: kotlin.String
         ) : NativeFfiException() {
         override val message
-            get() = "message=${ `message` }"
+            get() = "msg=${ `msg` }"
     }
     
     class Cancelled(
@@ -2365,10 +2365,10 @@ sealed class NativeFfiException: kotlin.Exception() {
     
     class Generic(
         
-        val `message`: kotlin.String
+        val `msg`: kotlin.String
         ) : NativeFfiException() {
         override val message
-            get() = "message=${ `message` }"
+            get() = "msg=${ `msg` }"
     }
     
 
@@ -2418,17 +2418,17 @@ public object FfiConverterTypeNativeFfiError : FfiConverterRustBuffer<NativeFfiE
             is NativeFfiException.Network -> (
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
                 4UL
-                + FfiConverterString.allocationSize(value.`message`)
+                + FfiConverterString.allocationSize(value.`msg`)
             )
             is NativeFfiException.Timeout -> (
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
                 4UL
-                + FfiConverterString.allocationSize(value.`message`)
+                + FfiConverterString.allocationSize(value.`msg`)
             )
             is NativeFfiException.Parse -> (
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
                 4UL
-                + FfiConverterString.allocationSize(value.`message`)
+                + FfiConverterString.allocationSize(value.`msg`)
             )
             is NativeFfiException.SourceNotFound -> (
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
@@ -2438,12 +2438,12 @@ public object FfiConverterTypeNativeFfiError : FfiConverterRustBuffer<NativeFfiE
             is NativeFfiException.ServerUnavailable -> (
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
                 4UL
-                + FfiConverterString.allocationSize(value.`message`)
+                + FfiConverterString.allocationSize(value.`msg`)
             )
             is NativeFfiException.Security -> (
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
                 4UL
-                + FfiConverterString.allocationSize(value.`message`)
+                + FfiConverterString.allocationSize(value.`msg`)
             )
             is NativeFfiException.Cancelled -> (
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
@@ -2452,7 +2452,7 @@ public object FfiConverterTypeNativeFfiError : FfiConverterRustBuffer<NativeFfiE
             is NativeFfiException.Generic -> (
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
                 4UL
-                + FfiConverterString.allocationSize(value.`message`)
+                + FfiConverterString.allocationSize(value.`msg`)
             )
         }
     }
@@ -2461,17 +2461,17 @@ public object FfiConverterTypeNativeFfiError : FfiConverterRustBuffer<NativeFfiE
         when(value) {
             is NativeFfiException.Network -> {
                 buf.putInt(1)
-                FfiConverterString.write(value.`message`, buf)
+                FfiConverterString.write(value.`msg`, buf)
                 Unit
             }
             is NativeFfiException.Timeout -> {
                 buf.putInt(2)
-                FfiConverterString.write(value.`message`, buf)
+                FfiConverterString.write(value.`msg`, buf)
                 Unit
             }
             is NativeFfiException.Parse -> {
                 buf.putInt(3)
-                FfiConverterString.write(value.`message`, buf)
+                FfiConverterString.write(value.`msg`, buf)
                 Unit
             }
             is NativeFfiException.SourceNotFound -> {
@@ -2481,12 +2481,12 @@ public object FfiConverterTypeNativeFfiError : FfiConverterRustBuffer<NativeFfiE
             }
             is NativeFfiException.ServerUnavailable -> {
                 buf.putInt(5)
-                FfiConverterString.write(value.`message`, buf)
+                FfiConverterString.write(value.`msg`, buf)
                 Unit
             }
             is NativeFfiException.Security -> {
                 buf.putInt(6)
-                FfiConverterString.write(value.`message`, buf)
+                FfiConverterString.write(value.`msg`, buf)
                 Unit
             }
             is NativeFfiException.Cancelled -> {
@@ -2495,7 +2495,7 @@ public object FfiConverterTypeNativeFfiError : FfiConverterRustBuffer<NativeFfiE
             }
             is NativeFfiException.Generic -> {
                 buf.putInt(8)
-                FfiConverterString.write(value.`message`, buf)
+                FfiConverterString.write(value.`msg`, buf)
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }

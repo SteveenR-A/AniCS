@@ -7,7 +7,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
@@ -58,7 +58,7 @@ fun DetailsScreen(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(
-                            imageVector = Icons.Default.ArrowBack,
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Volver",
                             tint = Color.White
                         )
@@ -122,7 +122,7 @@ fun DetailsScreen(
                                 .height(280.dp)
                         ) {
                             AsyncImage(
-                                model = details.thumbnail_url,
+                                model = details.thumbnailUrl,
                                 contentDescription = details.title,
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier.fillMaxSize()
@@ -385,19 +385,18 @@ fun EpisodeItem(
             }
 
             // Progress bar if partially watched
-            episode.watch_progress?.let { progress ->
-                if (progress in 0.05..0.95) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    LinearProgressIndicator(
-                        progress = { progress.toFloat() },
-                        color = MaterialTheme.colorScheme.primary,
-                        trackColor = DarkSurfaceVariant,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(3.dp)
-                            .clip(RoundedCornerShape(2.dp))
-                    )
-                }
+            val progress = episode.watchProgress
+            if (progress != null && progress in 0.05..0.95) {
+                Spacer(modifier = Modifier.height(8.dp))
+                LinearProgressIndicator(
+                    progress = { progress.toFloat() },
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = DarkSurfaceVariant,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(3.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                )
             }
         }
     }
