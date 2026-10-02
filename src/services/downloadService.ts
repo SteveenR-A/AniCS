@@ -1,6 +1,8 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type { DownloadProgress, DownloadTask, DownloadStatus } from '@/types';
+import { maskAndFilterServers } from '@/utils/serverUtils';
+import type { VideoServer } from '@/types';
 
 // ─── Puente Android Foreground Service ──────────────────────
 
@@ -140,6 +142,8 @@ export interface BatchDownloadItem {
   episodeNumber: number;
   episodeUrl: string;
   source: string;
+  preferredServer?: string;
+  allowFallback?: boolean;
 }
 
 export interface BatchDownloadResult {
@@ -148,8 +152,29 @@ export interface BatchDownloadResult {
   error?: string;
 }
 
+export const MAX_BATCH_EPISODES = 5000;
+
+export interface BatchServerChoice {
+  key: string;
+  name: string;
+}
+
+export async function getBatchDownloadServers(episodeUrl: string, source: string): Promise<BatchServerChoice[]> {
+  const raw = await invoke<VideoServer[]>('get_servers', { episodeUrl, source });
+  const supported = maskAndFilterServers(raw, false);
+  const labels = new Map(maskAndFilterServers(supported).map(server => [server.url, server.name]));
+  const choices = new Map<string, BatchServerChoice>();
+  for (const server of supported) {
+    const key = server.name.trim();
+    if (!choices.has(key.toLowerCase())) {
+      choices.set(key.toLowerCase(), { key, name: labels.get(server.url) ?? key });
+    }
+  }
+  return [...choices.values()];
+}
+
 /**
- * Resuelve servidores y encola el lote dentro del backend Rust.
+ * Registra el lote completo; Rust resuelve cada episodio cuando le toca descargar.
  * Esto evita depender del ciclo de vida del WebView cuando Android apaga la pantalla.
  */
 export const startBatchDownloads = (
@@ -188,6 +213,9 @@ export const deleteDownloadRecord = (
 export const onDownloadProgress = (
   callback: (progress: DownloadProgress) => void
 ) => listen<DownloadProgress>('download-progress', (event) => callback(event.payload));
+
+export const onDownloadCreated = (callback: (task: DownloadTask) => void) =>
+  listen<DownloadTask>('download-created', event => callback(event.payload));
 
 /** Suscribirse al evento de descarga completada */
 export const onDownloadCompleted = (

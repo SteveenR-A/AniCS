@@ -1,0 +1,1491 @@
+{
+  "fixtureVersion": 1,
+  "clock": "2026-10-02T12:00:00.000Z",
+  "entries": {
+    "local": {
+      "id": "local",
+      "animeTitle": "Café Dragon",
+      "animeUrl": "https://catalog.example/cafe/",
+      "thumbnailUrl": "",
+      "episodeNumber": 1,
+      "episodeUrl": "https://catalog.example/cafe/1/",
+      "watchProgress": 0.9,
+      "watchedAt": "2026-10-02T10:00:00.000Z",
+      "source": "jkanime",
+      "profileId": "default"
+    },
+    "newer": {
+      "id": "newer",
+      "animeTitle": "Café Dragon",
+      "animeUrl": "https://catalog.example/cafe/",
+      "thumbnailUrl": "",
+      "episodeNumber": 1,
+      "episodeUrl": "https://catalog.example/cafe/1/",
+      "watchProgress": 0.2,
+      "watchedAt": "2026-10-02T11:30:00.000Z",
+      "source": "otakustv",
+      "profileId": "default"
+    },
+    "tieHigher": {
+      "id": "tieHigher",
+      "animeTitle": "Café Dragon",
+      "animeUrl": "https://catalog.example/cafe/",
+      "thumbnailUrl": "",
+      "episodeNumber": 1,
+      "episodeUrl": "https://catalog.example/cafe/1/",
+      "watchProgress": 1,
+      "watchedAt": "2026-10-02T10:00:00.000Z",
+      "source": "jkanime",
+      "profileId": "default"
+    },
+    "tieEqual": {
+      "id": "tieEqual",
+      "animeTitle": "Café Dragon",
+      "animeUrl": "https://catalog.example/cafe/",
+      "thumbnailUrl": "",
+      "episodeNumber": 1,
+      "episodeUrl": "https://catalog.example/cafe/1/",
+      "watchProgress": 0.9,
+      "watchedAt": "2026-10-02T10:00:00.000Z",
+      "source": "jkanime",
+      "profileId": "default"
+    },
+    "kid": {
+      "id": "kid",
+      "animeTitle": "Café Dragon",
+      "animeUrl": "https://catalog.example/cafe/",
+      "thumbnailUrl": "",
+      "episodeNumber": 1,
+      "episodeUrl": "https://catalog.example/cafe/1/",
+      "watchProgress": 0.8,
+      "watchedAt": "2026-10-02T11:00:00.000Z",
+      "source": "jkanime",
+      "profileId": "kid"
+    },
+    "second": {
+      "id": "second",
+      "animeTitle": "Café Dragon",
+      "animeUrl": "https://catalog.example/cafe/",
+      "thumbnailUrl": "",
+      "episodeNumber": 2,
+      "episodeUrl": "https://catalog.example/cafe/2/",
+      "watchProgress": 0.8,
+      "watchedAt": "2026-10-02T11:40:00.000Z",
+      "source": "jkanime",
+      "profileId": "default"
+    },
+    "atGrace": {
+      "id": "atGrace",
+      "animeTitle": "Café Dragon",
+      "animeUrl": "https://catalog.example/cafe/",
+      "thumbnailUrl": "",
+      "episodeNumber": 1,
+      "episodeUrl": "https://catalog.example/cafe/1/",
+      "watchProgress": 0.8,
+      "watchedAt": "2026-10-02T10:00:05.000Z",
+      "source": "jkanime",
+      "profileId": "default"
+    },
+    "afterGrace": {
+      "id": "afterGrace",
+      "animeTitle": "Café Dragon",
+      "animeUrl": "https://catalog.example/cafe/",
+      "thumbnailUrl": "",
+      "episodeNumber": 1,
+      "episodeUrl": "https://catalog.example/cafe/1/",
+      "watchProgress": 0.8,
+      "watchedAt": "2026-10-02T10:00:05.001Z",
+      "source": "jkanime",
+      "profileId": "default"
+    },
+    "corrupt": {
+      "id": "corrupt",
+      "animeTitle": " Caram�liser !! ",
+      "animeUrl": "https://catalog.example/carameliser/",
+      "thumbnailUrl": "",
+      "episodeNumber": 1,
+      "episodeUrl": "https://catalog.example/carameliser/1/",
+      "watchProgress": 0.8,
+      "watchedAt": "2026-10-02T10:00:00.000Z",
+      "source": "jkanime",
+      "profileId": "default"
+    },
+    "cleanNewer": {
+      "id": "cleanNewer",
+      "animeTitle": "Caraméliser",
+      "animeUrl": "https://other.example/carameliser/",
+      "thumbnailUrl": "",
+      "episodeNumber": 1,
+      "episodeUrl": "https://other.example/carameliser/1/",
+      "watchProgress": 0.8,
+      "watchedAt": "2026-10-02T11:30:00.000Z",
+      "source": "jkanime",
+      "profileId": "default"
+    }
+  },
+  "favorites": {
+    "local": {
+      "title": "Café PC",
+      "url": "https://catalog.example/cafe/",
+      "thumbnailUrl": "",
+      "source": "jkanime",
+      "profileId": "default"
+    },
+    "remote": {
+      "title": "Café Phone",
+      "url": "HTTPS://CATALOG.EXAMPLE/CAFE/",
+      "thumbnailUrl": "",
+      "source": "jkanime",
+      "profileId": "default"
+    },
+    "removed": {
+      "title": "Borrado",
+      "url": "https://catalog.example/removed/",
+      "thumbnailUrl": "",
+      "source": "jkanime",
+      "profileId": "default"
+    },
+    "restored": {
+      "title": "Restaurado",
+      "url": "https://catalog.example/removed/",
+      "thumbnailUrl": "",
+      "source": "jkanime",
+      "profileId": "default",
+      "addedAt": "2026-10-02T10:00:00.001Z"
+    },
+    "atDeletion": {
+      "title": "Empate",
+      "url": "https://catalog.example/removed/",
+      "thumbnailUrl": "",
+      "source": "jkanime",
+      "profileId": "default",
+      "addedAt": "2026-10-02T10:00:00.000Z"
+    },
+    "phone": {
+      "title": "Nuevo 龍",
+      "url": "https://catalog.example/new/",
+      "thumbnailUrl": "",
+      "source": "jkanime",
+      "profileId": "default"
+    },
+    "kid": {
+      "title": "Café Niño",
+      "url": "https://catalog.example/cafe/",
+      "thumbnailUrl": "",
+      "source": "jkanime",
+      "profileId": "kid"
+    }
+  },
+  "profiles": {
+    "local": {
+      "id": "default",
+      "name": "Principal PC",
+      "avatar": "sparkles",
+      "color": "#3b82f6",
+      "isActive": true,
+      "createdAt": "2026-01-01T00:00:00.000Z"
+    },
+    "remote": {
+      "id": "default",
+      "name": "Principal Phone",
+      "avatar": "sparkles",
+      "color": "#3b82f6",
+      "isActive": true,
+      "createdAt": "2026-01-01T00:00:00.000Z"
+    },
+    "kid": {
+      "id": "kid",
+      "name": "Niño 龍",
+      "avatar": "sparkles",
+      "color": "#3b82f6",
+      "isActive": false,
+      "createdAt": "2026-01-01T00:00:00.000Z"
+    },
+    "phone": {
+      "id": "phone",
+      "name": "Móvil",
+      "avatar": "sparkles",
+      "color": "#3b82f6",
+      "isActive": true,
+      "createdAt": "2026-01-01T00:00:00.000Z"
+    },
+    "gone": {
+      "id": "gone",
+      "name": "Borrado",
+      "avatar": "sparkles",
+      "color": "#3b82f6",
+      "isActive": true,
+      "createdAt": "2026-01-01T00:00:00.000Z"
+    }
+  },
+  "migrations": [
+    {
+      "name": "v1 sanitizes titles and deduplicates by canonical key",
+      "input": {
+        "syncMeta": {
+          "schemaVersion": 1,
+          "appVersion": "0.2.11",
+          "lastModifiedAt": "2026-10-02T09:00:00.000Z",
+          "lastModifiedDevice": "windows",
+          "fileHashes": {
+            "profiles": "",
+            "history": "",
+            "favorites": "",
+            "settings": ""
+          },
+          "deletedFavorites": [],
+          "deletedProfiles": []
+        },
+        "profiles": [],
+        "history": [
+          {
+            "id": "corrupt",
+            "animeTitle": " Caram�liser !! ",
+            "animeUrl": "https://catalog.example/carameliser/",
+            "thumbnailUrl": "",
+            "episodeNumber": 1,
+            "episodeUrl": "https://catalog.example/carameliser/1/",
+            "watchProgress": 0.8,
+            "watchedAt": "2026-10-02T10:00:00.000Z",
+            "source": "jkanime",
+            "profileId": "default"
+          },
+          {
+            "id": "cleanNewer",
+            "animeTitle": "Caraméliser",
+            "animeUrl": "https://other.example/carameliser/",
+            "thumbnailUrl": "",
+            "episodeNumber": 1,
+            "episodeUrl": "https://other.example/carameliser/1/",
+            "watchProgress": 0.8,
+            "watchedAt": "2026-10-02T11:30:00.000Z",
+            "source": "jkanime",
+            "profileId": "default"
+          },
+          {
+            "id": "kid",
+            "animeTitle": "Café Dragon",
+            "animeUrl": "https://catalog.example/cafe/",
+            "thumbnailUrl": "",
+            "episodeNumber": 1,
+            "episodeUrl": "https://catalog.example/cafe/1/",
+            "watchProgress": 0.8,
+            "watchedAt": "2026-10-02T11:00:00.000Z",
+            "source": "jkanime",
+            "profileId": "kid"
+          }
+        ],
+        "favorites": [],
+        "settings": {}
+      },
+      "expected": {
+        "syncMeta": {
+          "schemaVersion": 2,
+          "appVersion": "0.2.11",
+          "lastModifiedAt": "2026-10-02T09:00:00.000Z",
+          "lastModifiedDevice": "windows",
+          "fileHashes": {
+            "profiles": "",
+            "history": "",
+            "favorites": "",
+            "settings": ""
+          },
+          "deletedFavorites": [],
+          "deletedProfiles": [],
+          "deletedHistory": []
+        },
+        "profiles": [],
+        "history": [
+          {
+            "id": "cleanNewer",
+            "animeTitle": "Caraméliser",
+            "animeUrl": "https://other.example/carameliser/",
+            "thumbnailUrl": "",
+            "episodeNumber": 1,
+            "episodeUrl": "https://other.example/carameliser/1/",
+            "watchProgress": 0.8,
+            "watchedAt": "2026-10-02T11:30:00.000Z",
+            "source": "jkanime",
+            "profileId": "default"
+          },
+          {
+            "id": "kid",
+            "animeTitle": "Café Dragon",
+            "animeUrl": "https://catalog.example/cafe/",
+            "thumbnailUrl": "",
+            "episodeNumber": 1,
+            "episodeUrl": "https://catalog.example/cafe/1/",
+            "watchProgress": 0.8,
+            "watchedAt": "2026-10-02T11:00:00.000Z",
+            "source": "jkanime",
+            "profileId": "kid"
+          }
+        ],
+        "favorites": [],
+        "settings": {}
+      }
+    },
+    {
+      "name": "v2 preserves Unicode, re-added favorite metadata and string settings",
+      "input": {
+        "syncMeta": {
+          "schemaVersion": 2,
+          "appVersion": "0.2.11",
+          "lastModifiedAt": "2026-10-02T09:00:00.000Z",
+          "lastModifiedDevice": "android",
+          "fileHashes": {
+            "profiles": "",
+            "history": "",
+            "favorites": "",
+            "settings": ""
+          },
+          "deletedFavorites": [],
+          "deletedProfiles": [],
+          "deletedHistory": []
+        },
+        "profiles": [
+          {
+            "id": "kid",
+            "name": "Niño 龍",
+            "avatar": "sparkles",
+            "color": "#3b82f6",
+            "isActive": false,
+            "createdAt": "2026-01-01T00:00:00.000Z"
+          }
+        ],
+        "history": [
+          {
+            "id": "newer",
+            "animeTitle": "Café Dragon",
+            "animeUrl": "https://catalog.example/cafe/",
+            "thumbnailUrl": "",
+            "episodeNumber": 1,
+            "episodeUrl": "https://catalog.example/cafe/1/",
+            "watchProgress": 0.2,
+            "watchedAt": "2026-10-02T11:30:00.000Z",
+            "source": "otakustv",
+            "profileId": "default"
+          }
+        ],
+        "favorites": [
+          {
+            "title": "Restaurado",
+            "url": "https://catalog.example/removed/",
+            "thumbnailUrl": "",
+            "source": "jkanime",
+            "profileId": "default",
+            "addedAt": "2026-10-02T10:00:00.001Z"
+          }
+        ],
+        "settings": {
+          "download_dir": "/storage/emulated/0/Anime",
+          "auto_resume": "true",
+          "parallel_downloads": "2"
+        }
+      },
+      "expected": {
+        "syncMeta": {
+          "schemaVersion": 2,
+          "appVersion": "0.2.11",
+          "lastModifiedAt": "2026-10-02T09:00:00.000Z",
+          "lastModifiedDevice": "android",
+          "fileHashes": {
+            "profiles": "",
+            "history": "",
+            "favorites": "",
+            "settings": ""
+          },
+          "deletedFavorites": [],
+          "deletedProfiles": [],
+          "deletedHistory": []
+        },
+        "profiles": [
+          {
+            "id": "kid",
+            "name": "Niño 龍",
+            "avatar": "sparkles",
+            "color": "#3b82f6",
+            "isActive": false,
+            "createdAt": "2026-01-01T00:00:00.000Z"
+          }
+        ],
+        "history": [
+          {
+            "id": "newer",
+            "animeTitle": "Café Dragon",
+            "animeUrl": "https://catalog.example/cafe/",
+            "thumbnailUrl": "",
+            "episodeNumber": 1,
+            "episodeUrl": "https://catalog.example/cafe/1/",
+            "watchProgress": 0.2,
+            "watchedAt": "2026-10-02T11:30:00.000Z",
+            "source": "otakustv",
+            "profileId": "default"
+          }
+        ],
+        "favorites": [
+          {
+            "title": "Restaurado",
+            "url": "https://catalog.example/removed/",
+            "thumbnailUrl": "",
+            "source": "jkanime",
+            "profileId": "default",
+            "addedAt": "2026-10-02T10:00:00.001Z"
+          }
+        ],
+        "settings": {
+          "download_dir": "/storage/emulated/0/Anime",
+          "auto_resume": "true",
+          "parallel_downloads": "2"
+        }
+      }
+    },
+    {
+      "name": "empty v2 is a valid empty payload",
+      "input": {
+        "syncMeta": {
+          "schemaVersion": 2,
+          "appVersion": "0.2.11",
+          "lastModifiedAt": "2026-10-02T09:00:00.000Z",
+          "lastModifiedDevice": "windows",
+          "fileHashes": {
+            "profiles": "",
+            "history": "",
+            "favorites": "",
+            "settings": ""
+          },
+          "deletedFavorites": [],
+          "deletedProfiles": [],
+          "deletedHistory": []
+        },
+        "profiles": [],
+        "history": [],
+        "favorites": [],
+        "settings": {}
+      },
+      "expected": {
+        "syncMeta": {
+          "schemaVersion": 2,
+          "appVersion": "0.2.11",
+          "lastModifiedAt": "2026-10-02T09:00:00.000Z",
+          "lastModifiedDevice": "windows",
+          "fileHashes": {
+            "profiles": "",
+            "history": "",
+            "favorites": "",
+            "settings": ""
+          },
+          "deletedFavorites": [],
+          "deletedProfiles": [],
+          "deletedHistory": []
+        },
+        "profiles": [],
+        "history": [],
+        "favorites": [],
+        "settings": {}
+      }
+    },
+    {
+      "name": "missing schema metadata defaults to v1",
+      "input": {
+        "profiles": [],
+        "history": [],
+        "favorites": [],
+        "settings": {}
+      },
+      "expected": {
+        "profiles": [],
+        "history": [],
+        "favorites": [],
+        "settings": {},
+        "syncMeta": {
+          "deletedHistory": [],
+          "schemaVersion": 2
+        }
+      }
+    },
+    {
+      "name": "future schema is rejected",
+      "input": {
+        "syncMeta": {
+          "schemaVersion": 3,
+          "appVersion": "0.2.11",
+          "lastModifiedAt": "2026-10-02T09:00:00.000Z",
+          "lastModifiedDevice": "windows",
+          "fileHashes": {
+            "profiles": "",
+            "history": "",
+            "favorites": "",
+            "settings": ""
+          },
+          "deletedFavorites": [],
+          "deletedProfiles": [],
+          "deletedHistory": []
+        },
+        "profiles": [],
+        "history": [],
+        "favorites": [],
+        "settings": {}
+      },
+      "error": "SyncSchemaError"
+    }
+  ],
+  "keyCases": [
+    {
+      "name": "accents and punctuation",
+      "entry": {
+        "id": "key-1",
+        "animeTitle": " ¡Café Dragon! ",
+        "animeUrl": "https://catalog.example/cafe/",
+        "thumbnailUrl": "",
+        "episodeNumber": 1,
+        "episodeUrl": "https://catalog.example/cafe/1/",
+        "watchProgress": 0.8,
+        "watchedAt": "2026-10-02T10:00:00.000Z",
+        "source": "jkanime",
+        "profileId": ""
+      },
+      "normalizedTitle": "cafedragon",
+      "rustNormalizedTitle": "cafedragon",
+      "episodeKey": "cafedragon::ep1::default",
+      "animeKey": "cafedragon::default"
+    },
+    {
+      "name": "replacement character differs in existing Rust normalizer",
+      "entry": {
+        "id": "corrupt",
+        "animeTitle": " Caram�liser !! ",
+        "animeUrl": "https://catalog.example/carameliser/",
+        "thumbnailUrl": "",
+        "episodeNumber": 1,
+        "episodeUrl": "https://catalog.example/carameliser/1/",
+        "watchProgress": 0.8,
+        "watchedAt": "2026-10-02T10:00:00.000Z",
+        "source": "jkanime",
+        "profileId": "default"
+      },
+      "normalizedTitle": "carameliser",
+      "rustNormalizedTitle": "caramliser",
+      "episodeKey": "carameliser::ep1::default",
+      "animeKey": "carameliser::default"
+    },
+    {
+      "name": "non-Latin title falls back to lowercased trimmed URL",
+      "entry": {
+        "id": "key-3",
+        "animeTitle": "龍",
+        "animeUrl": " HTTPS://CATALOG.EXAMPLE/DRAGON/ ",
+        "thumbnailUrl": "",
+        "episodeNumber": 1,
+        "episodeUrl": "https://catalog.example/cafe/1/",
+        "watchProgress": 0.8,
+        "watchedAt": "2026-10-02T10:00:00.000Z",
+        "source": "jkanime",
+        "profileId": "kid"
+      },
+      "normalizedTitle": "",
+      "rustNormalizedTitle": "",
+      "episodeKey": "https://catalog.example/dragon/::ep1::kid",
+      "animeKey": "https://catalog.example/dragon/::kid"
+    },
+    {
+      "name": "extended Latin differs in existing Rust normalizer",
+      "entry": {
+        "id": "key-4",
+        "animeTitle": "Ångström",
+        "animeUrl": "https://catalog.example/cafe/",
+        "thumbnailUrl": "",
+        "episodeNumber": 1,
+        "episodeUrl": "https://catalog.example/cafe/1/",
+        "watchProgress": 0.8,
+        "watchedAt": "2026-10-02T10:00:00.000Z",
+        "source": "jkanime",
+        "profileId": "default"
+      },
+      "normalizedTitle": "angstrom",
+      "rustNormalizedTitle": "ngstrom",
+      "episodeKey": "angstrom::ep1::default",
+      "animeKey": "angstrom::default"
+    }
+  ],
+  "historyCases": [
+    {
+      "name": "newer timestamp wins even with lower progress or different provider",
+      "local": [
+        "local"
+      ],
+      "remote": [
+        "newer"
+      ],
+      "tombstones": [],
+      "expected": [
+        "newer"
+      ]
+    },
+    {
+      "name": "equal timestamp chooses higher progress",
+      "local": [
+        "local"
+      ],
+      "remote": [
+        "tieHigher"
+      ],
+      "tombstones": [],
+      "expected": [
+        "tieHigher"
+      ]
+    },
+    {
+      "name": "equal timestamp and progress chooses remote",
+      "local": [
+        "local"
+      ],
+      "remote": [
+        "tieEqual"
+      ],
+      "tombstones": [],
+      "expected": [
+        "tieEqual"
+      ]
+    },
+    {
+      "name": "same anime in different profiles stays separate and newest is first",
+      "local": [
+        "local"
+      ],
+      "remote": [
+        "kid"
+      ],
+      "tombstones": [],
+      "expected": [
+        "kid",
+        "local"
+      ]
+    },
+    {
+      "name": "episode tombstone includes the exact five-second grace boundary",
+      "local": [
+        "local"
+      ],
+      "remote": [
+        "atGrace"
+      ],
+      "tombstones": [
+        {
+          "type": "episode",
+          "key": "cafedragon::ep1::default",
+          "profileId": "default",
+          "deletedAt": "2026-10-02T10:00:00.000Z"
+        }
+      ],
+      "expected": []
+    },
+    {
+      "name": "watch one millisecond after grace survives",
+      "local": [],
+      "remote": [
+        "afterGrace"
+      ],
+      "tombstones": [
+        {
+          "type": "episode",
+          "key": "cafedragon::ep1::default",
+          "profileId": "default",
+          "deletedAt": "2026-10-02T10:00:00.000Z"
+        }
+      ],
+      "expected": [
+        "afterGrace"
+      ]
+    },
+    {
+      "name": "anime tombstone removes multiple episodes of only its profile",
+      "local": [
+        "local",
+        "second",
+        "kid"
+      ],
+      "remote": [],
+      "tombstones": [
+        {
+          "type": "anime",
+          "key": "cafedragon::default",
+          "profileId": "default",
+          "deletedAt": "2026-10-02T11:45:00.000Z"
+        }
+      ],
+      "expected": [
+        "kid"
+      ]
+    },
+    {
+      "name": "clear tombstone affects only its profile",
+      "local": [
+        "local",
+        "kid"
+      ],
+      "remote": [],
+      "tombstones": [
+        {
+          "type": "clear",
+          "key": "default",
+          "profileId": "default",
+          "deletedAt": "2026-10-02T11:45:00.000Z"
+        }
+      ],
+      "expected": [
+        "kid"
+      ]
+    }
+  ],
+  "favoriteCases": [
+    {
+      "name": "normalized URL deduplicates but local metadata wins",
+      "local": [
+        "local"
+      ],
+      "remote": [
+        "remote",
+        "kid"
+      ],
+      "tombstones": [],
+      "expected": [
+        "local",
+        "kid"
+      ]
+    },
+    {
+      "name": "deleted favorite without addedAt stays deleted",
+      "local": [
+        "removed"
+      ],
+      "remote": [],
+      "tombstones": [
+        {
+          "url": "https://catalog.example/removed/",
+          "profileId": "default",
+          "deletedAt": "2026-10-02T10:00:00.000Z"
+        }
+      ],
+      "expected": []
+    },
+    {
+      "name": "strictly newer addedAt survives deletion",
+      "local": [
+        "atDeletion"
+      ],
+      "remote": [
+        "restored"
+      ],
+      "tombstones": [
+        {
+          "url": "https://catalog.example/removed/",
+          "profileId": "default",
+          "deletedAt": "2026-10-02T10:00:00.000Z"
+        }
+      ],
+      "expected": [
+        "restored"
+      ]
+    }
+  ],
+  "profileCases": [
+    {
+      "name": "local profile wins and new remote profiles become inactive",
+      "local": [
+        "local",
+        "kid"
+      ],
+      "remote": [
+        "remote",
+        "phone"
+      ],
+      "deletedProfiles": [],
+      "expected": [
+        {
+          "id": "default",
+          "name": "Principal PC",
+          "avatar": "sparkles",
+          "color": "#3b82f6",
+          "isActive": true,
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        {
+          "id": "kid",
+          "name": "Niño 龍",
+          "avatar": "sparkles",
+          "color": "#3b82f6",
+          "isActive": false,
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        {
+          "id": "phone",
+          "name": "Móvil",
+          "avatar": "sparkles",
+          "color": "#3b82f6",
+          "isActive": false,
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "deleted profile ID is suppressed independently of createdAt",
+      "local": [
+        "gone"
+      ],
+      "remote": [
+        "gone"
+      ],
+      "deletedProfiles": [
+        {
+          "profileId": "gone",
+          "deletedAt": "2026-10-02T10:00:00.000Z"
+        }
+      ],
+      "expected": []
+    }
+  ],
+  "payloads": {
+    "pc": {
+      "syncMeta": {
+        "schemaVersion": 2,
+        "appVersion": "0.2.11",
+        "lastModifiedAt": "2026-10-02T09:00:00.000Z",
+        "lastModifiedDevice": "windows",
+        "fileHashes": {
+          "profiles": "",
+          "history": "",
+          "favorites": "",
+          "settings": ""
+        },
+        "deletedFavorites": [],
+        "deletedProfiles": [],
+        "deletedHistory": [],
+        "devices": {
+          "windows": {
+            "lastSyncAt": "2026-10-02T09:00:00.000Z",
+            "appVersion": "0.2.11"
+          }
+        }
+      },
+      "profiles": [
+        {
+          "id": "default",
+          "name": "Principal PC",
+          "avatar": "sparkles",
+          "color": "#3b82f6",
+          "isActive": true,
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        {
+          "id": "kid",
+          "name": "Niño 龍",
+          "avatar": "sparkles",
+          "color": "#3b82f6",
+          "isActive": false,
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        }
+      ],
+      "history": [
+        {
+          "id": "local",
+          "animeTitle": "Café Dragon",
+          "animeUrl": "https://catalog.example/cafe/",
+          "thumbnailUrl": "",
+          "episodeNumber": 1,
+          "episodeUrl": "https://catalog.example/cafe/1/",
+          "watchProgress": 0.9,
+          "watchedAt": "2026-10-02T10:00:00.000Z",
+          "source": "jkanime",
+          "profileId": "default"
+        },
+        {
+          "id": "kid",
+          "animeTitle": "Café Dragon",
+          "animeUrl": "https://catalog.example/cafe/",
+          "thumbnailUrl": "",
+          "episodeNumber": 1,
+          "episodeUrl": "https://catalog.example/cafe/1/",
+          "watchProgress": 0.8,
+          "watchedAt": "2026-10-02T11:00:00.000Z",
+          "source": "jkanime",
+          "profileId": "kid"
+        }
+      ],
+      "favorites": [
+        {
+          "title": "Café PC",
+          "url": "https://catalog.example/cafe/",
+          "thumbnailUrl": "",
+          "source": "jkanime",
+          "profileId": "default"
+        },
+        {
+          "title": "Borrado",
+          "url": "https://catalog.example/removed/",
+          "thumbnailUrl": "",
+          "source": "jkanime",
+          "profileId": "default"
+        }
+      ],
+      "settings": {
+        "theme": "dark",
+        "download_dir": "C:\\Videos\\AniCS"
+      },
+      "settingsDesktop": {
+        "theme": "old-pc",
+        "subtitles": "true"
+      },
+      "settingsMobile": {
+        "theme": "cached-phone",
+        "quality": "auto"
+      }
+    },
+    "phone": {
+      "syncMeta": {
+        "schemaVersion": 2,
+        "appVersion": "0.2.11",
+        "lastModifiedAt": "2026-10-02T09:00:00.000Z",
+        "lastModifiedDevice": "android",
+        "fileHashes": {
+          "profiles": "",
+          "history": "",
+          "favorites": "",
+          "settings": ""
+        },
+        "deletedFavorites": [
+          {
+            "url": "https://catalog.example/removed/",
+            "profileId": "default",
+            "deletedAt": "2026-10-02T10:00:00.000Z"
+          }
+        ],
+        "deletedProfiles": [
+          {
+            "profileId": "gone",
+            "deletedAt": "2026-10-02T10:00:00.000Z"
+          }
+        ],
+        "deletedHistory": [],
+        "devices": {
+          "android": {
+            "lastSyncAt": "2026-10-02T10:00:00.000Z",
+            "appVersion": "0.2.11"
+          }
+        }
+      },
+      "profiles": [
+        {
+          "id": "default",
+          "name": "Principal Phone",
+          "avatar": "sparkles",
+          "color": "#3b82f6",
+          "isActive": true,
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        {
+          "id": "phone",
+          "name": "Móvil",
+          "avatar": "sparkles",
+          "color": "#3b82f6",
+          "isActive": true,
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        {
+          "id": "gone",
+          "name": "Borrado",
+          "avatar": "sparkles",
+          "color": "#3b82f6",
+          "isActive": true,
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        }
+      ],
+      "history": [
+        {
+          "id": "newer",
+          "animeTitle": "Café Dragon",
+          "animeUrl": "https://catalog.example/cafe/",
+          "thumbnailUrl": "",
+          "episodeNumber": 1,
+          "episodeUrl": "https://catalog.example/cafe/1/",
+          "watchProgress": 0.2,
+          "watchedAt": "2026-10-02T11:30:00.000Z",
+          "source": "otakustv",
+          "profileId": "default"
+        },
+        {
+          "id": "second",
+          "animeTitle": "Café Dragon",
+          "animeUrl": "https://catalog.example/cafe/",
+          "thumbnailUrl": "",
+          "episodeNumber": 2,
+          "episodeUrl": "https://catalog.example/cafe/2/",
+          "watchProgress": 0.8,
+          "watchedAt": "2026-10-02T11:40:00.000Z",
+          "source": "jkanime",
+          "profileId": "default"
+        }
+      ],
+      "favorites": [
+        {
+          "title": "Café Phone",
+          "url": "HTTPS://CATALOG.EXAMPLE/CAFE/",
+          "thumbnailUrl": "",
+          "source": "jkanime",
+          "profileId": "default"
+        },
+        {
+          "title": "Nuevo 龍",
+          "url": "https://catalog.example/new/",
+          "thumbnailUrl": "",
+          "source": "jkanime",
+          "profileId": "default"
+        }
+      ],
+      "settings": {
+        "theme": "phone-dark",
+        "download_dir": "/storage/emulated/0/Anime"
+      },
+      "settingsDesktop": {
+        "theme": "remote-pc",
+        "player_type": "internal"
+      },
+      "settingsMobile": {
+        "theme": "old-phone",
+        "quality": "720p"
+      }
+    },
+    "empty": {
+      "syncMeta": {
+        "schemaVersion": 2,
+        "appVersion": "0.2.11",
+        "lastModifiedAt": "2026-10-02T09:00:00.000Z",
+        "lastModifiedDevice": "windows",
+        "fileHashes": {
+          "profiles": "",
+          "history": "",
+          "favorites": "",
+          "settings": ""
+        },
+        "deletedFavorites": [],
+        "deletedProfiles": [],
+        "deletedHistory": []
+      },
+      "profiles": [],
+      "history": [],
+      "favorites": [],
+      "settings": {}
+    }
+  },
+  "mergeCases": [
+    {
+      "name": "PC caller preserves desktop priority and cached mobile settings",
+      "platform": "windows",
+      "local": "pc",
+      "remote": "phone",
+      "expected": {
+        "syncMeta": {
+          "schemaVersion": 2,
+          "appVersion": "0.2.11",
+          "lastModifiedAt": "2026-10-02T12:00:00.000Z",
+          "lastModifiedDevice": "windows",
+          "fileHashes": {
+            "profiles": "",
+            "history": "",
+            "favorites": "",
+            "settings": ""
+          },
+          "deletedFavorites": [
+            {
+              "url": "https://catalog.example/removed/",
+              "profileId": "default",
+              "deletedAt": "2026-10-02T10:00:00.000Z"
+            }
+          ],
+          "deletedProfiles": [
+            {
+              "profileId": "gone",
+              "deletedAt": "2026-10-02T10:00:00.000Z"
+            }
+          ],
+          "deletedHistory": [],
+          "devices": {
+            "android": {
+              "lastSyncAt": "2026-10-02T10:00:00.000Z",
+              "appVersion": "0.2.11"
+            },
+            "windows": {
+              "lastSyncAt": "2026-10-02T09:00:00.000Z",
+              "appVersion": "0.2.11"
+            }
+          }
+        },
+        "profiles": [
+          {
+            "id": "default",
+            "name": "Principal PC",
+            "avatar": "sparkles",
+            "color": "#3b82f6",
+            "isActive": true,
+            "createdAt": "2026-01-01T00:00:00.000Z"
+          },
+          {
+            "id": "kid",
+            "name": "Niño 龍",
+            "avatar": "sparkles",
+            "color": "#3b82f6",
+            "isActive": false,
+            "createdAt": "2026-01-01T00:00:00.000Z"
+          },
+          {
+            "id": "phone",
+            "name": "Móvil",
+            "avatar": "sparkles",
+            "color": "#3b82f6",
+            "isActive": false,
+            "createdAt": "2026-01-01T00:00:00.000Z"
+          }
+        ],
+        "history": [
+          {
+            "id": "second",
+            "animeTitle": "Café Dragon",
+            "animeUrl": "https://catalog.example/cafe/",
+            "thumbnailUrl": "",
+            "episodeNumber": 2,
+            "episodeUrl": "https://catalog.example/cafe/2/",
+            "watchProgress": 0.8,
+            "watchedAt": "2026-10-02T11:40:00.000Z",
+            "source": "jkanime",
+            "profileId": "default"
+          },
+          {
+            "id": "newer",
+            "animeTitle": "Café Dragon",
+            "animeUrl": "https://catalog.example/cafe/",
+            "thumbnailUrl": "",
+            "episodeNumber": 1,
+            "episodeUrl": "https://catalog.example/cafe/1/",
+            "watchProgress": 0.2,
+            "watchedAt": "2026-10-02T11:30:00.000Z",
+            "source": "otakustv",
+            "profileId": "default"
+          },
+          {
+            "id": "kid",
+            "animeTitle": "Café Dragon",
+            "animeUrl": "https://catalog.example/cafe/",
+            "thumbnailUrl": "",
+            "episodeNumber": 1,
+            "episodeUrl": "https://catalog.example/cafe/1/",
+            "watchProgress": 0.8,
+            "watchedAt": "2026-10-02T11:00:00.000Z",
+            "source": "jkanime",
+            "profileId": "kid"
+          }
+        ],
+        "favorites": [
+          {
+            "title": "Café PC",
+            "url": "https://catalog.example/cafe/",
+            "thumbnailUrl": "",
+            "source": "jkanime",
+            "profileId": "default"
+          },
+          {
+            "title": "Nuevo 龍",
+            "url": "https://catalog.example/new/",
+            "thumbnailUrl": "",
+            "source": "jkanime",
+            "profileId": "default"
+          }
+        ],
+        "settings": {
+          "theme": "dark",
+          "player_type": "internal",
+          "subtitles": "true",
+          "download_dir": "C:\\Videos\\AniCS"
+        },
+        "settingsDesktop": {
+          "theme": "dark",
+          "player_type": "internal",
+          "subtitles": "true",
+          "download_dir": "C:\\Videos\\AniCS"
+        },
+        "settingsMobile": {
+          "theme": "cached-phone",
+          "quality": "auto"
+        }
+      }
+    },
+    {
+      "name": "Android caller preserves mobile priority and its local profile names",
+      "platform": "android",
+      "local": "phone",
+      "remote": "pc",
+      "expected": {
+        "syncMeta": {
+          "schemaVersion": 2,
+          "appVersion": "0.2.11",
+          "lastModifiedAt": "2026-10-02T12:00:00.000Z",
+          "lastModifiedDevice": "android",
+          "fileHashes": {
+            "profiles": "",
+            "history": "",
+            "favorites": "",
+            "settings": ""
+          },
+          "deletedFavorites": [
+            {
+              "url": "https://catalog.example/removed/",
+              "profileId": "default",
+              "deletedAt": "2026-10-02T10:00:00.000Z"
+            }
+          ],
+          "deletedProfiles": [
+            {
+              "profileId": "gone",
+              "deletedAt": "2026-10-02T10:00:00.000Z"
+            }
+          ],
+          "deletedHistory": [],
+          "devices": {
+            "windows": {
+              "lastSyncAt": "2026-10-02T09:00:00.000Z",
+              "appVersion": "0.2.11"
+            },
+            "android": {
+              "lastSyncAt": "2026-10-02T10:00:00.000Z",
+              "appVersion": "0.2.11"
+            }
+          }
+        },
+        "profiles": [
+          {
+            "id": "default",
+            "name": "Principal Phone",
+            "avatar": "sparkles",
+            "color": "#3b82f6",
+            "isActive": true,
+            "createdAt": "2026-01-01T00:00:00.000Z"
+          },
+          {
+            "id": "phone",
+            "name": "Móvil",
+            "avatar": "sparkles",
+            "color": "#3b82f6",
+            "isActive": true,
+            "createdAt": "2026-01-01T00:00:00.000Z"
+          },
+          {
+            "id": "kid",
+            "name": "Niño 龍",
+            "avatar": "sparkles",
+            "color": "#3b82f6",
+            "isActive": false,
+            "createdAt": "2026-01-01T00:00:00.000Z"
+          }
+        ],
+        "history": [
+          {
+            "id": "second",
+            "animeTitle": "Café Dragon",
+            "animeUrl": "https://catalog.example/cafe/",
+            "thumbnailUrl": "",
+            "episodeNumber": 2,
+            "episodeUrl": "https://catalog.example/cafe/2/",
+            "watchProgress": 0.8,
+            "watchedAt": "2026-10-02T11:40:00.000Z",
+            "source": "jkanime",
+            "profileId": "default"
+          },
+          {
+            "id": "newer",
+            "animeTitle": "Café Dragon",
+            "animeUrl": "https://catalog.example/cafe/",
+            "thumbnailUrl": "",
+            "episodeNumber": 1,
+            "episodeUrl": "https://catalog.example/cafe/1/",
+            "watchProgress": 0.2,
+            "watchedAt": "2026-10-02T11:30:00.000Z",
+            "source": "otakustv",
+            "profileId": "default"
+          },
+          {
+            "id": "kid",
+            "animeTitle": "Café Dragon",
+            "animeUrl": "https://catalog.example/cafe/",
+            "thumbnailUrl": "",
+            "episodeNumber": 1,
+            "episodeUrl": "https://catalog.example/cafe/1/",
+            "watchProgress": 0.8,
+            "watchedAt": "2026-10-02T11:00:00.000Z",
+            "source": "jkanime",
+            "profileId": "kid"
+          }
+        ],
+        "favorites": [
+          {
+            "title": "Café Phone",
+            "url": "HTTPS://CATALOG.EXAMPLE/CAFE/",
+            "thumbnailUrl": "",
+            "source": "jkanime",
+            "profileId": "default"
+          },
+          {
+            "title": "Nuevo 龍",
+            "url": "https://catalog.example/new/",
+            "thumbnailUrl": "",
+            "source": "jkanime",
+            "profileId": "default"
+          }
+        ],
+        "settings": {
+          "theme": "phone-dark",
+          "quality": "720p",
+          "download_dir": "/storage/emulated/0/Anime"
+        },
+        "settingsDesktop": {
+          "theme": "remote-pc",
+          "subtitles": "true",
+          "player_type": "internal"
+        },
+        "settingsMobile": {
+          "theme": "phone-dark",
+          "quality": "720p",
+          "download_dir": "/storage/emulated/0/Anime"
+        }
+      }
+    }
+  ],
+  "retention": {
+    "local": [
+      {
+        "type": "episode",
+        "key": "expired",
+        "profileId": "default",
+        "deletedAt": "2026-09-02T11:59:59.999Z"
+      },
+      {
+        "type": "episode",
+        "key": "boundary",
+        "profileId": "default",
+        "deletedAt": "2026-09-02T12:00:00.000Z"
+      },
+      {
+        "type": "episode",
+        "key": "recent",
+        "profileId": "default",
+        "deletedAt": "2026-09-02T12:00:00.001Z"
+      }
+    ],
+    "expectedKeys": [
+      "recent"
+    ],
+    "retentionDays": 30
+  },
+  "historyLimit": {
+    "inputCount": 1502,
+    "expectedCount": 1500,
+    "firstEpisode": 1502,
+    "lastEpisode": 3
+  },
+  "localHistoryCases": [
+    {
+      "name": "explicit local source",
+      "entry": {
+        "id": "local-source",
+        "animeTitle": "Café Dragon",
+        "animeUrl": "https://catalog.example/cafe/",
+        "thumbnailUrl": "",
+        "episodeNumber": 1,
+        "episodeUrl": "https://catalog.example/cafe/1/",
+        "watchProgress": 0.8,
+        "watchedAt": "2026-10-02T10:00:00.000Z",
+        "source": "local",
+        "profileId": "default"
+      },
+      "expected": true
+    },
+    {
+      "name": "Windows path",
+      "entry": {
+        "id": "windows",
+        "animeTitle": "Café Dragon",
+        "animeUrl": "https://catalog.example/cafe/",
+        "thumbnailUrl": "",
+        "episodeNumber": 1,
+        "episodeUrl": "C:\\Videos\\AniCS\\episode.mp4",
+        "watchProgress": 0.8,
+        "watchedAt": "2026-10-02T10:00:00.000Z",
+        "source": "jkanime",
+        "profileId": "default"
+      },
+      "expected": true
+    },
+    {
+      "name": "Android shared storage",
+      "entry": {
+        "id": "storage",
+        "animeTitle": "Café Dragon",
+        "animeUrl": "/storage/emulated/0/Anime",
+        "thumbnailUrl": "",
+        "episodeNumber": 1,
+        "episodeUrl": "https://catalog.example/cafe/1/",
+        "watchProgress": 0.8,
+        "watchedAt": "2026-10-02T10:00:00.000Z",
+        "source": "jkanime",
+        "profileId": "default"
+      },
+      "expected": true
+    },
+    {
+      "name": "Android app storage",
+      "entry": {
+        "id": "/data/user/0/com.anics.app/files/episode.mp4",
+        "animeTitle": "Café Dragon",
+        "animeUrl": "https://catalog.example/cafe/",
+        "thumbnailUrl": "",
+        "episodeNumber": 1,
+        "episodeUrl": "https://catalog.example/cafe/1/",
+        "watchProgress": 0.8,
+        "watchedAt": "2026-10-02T10:00:00.000Z",
+        "source": "jkanime",
+        "profileId": "default"
+      },
+      "expected": true
+    },
+    {
+      "name": "local URI",
+      "entry": {
+        "id": "uri",
+        "animeTitle": "Café Dragon",
+        "animeUrl": "https://catalog.example/cafe/",
+        "thumbnailUrl": "",
+        "episodeNumber": 1,
+        "episodeUrl": "local://episode",
+        "watchProgress": 0.8,
+        "watchedAt": "2026-10-02T10:00:00.000Z",
+        "source": "jkanime",
+        "profileId": "default"
+      },
+      "expected": true
+    },
+    {
+      "name": "remote stream",
+      "entry": {
+        "id": "newer",
+        "animeTitle": "Café Dragon",
+        "animeUrl": "https://catalog.example/cafe/",
+        "thumbnailUrl": "",
+        "episodeNumber": 1,
+        "episodeUrl": "https://catalog.example/cafe/1/",
+        "watchProgress": 0.2,
+        "watchedAt": "2026-10-02T11:30:00.000Z",
+        "source": "otakustv",
+        "profileId": "default"
+      },
+      "expected": false
+    }
+  ]
+}

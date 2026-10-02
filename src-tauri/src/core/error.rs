@@ -38,6 +38,9 @@ pub enum AppError {
     #[error("Rate limit exceeded: {0}")]
     RateLimit(String),
 
+    #[error("Timeout: {0}")]
+    Timeout(String),
+
     #[error("{0}")]
     Generic(String),
 }
@@ -45,6 +48,24 @@ pub enum AppError {
 impl From<AppError> for String {
     fn from(e: AppError) -> String {
         e.to_string()
+    }
+}
+
+impl From<anics_core::error::CoreError> for AppError {
+    fn from(e: anics_core::error::CoreError) -> Self {
+        match e {
+            anics_core::error::CoreError::Network(err) => AppError::Network(err),
+            anics_core::error::CoreError::Parse(msg) => AppError::Parse(msg),
+            anics_core::error::CoreError::Scraper(msg) => AppError::Scraper(msg),
+            anics_core::error::CoreError::Resolver(msg) => AppError::Resolver(msg),
+            anics_core::error::CoreError::Download(msg) => AppError::Download(msg),
+            anics_core::error::CoreError::NotFound(msg) => AppError::NotFound(msg),
+            anics_core::error::CoreError::Cancelled => AppError::Cancelled,
+            anics_core::error::CoreError::Security(msg) => AppError::Security(msg),
+            anics_core::error::CoreError::RateLimit(msg) => AppError::RateLimit(msg),
+            anics_core::error::CoreError::Timeout(msg) => AppError::Timeout(msg),
+            anics_core::error::CoreError::Generic(msg) => AppError::Generic(msg),
+        }
     }
 }
 

@@ -1084,7 +1084,11 @@ export function MobileDetailsPage() {
           isOpen={showBatchModal}
           onClose={() => setShowBatchModal(false)}
           animeTitle={details.title}
-          episodes={details.episodes}
+          episodes={details.episodes.map(ep => ({
+            ...ep,
+            watched: (historyMap.get(ep.number) ?? ep.watchProgress ?? (ep.watched ? 1 : 0)) >= 0.85,
+            watchProgress: historyMap.get(ep.number) ?? ep.watchProgress ?? (ep.watched ? 1 : 0),
+          }))}
           source={source}
           onSuccessToast={(msg) => {
             setDownloadSuccessToast(msg);

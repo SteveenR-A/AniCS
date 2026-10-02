@@ -1,6 +1,6 @@
 [package]
 name = "anics"
-version = "0.2.11"
+version = "0.3.0"
 description = "AniCS - Anime & Donghua Desktop Application"
 authors = ["AniCS"]
 edition = "2021"
@@ -17,6 +17,7 @@ path = "src/main.rs"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+anics-core = { path = "../crates/anics-core" }
 tauri = { version = "2", features = ["protocol-asset", "custom-protocol"] }
 tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"

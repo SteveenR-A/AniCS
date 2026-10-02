@@ -1,4 +1,5 @@
 pub mod anime;
+pub mod catalog_contract;
 pub mod error;
 pub mod unpacker;
 pub mod url_security;

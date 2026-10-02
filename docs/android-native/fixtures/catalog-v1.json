@@ -1,0 +1,81 @@
+{
+  "fixtureVersion": 1,
+  "animeResults": [
+    {
+      "case": "legacy defaults and explicit nulls become omitted result fields",
+      "input": {"title": "Viaje del dragón 龍", "url": "https://catalog.example/dragon/", "description": null, "rating": null},
+      "expected": {"title": "Viaje del dragón 龍", "url": "https://catalog.example/dragon/", "thumbnailUrl": "", "source": "jkanime"}
+    },
+    {
+      "case": "full result preserves custom identity and display metadata",
+      "input": {"title": "Viaje del dragón 龍", "url": "https://catalog.example/dragon/", "thumbnailUrl": "https://images.example/dragon.webp", "description": "Una aventura.", "episode": "12", "animeType": "ONA", "status": "En emisión", "genres": ["Acción"], "year": "2026", "rating": 8.5, "source": "custom_0", "profileId": "perfil-ñ"},
+      "expected": {"title": "Viaje del dragón 龍", "url": "https://catalog.example/dragon/", "thumbnailUrl": "https://images.example/dragon.webp", "description": "Una aventura.", "episode": "12", "animeType": "ONA", "status": "En emisión", "genres": ["Acción"], "year": "2026", "rating": 8.5, "source": "custom_0", "profileId": "perfil-ñ"}
+    }
+  ],
+  "details": [
+    {
+      "case": "nullable details and watched progress",
+      "input": {"title": "Viaje del dragón 龍", "url": "https://catalog.example/dragon/", "thumbnailUrl": "", "synopsis": "Primera línea.\nSegunda línea.", "genres": ["Acción", "Fantasía"], "status": "En emisión", "animeType": "ONA", "studio": null, "duration": "24 min", "totalEpisodes": "?", "season": null, "broadcast": null, "languages": null, "year": "2026", "rating": 8.5, "source": "mundodonghua", "episodes": [{"number": 1, "title": null, "url": "https://catalog.example/dragon/1/", "thumbnailUrl": null, "watched": false, "watchProgress": 0.375}, {"number": 2, "title": "Encuentro", "url": "https://catalog.example/dragon/2/", "watched": false}]},
+      "expected": {"title": "Viaje del dragón 龍", "url": "https://catalog.example/dragon/", "thumbnailUrl": "", "synopsis": "Primera línea.\nSegunda línea.", "genres": ["Acción", "Fantasía"], "status": "En emisión", "animeType": "ONA", "studio": null, "duration": "24 min", "totalEpisodes": "?", "season": null, "broadcast": null, "languages": null, "year": "2026", "rating": 8.5, "source": "mundodonghua", "episodes": [{"number": 1, "title": null, "url": "https://catalog.example/dragon/1/", "thumbnailUrl": null, "watched": false, "watchProgress": 0.375}, {"number": 2, "title": "Encuentro", "url": "https://catalog.example/dragon/2/", "thumbnailUrl": null, "watched": false, "watchProgress": null}]}
+    }
+  ],
+  "servers": [
+    {
+      "case": "direct server retains referer independently of episode URL",
+      "input": {"name": "Servidor MP4", "url": "https://media.example/video.mp4?token=fixture", "isDirect": true, "referer": "https://catalog.example/dragon/1/"},
+      "expected": {"name": "Servidor MP4", "url": "https://media.example/video.mp4?token=fixture", "isDirect": true, "referer": "https://catalog.example/dragon/1/"}
+    },
+    {
+      "case": "embed without referer serializes null",
+      "input": {"name": "Servidor HLS", "url": "https://embed.example/e/fixture", "isDirect": false},
+      "expected": {"name": "Servidor HLS", "url": "https://embed.example/e/fixture", "isDirect": false, "referer": null}
+    }
+  ],
+  "media": [
+    {
+      "case": "HLS keeps signed URLs, headers and qualities",
+      "input": {"directUrl": "https://media.example/master.m3u8?token=fixture%2Bvalue", "mediaType": "hls", "referer": "https://catalog.example/dragon/1/", "userAgent": "AniCS-Contract/1", "qualities": [{"label": "720p", "url": "https://media.example/720.m3u8?token=fixture%2Bvalue", "bandwidth": 2500000}, {"label": "Auto", "url": "https://media.example/master.m3u8?token=fixture%2Bvalue", "bandwidth": null}]},
+      "expected": {"directUrl": "https://media.example/master.m3u8?token=fixture%2Bvalue", "mediaType": "hls", "referer": "https://catalog.example/dragon/1/", "userAgent": "AniCS-Contract/1", "qualities": [{"label": "720p", "url": "https://media.example/720.m3u8?token=fixture%2Bvalue", "bandwidth": 2500000}, {"label": "Auto", "url": "https://media.example/master.m3u8?token=fixture%2Bvalue", "bandwidth": null}]}
+    },
+    {
+      "case": "MP4 defaults optional headers to null",
+      "input": {"directUrl": "https://media.example/video.mp4", "mediaType": "mp4", "qualities": []},
+      "expected": {"directUrl": "https://media.example/video.mp4", "mediaType": "mp4", "referer": null, "userAgent": null, "qualities": []}
+    },
+    {
+      "case": "unknown format is explicit",
+      "input": {"directUrl": "https://media.example/download?id=fixture", "mediaType": "unknown", "qualities": []},
+      "expected": {"directUrl": "https://media.example/download?id=fixture", "mediaType": "unknown", "referer": null, "userAgent": null, "qualities": []}
+    }
+  ],
+  "filters": [
+    {
+      "case": "pagination and optional filters",
+      "input": {"query": "dragón 龍", "genre": "accion", "animeType": "ONA", "page": 2},
+      "expected": {"query": "dragón 龍", "genre": "accion", "status": null, "animeType": "ONA", "year": null, "orderBy": null, "page": 2}
+    }
+  ],
+  "pages": [
+    {
+      "case": "empty page without known total",
+      "input": {"results": [], "currentPage": 1, "hasNext": false},
+      "expected": {"results": [], "currentPage": 1, "totalPages": null, "hasNext": false}
+    }
+  ],
+  "genres": [
+    {"case": "Unicode genre name", "input": {"name": "Acción", "slug": "accion"}, "expected": {"name": "Acción", "slug": "accion"}}
+  ],
+  "schedule": [
+    {"case": "empty schedule day", "input": {"day": "Miércoles", "animes": []}, "expected": {"day": "Miércoles", "animes": []}}
+  ],
+  "errors": [
+    {"code": "network", "message": "No se pudo conectar", "sourceId": "jkanime"},
+    {"code": "timeout", "message": "Tiempo agotado", "sourceId": "jkanime"},
+    {"code": "parse", "message": "HTML no reconocido", "sourceId": "mundodonghua"},
+    {"code": "source_not_found", "message": "Fuente inexistente", "sourceId": "custom_9"},
+    {"code": "server_unavailable", "message": "Servidor sin stream", "sourceId": "otakustv"},
+    {"code": "cancelled", "message": "Operación cancelada"},
+    {"code": "security", "message": "URL bloqueada"},
+    {"code": "rate_limit", "message": "Límite temporal"}
+  ]
+}

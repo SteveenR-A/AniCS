@@ -84,6 +84,11 @@ pub fn init_database_inner(app_data_dir: &PathBuf) -> AppResult<Connection> {
             created_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
 
+        CREATE TABLE IF NOT EXISTS download_requests (
+            download_id TEXT PRIMARY KEY REFERENCES downloads(id) ON DELETE CASCADE,
+            request_json TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
@@ -1203,9 +1208,8 @@ pub fn reset_database() -> AppResult<()> {
 // Descargas Persistentes (Downloads)
 // ──────────────────────────────────────────
 
-/// Inserta o reemplaza una tarea de descarga en SQLite.
-pub fn save_download_task(task: &DownloadTask) -> AppResult<()> {
-    with_db(|conn| {
+/// Updates keep the original rowid and created_at, which define FIFO order.
+fn save_download_task_on(conn: &Connection, task: &DownloadTask) -> rusqlite::Result<()> {
         conn.execute(
             "INSERT INTO downloads
                 (id, anime_title, episode_number, stream_url, referer, output_path,
@@ -1238,7 +1242,37 @@ pub fn save_download_task(task: &DownloadTask) -> AppResult<()> {
             ],
         )?;
         Ok(())
-    })
+}
+
+pub fn save_download_task(task: &DownloadTask) -> AppResult<()> {
+    with_db(|conn| save_download_task_on(conn, task))
+}
+
+fn save_download_batch_on(
+    conn: &Connection,
+    tasks: &[(DownloadTask, String)],
+) -> rusqlite::Result<()> {
+    let transaction = conn.unchecked_transaction()?;
+    for (task, request) in tasks {
+        save_download_task_on(&transaction, task)?;
+        transaction.execute(
+            "INSERT INTO download_requests (download_id, request_json) VALUES (?1, ?2)",
+            params![task.id, request],
+        )?;
+    }
+    transaction.commit()
+}
+
+/// Reserve the complete batch atomically before any network resolution begins.
+pub fn save_download_batch(tasks: &[(DownloadTask, String)]) -> AppResult<()> {
+    with_db(|conn| save_download_batch_on(conn, tasks))
+}
+
+pub fn get_download_request_db(id: &str) -> AppResult<Option<String>> {
+    with_db(|conn| conn.query_row(
+        "SELECT request_json FROM download_requests WHERE download_id = ?1",
+        params![id], |row| row.get(0),
+    ).optional())
 }
 
 /// Actualiza el progreso y estado de una descarga periódicamente.
@@ -1270,13 +1304,12 @@ pub fn update_download_progress_db(
 }
 
 /// Recupera todas las descargas registradas en SQLite, ordenadas cronológicamente.
-pub fn get_all_downloads_db() -> AppResult<Vec<DownloadTask>> {
-    with_db(|conn| {
+fn get_all_downloads_on(conn: &Connection) -> rusqlite::Result<Vec<DownloadTask>> {
         let mut stmt = conn.prepare(
             "SELECT id, anime_title, episode_number, stream_url, referer, output_path,
-                    status, progress, downloaded_bytes, total_bytes, error, created_at
+                    status, progress, downloaded_bytes, total_bytes, error, created_at, rowid
              FROM downloads
-             ORDER BY created_at DESC",
+             ORDER BY rowid ASC",
         )?;
 
         let rows = stmt.query_map([], |row| {
@@ -1293,15 +1326,15 @@ pub fn get_all_downloads_db() -> AppResult<Vec<DownloadTask>> {
                 total_bytes: row.get::<_, Option<i64>>(9)?.map(|v| v as u64),
                 error: row.get(10)?,
                 created_at: row.get(11)?,
+                queue_order: row.get(12)?,
             })
         })?;
 
-        let mut tasks = Vec::new();
-        for r in rows.flatten() {
-            tasks.push(r);
-        }
-        Ok(tasks)
-    })
+        rows.collect()
+}
+
+pub fn get_all_downloads_db() -> AppResult<Vec<DownloadTask>> {
+    with_db(get_all_downloads_on)
 }
 
 /// Elimina el registro de una descarga de SQLite.
@@ -1333,6 +1366,60 @@ mod tests {
     use std::env;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn batch_reservations_survive_restart_and_updates_preserve_fifo() {
+        let root = env::temp_dir().join(format!("anics_queue_{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let tasks: Vec<_> = (1..=201).map(|episode| (
+            DownloadTask {
+                queue_order: 0, id: format!("episode{episode}"), anime_title: "Serie".to_string(),
+                episode_number: episode, stream_url: String::new(), referer: None,
+                output_path: format!("Ep{episode}.mp4"), status: "queued".to_string(), progress: 0.0,
+                downloaded_bytes: 0, total_bytes: None, error: None, created_at: "same-timestamp".to_string(),
+            },
+            format!("{{\"episodeUrl\":\"https://source.test/{episode}\",\"preferredServer\":\"Magi\"}}"),
+        )).collect();
+        {
+            let conn = init_database_inner(&root).unwrap();
+            save_download_batch_on(&conn, &tasks).unwrap();
+            let saved = get_all_downloads_on(&conn).unwrap();
+            assert_eq!(saved.len(), 201);
+            assert_eq!(saved.iter().map(|task| task.episode_number).collect::<Vec<_>>(), (1..=201).collect::<Vec<_>>());
+            let mut resumed = saved[0].clone();
+            resumed.status = "paused".to_string();
+            resumed.progress = 32.0;
+            save_download_task_on(&conn, &resumed).unwrap();
+            assert_eq!(get_all_downloads_on(&conn).unwrap()[0].queue_order, saved[0].queue_order);
+        }
+        {
+            let conn = init_database_inner(&root).unwrap();
+            let restored = get_all_downloads_on(&conn).unwrap();
+            assert_eq!(restored[0].episode_number, 1);
+            assert_eq!(restored[200].episode_number, 201);
+            let request: String = conn.query_row("SELECT request_json FROM download_requests WHERE download_id = 'episode201'", [], |row| row.get(0)).unwrap();
+            assert!(request.contains("https://source.test/201"));
+            assert!(request.contains("Magi"));
+            conn.execute("DELETE FROM downloads WHERE id = 'episode201'", []).unwrap();
+            let remaining: i64 = conn.query_row("SELECT COUNT(*) FROM download_requests WHERE download_id = 'episode201'", [], |row| row.get(0)).unwrap();
+            assert_eq!(remaining, 0);
+        }
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn failed_batch_transaction_does_not_leave_partial_reservations() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE downloads (id TEXT PRIMARY KEY, anime_title TEXT, episode_number INTEGER, stream_url TEXT, referer TEXT, output_path TEXT, status TEXT, progress REAL, downloaded_bytes INTEGER, total_bytes INTEGER, error TEXT, created_at TEXT); CREATE TABLE download_requests (download_id TEXT PRIMARY KEY, request_json TEXT);").unwrap();
+        let task = DownloadTask {
+            queue_order: 0, id: "duplicate".to_string(), anime_title: "Serie".to_string(), episode_number: 1,
+            stream_url: String::new(), referer: None, output_path: "Ep1.mp4".to_string(), status: "queued".to_string(),
+            progress: 0.0, downloaded_bytes: 0, total_bytes: None, error: None, created_at: "now".to_string(),
+        };
+        assert!(save_download_batch_on(&conn, &[(task.clone(), "{}".to_string()), (task, "{}".to_string())]).is_err());
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM downloads", [], |row| row.get(0)).unwrap();
+        assert_eq!(count, 0);
+    }
 
     fn get_unique_id() -> String {
         SystemTime::now()

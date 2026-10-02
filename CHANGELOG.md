@@ -5,6 +5,15 @@ El formato está basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1
 
 ---
 
+## [0.3.0] - 2026-10-02
+
+### Arquitectura Multiplataforma y Núcleo Rust Desacoplado
+- Núcleo Rust puro anics-core desacoplado sin dependencias de SQLite ni Tauri
+- Soporte inicial para Android nativo preview (Kotlin, Jetpack Compose, Media3)
+- Mejoras de estabilidad y compatibilidad en descargas y streaming
+
+---
+
 ## [0.2.11] - 2026-10-01
 
 ### Estabilidad de Streaming, Auditoría de Seguridad y Optimización de Rendimiento

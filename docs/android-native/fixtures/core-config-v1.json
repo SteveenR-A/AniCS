@@ -1,0 +1,20 @@
+{
+  "fixtureVersion": 1,
+  "settings": {
+    "jkanime_base_url": "https://mirror.example/catalog/",
+    "mundodonghua_base_url": "https://donghua.example",
+    "otakustv_base_url": "https://anime.example",
+    "custom_sources": "[{\"name\":\"Donghua 龍\",\"url\":\"https://custom.example/donghua/\",\"type\":\"Anime Donghua Respaldo\"},{\"name\":\"Respaldo\",\"url\":\"https://custom.example/anime/\",\"type\":\"RESPALDO\"},{\"name\":\"Libre\",\"url\":\"https://custom.example/free/\"}]"
+  },
+  "expected": {
+    "sources": [
+      {"id": "jkanime", "name": "Anime", "extractor": "jkanime", "baseUrl": "https://mirror.example/catalog/", "mirrorUrls": ["https://jkanime.org", "https://jkanime.bz", "https://jkanime.net"]},
+      {"id": "mundodonghua", "name": "Donghua", "extractor": "mundodonghua", "baseUrl": "https://donghua.example", "mirrorUrls": []},
+      {"id": "otakustv", "name": "OtakusTV", "extractor": "otakustv", "baseUrl": "https://anime.example", "mirrorUrls": []},
+      {"id": "custom_0", "name": "Donghua 龍", "extractor": "mundodonghua", "baseUrl": "https://custom.example/donghua/", "mirrorUrls": []},
+      {"id": "custom_1", "name": "Respaldo", "extractor": "otakustv", "baseUrl": "https://custom.example/anime/", "mirrorUrls": []},
+      {"id": "custom_2", "name": "Libre", "extractor": "jkanime", "baseUrl": "https://custom.example/free/", "mirrorUrls": ["https://jkanime.org", "https://jkanime.bz", "https://jkanime.net"]}
+    ],
+    "http": {"requestTimeoutMs": 20000, "connectTimeoutMs": 10000, "maxRedirects": 10, "maxAttempts": 3}
+  }
+}

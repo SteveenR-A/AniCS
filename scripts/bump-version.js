@@ -50,11 +50,24 @@ if (fs.existsSync(pkgLockPath)) {
 }
 
 // 2. src-tauri/Cargo.toml
-const cargoPath = path.join(ROOT, 'src-tauri', 'Cargo.toml');
-let cargo = fs.readFileSync(cargoPath, 'utf8');
-cargo = cargo.replace(/^version = "[\d.]+"/m, `version = "${targetVersion}"`);
-fs.writeFileSync(cargoPath, cargo, 'utf8');
-console.log('  ✓ src-tauri/Cargo.toml actualizado');
+const cargoPaths = [path.join(ROOT, 'src-tauri', 'Cargo.toml'), path.join(ROOT, 'crates', 'anics-core', 'Cargo.toml'), path.join(ROOT, 'crates', 'anics-ffi', 'Cargo.toml')];
+for (const cPath of cargoPaths) {
+  if (fs.existsSync(cPath)) {
+    let cargo = fs.readFileSync(cPath, 'utf8');
+    cargo = cargo.replace(/^version = "[\d.]+"/m, `version = "${targetVersion}"`);
+    fs.writeFileSync(cPath, cargo, 'utf8');
+    console.log(`  ✓ ${path.relative(ROOT, cPath)} actualizado`);
+  }
+}
+
+// 2.1 android-native/app/build.gradle.kts
+const androidGradlePath = path.join(ROOT, 'android-native', 'app', 'build.gradle.kts');
+if (fs.existsSync(androidGradlePath)) {
+  let gCode = fs.readFileSync(androidGradlePath, 'utf8');
+  gCode = gCode.replace(/versionName = "[^"]+"/, `versionName = "${targetVersion}-preview"`);
+  fs.writeFileSync(androidGradlePath, gCode, 'utf8');
+  console.log('  ✓ android-native/app/build.gradle.kts actualizado');
+}
 
 // 3. src-tauri/tauri.conf.json
 const tauriConfPath = path.join(ROOT, 'src-tauri', 'tauri.conf.json');

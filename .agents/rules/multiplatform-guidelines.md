@@ -57,7 +57,8 @@ Este documento establece las reglas arquitectónicas y directrices obligatorias 
    - `CREATE TABLE IF NOT EXISTS` -> `ALTER TABLE ADD COLUMN` -> `CREATE INDEX IF NOT EXISTS` -> inserción inicial.
    - Jamás declarar índices sobre columnas antes de verificar y ejecutar sus respectivas migraciones `ALTER TABLE`.
 3. **Sincronización en la Nube y Lápidas (Tombstones)**:
-   - Todo borrado intencional de datos debe registrarse en la tabla `tombstones` para propagarse fielmente a través de GitHub Gist.
+   - Todo borrado intencional de datos debe registrarse en la tabla `tombstones` para propagarse a través de Firestore (`users/{userId}/sync/data`, esquema v2). Los nombres Gist restantes son aliases de compatibilidad, no otro transporte.
+   - Mantener la semántica actual de `mergeSyncData`, la separación de ajustes móvil/escritorio y el modo local con Auth desactivado. El contrato y las diferencias pendientes de compatibilidad nativa están en `docs/android-native/sync-contracts.md`; no asumir ETag ni reemplazar el proveedor durante la migración.
 
 ---
 

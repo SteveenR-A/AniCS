@@ -1,18 +1,16 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Arc,
-};
+use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
-use tokio::sync::{mpsc, oneshot, Mutex, Notify};
+use tokio::sync::{mpsc, oneshot, Mutex};
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::core::*;
 use crate::downloader::HlsEngine;
+use crate::downloader::queue::{DownloadQueue, QueueTicket};
 use crate::storage;
 use crate::AppState;
 
@@ -25,8 +23,8 @@ type DownloadMap = Arc<Mutex<HashMap<String, DownloadHandle>>>;
 
 pub struct DownloadManager {
     pub tasks: DownloadMap,
-    pub active_slots: Arc<AtomicUsize>,
-    pub slot_notify: Arc<Notify>,
+    queue: Arc<DownloadQueue>,
+    submission_lock: Mutex<()>,
     operation_locks: Mutex<HashMap<String, std::sync::Weak<Mutex<()>>>>,
 }
 
@@ -34,8 +32,8 @@ impl DownloadManager {
     pub fn new() -> Self {
         Self {
             tasks: Arc::new(Mutex::new(HashMap::new())),
-            active_slots: Arc::new(AtomicUsize::new(0)),
-            slot_notify: Arc::new(Notify::new()),
+            queue: Arc::new(DownloadQueue::default()),
+            submission_lock: Mutex::new(()),
             operation_locks: Mutex::new(HashMap::new()),
         }
     }
@@ -64,46 +62,6 @@ fn configured_concurrency_limit() -> usize {
         .and_then(|v| v.parse::<usize>().ok())
         .unwrap_or(3)
         .clamp(1, 4)
-}
-
-struct DownloadSlotGuard {
-    active_slots: Arc<AtomicUsize>,
-    slot_notify: Arc<Notify>,
-}
-
-impl Drop for DownloadSlotGuard {
-    fn drop(&mut self) {
-        self.active_slots.fetch_sub(1, Ordering::AcqRel);
-        self.slot_notify.notify_waiters();
-    }
-}
-
-async fn acquire_download_slot(
-    active_slots: Arc<AtomicUsize>,
-    slot_notify: Arc<Notify>,
-    cancel_rx: &mut oneshot::Receiver<()>,
-) -> Option<DownloadSlotGuard> {
-    loop {
-        let limit = configured_concurrency_limit();
-        let current = active_slots.load(Ordering::Acquire);
-
-        if current < limit
-            && active_slots
-                .compare_exchange(current, current + 1, Ordering::AcqRel, Ordering::Acquire)
-                .is_ok()
-        {
-            return Some(DownloadSlotGuard {
-                active_slots,
-                slot_notify,
-            });
-        }
-
-        tokio::select! {
-            _ = &mut *cancel_rx => return None,
-            _ = slot_notify.notified() => {}
-            _ = tokio::time::sleep(std::time::Duration::from_millis(750)) => {}
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -138,6 +96,45 @@ pub struct BatchDownloadItem {
     pub episode_number: u32,
     pub episode_url: String,
     pub source: String,
+    #[serde(default)]
+    pub preferred_server: Option<String>,
+    #[serde(default = "default_allow_fallback")]
+    pub allow_fallback: bool,
+}
+
+fn default_allow_fallback() -> bool { true }
+
+pub const MAX_BATCH_EPISODES: usize = 5000;
+
+async fn resolve_queued_episode(id: &str) -> Result<ResolvedMedia, String> {
+    let request = storage::get_download_request_db(id).map_err(|e| e.to_string())?
+        .ok_or_else(|| "No se encontró la solicitud del episodio".to_string())?;
+    let item: BatchDownloadItem = serde_json::from_str(&request).map_err(|e| e.to_string())?;
+    let extractor = crate::scrapers::create_extractor(&item.source)
+        .ok_or_else(|| format!("Fuente desconocida: {}", item.source))?;
+    let servers = tokio::time::timeout(std::time::Duration::from_secs(60), extractor.get_servers(&item.episode_url))
+        .await.map_err(|_| "Tiempo agotado buscando servidores".to_string())?
+        .map_err(|e| format!("No se pudieron obtener servidores: {e}"))?;
+    let servers = crate::downloader::server_policy::candidates(servers, item.preferred_server.as_deref(), item.allow_fallback)?;
+    let mut errors = Vec::new();
+    for server in servers {
+        match tokio::time::timeout(std::time::Duration::from_secs(45), extractor.resolve_stream(&server)).await {
+            Ok(Ok(media)) if !media.direct_url.trim().is_empty() => return Ok(media),
+            Ok(Ok(_)) => errors.push(format!("{}: no devolvió una URL directa", server.name)),
+            Ok(Err(error)) => errors.push(format!("{}: {error}", server.name)),
+            Err(_) => errors.push(format!("{}: tiempo de espera agotado", server.name)),
+        }
+    }
+    Err(format!("No se pudo preparar el episodio. {}", errors.join(" · ")))
+}
+
+fn finish_preparation(task: &DownloadTask, sender: &mpsc::UnboundedSender<DownloadProgress>, status: DownloadStatus, error: String) {
+    let paused = status == DownloadStatus::Paused;
+    let _ = sender.send(DownloadProgress {
+        id: task.id.clone(), progress: task.progress, speed_kbps: 0.0,
+        downloaded_bytes: task.downloaded_bytes, total_bytes: task.total_bytes,
+        status, error: if paused { None } else { Some(error) },
+    });
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -333,10 +330,10 @@ pub fn clean_empty_anime_folder_safely(folder_path: &Path, base_dir: &Path) {
 
 fn spawn_download(
     download_id: String,
-    task_record: DownloadTask,
+    mut task_record: DownloadTask,
     app_handle: AppHandle,
-    active_slots: Arc<AtomicUsize>,
-    slot_notify: Arc<Notify>,
+    queue: Arc<DownloadQueue>,
+    ticket: QueueTicket,
     mut cancel_rx: oneshot::Receiver<()>,
     tasks_map: DownloadMap,
 ) -> tokio::task::JoinHandle<()> {
@@ -349,10 +346,10 @@ fn spawn_download(
     // Reenviar eventos de progreso hacia Tauri Event y actualizar DB periódicamente
     let progress_forwarder = tokio::spawn(async move {
         let mut last_db_update = std::time::Instant::now();
+        let mut last_status = None;
         while let Some(progress) = progress_rx.recv().await {
-            let _ = app_handle_clone.emit("download-progress", &progress);
-
             if last_db_update.elapsed().as_millis() >= 800
+                || last_status.as_ref() != Some(&progress.status)
                 || progress.status == DownloadStatus::Completed
                 || progress.status == DownloadStatus::Failed
                 || progress.status == DownloadStatus::Paused
@@ -374,7 +371,9 @@ fn spawn_download(
                     progress.error.as_deref(),
                 );
                 last_db_update = std::time::Instant::now();
+                last_status = Some(progress.status.clone());
             }
+            let _ = app_handle_clone.emit("download-progress", &progress);
         }
     });
 
@@ -393,10 +392,10 @@ fn spawn_download(
         // 2. Esperar un turno respetando el ajuste max_concurrent_downloads (1..4).
         // El límite se consulta mientras la tarea espera, por lo que cambiarlo en Ajustes
         // afecta a las tareas en cola sin reiniciar AniCS.
-        let _slot_guard = match acquire_download_slot(
-            active_slots,
-            slot_notify,
+        let _slot_guard = match queue.acquire(
+            &ticket,
             &mut cancel_rx,
+            configured_concurrency_limit,
         ).await {
             Some(guard) => guard,
             None => {
@@ -415,6 +414,38 @@ fn spawn_download(
                 return;
             }
         };
+
+        // A queued batch episode holds its position before resolution. Requests
+        // survive restart and are resolved only when the episode gets its turn.
+        if task_record.stream_url.is_empty() {
+            let resolution = tokio::select! {
+                _ = &mut cancel_rx => Err("Descarga pausada durante la preparación".to_string()),
+                result = resolve_queued_episode(&task_record.id) => result,
+            };
+            match resolution {
+                Ok(media) => {
+                    task_record.stream_url = media.direct_url;
+                    task_record.referer = media.referer;
+                    if let Err(error) = storage::save_download_task(&task_record) {
+                        finish_preparation(&task_record, &progress_tx, DownloadStatus::Failed, error.to_string());
+                        drop(progress_tx);
+                        let _ = progress_forwarder.await;
+                        tasks_map.lock().await.remove(&dl_id_cleanup);
+                        return;
+                    }
+                }
+                Err(error) => {
+                    let status = if error == "Descarga pausada durante la preparación" {
+                        DownloadStatus::Paused
+                    } else { DownloadStatus::Failed };
+                    finish_preparation(&task_record, &progress_tx, status, error);
+                    drop(progress_tx);
+                    let _ = progress_forwarder.await;
+                    tasks_map.lock().await.remove(&dl_id_cleanup);
+                    return;
+                }
+            }
+        }
 
         // 3. Notificar inicio de descarga
         let _ = progress_tx.send(DownloadProgress {
@@ -568,15 +599,14 @@ fn spawn_download(
     })
 }
 
-async fn start_download_internal(
+fn create_download_record(
     anime_title: String,
     episode_number: u32,
     stream_url: String,
     referer: Option<String>,
     output_dir: Option<String>,
-    app_handle: AppHandle,
-    state: &AppState,
-) -> Result<String, String> {
+    app_handle: &AppHandle,
+) -> Result<DownloadTask, String> {
     let download_id = Uuid::new_v4().to_string();
 
     let base_dir = if let Some(dir) = output_dir {
@@ -591,15 +621,15 @@ async fn start_download_internal(
 
     let safe_title = sanitize_anime_folder_name(&anime_title);
     let anime_folder = base_dir.join(&safe_title);
-    if let Err(e) = fs::create_dir_all(&anime_folder) {
-        log::warn!("No se pudo crear la carpeta {}: {}", anime_folder.display(), e);
-    }
+    fs::create_dir_all(&anime_folder)
+        .map_err(|e| format!("No se pudo crear la carpeta de descarga: {e}"))?;
 
     let output_path = anime_folder.join(format!("Ep{:03}.mp4", episode_number));
     crate::downloader::media_server::register_download_root(&base_dir);
     let output_path_str = output_path.to_string_lossy().to_string();
 
     let task_record = DownloadTask {
+        queue_order: 0,
         id: download_id.clone(),
         anime_title,
         episode_number,
@@ -614,28 +644,71 @@ async fn start_download_internal(
         created_at: Utc::now().to_rfc3339(),
     };
 
-    storage::save_download_task(&task_record).map_err(|e| e.to_string())?;
+    Ok(task_record)
+}
 
+async fn launch_download(
+    task_record: DownloadTask,
+    ticket: QueueTicket,
+    app_handle: AppHandle,
+    manager: &DownloadManager,
+) {
+    let download_id = task_record.id.clone();
     let (cancel_tx, cancel_rx) = oneshot::channel::<()>();
-    let tasks_map = state.download_manager.tasks.clone();
+    let tasks_map = manager.tasks.clone();
+    let mut tasks = tasks_map.lock().await;
+    let _ = app_handle.emit("download-created", &task_record);
     let handle = spawn_download(
         download_id.clone(),
         task_record,
         app_handle,
-        state.download_manager.active_slots.clone(),
-        state.download_manager.slot_notify.clone(),
+        manager.queue.clone(),
+        ticket,
         cancel_rx,
         tasks_map.clone(),
     );
 
-    tasks_map.lock().await.insert(
+    tasks.insert(
         download_id.clone(),
         DownloadHandle {
             task: handle,
             cancel_tx,
         },
     );
-    Ok(download_id)
+}
+
+fn existing_download<'a>(records: &'a [DownloadTask], output_path: &str) -> Option<&'a DownloadTask> {
+    records.iter().find(|record| record.output_path == output_path && (
+        matches!(record.status.as_str(), "queued" | "downloading")
+        || (record.status == "completed" && Path::new(output_path).is_file())
+    ))
+}
+
+async fn start_download_internal(
+    anime_title: String,
+    episode_number: u32,
+    stream_url: String,
+    referer: Option<String>,
+    output_dir: Option<String>,
+    app_handle: AppHandle,
+    state: &AppState,
+) -> Result<String, String> {
+    let manager = &state.download_manager;
+    let _submission = manager.submission_lock.lock().await;
+    let record = create_download_record(anime_title, episode_number, stream_url, referer, output_dir, &app_handle)?;
+    let saved = storage::get_all_downloads_db().map_err(|e| e.to_string())?;
+    if let Some(existing) = existing_download(&saved, &record.output_path) {
+        let _ = app_handle.emit("download-created", existing);
+        return Ok(existing.id.clone());
+    }
+    storage::save_download_task(&record).map_err(|e| e.to_string())?;
+    let record = storage::get_all_downloads_db().map_err(|e| e.to_string())?
+        .into_iter().find(|task| task.id == record.id)
+        .ok_or_else(|| "No se pudo recuperar la tarea creada".to_string())?;
+    let ticket = manager.queue.reserve(record.queue_order, &record.id);
+    let id = record.id.clone();
+    launch_download(record, ticket, app_handle, manager).await;
+    Ok(id)
 }
 
 /// Iniciar una descarga individual y persistirla en SQLite.
@@ -661,82 +734,50 @@ pub async fn start_download(
     .await
 }
 
-/// Resuelve y encola un lote completo dentro de Rust para que el proceso no dependa
-/// del WebView mientras Android tiene la pantalla apagada.
+/// Persist and reserve the whole batch before network work. Returns immediately;
+/// each worker resolves its own episode when its FIFO turn becomes available.
 #[tauri::command]
 pub async fn start_batch_download(
-    items: Vec<BatchDownloadItem>,
+    mut items: Vec<BatchDownloadItem>,
     app_handle: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Vec<BatchDownloadResult>, String> {
-    if items.len() > 200 {
-        return Err("El lote excede el máximo de 200 episodios".to_string());
+    if items.len() > MAX_BATCH_EPISODES {
+        return Err(format!("El lote excede el máximo de {MAX_BATCH_EPISODES} episodios"));
     }
-
+    let manager = &state.download_manager;
+    let _submission = manager.submission_lock.lock().await;
+    items.sort_by_key(|item| item.episode_number);
     let mut results = Vec::with_capacity(items.len());
-
+    let mut existing = storage::get_all_downloads_db().map_err(|e| e.to_string())?;
+    let mut prepared = Vec::new();
     for item in items {
-        let extractor = match crate::scrapers::create_extractor(&item.source) {
-            Some(extractor) => extractor,
-            None => {
-                results.push(BatchDownloadResult {
-                    episode_number: item.episode_number,
-                    download_id: None,
-                    error: Some(format!("Fuente desconocida: {}", item.source)),
-                });
-                continue;
+        let result = (|| {
+            if item.episode_url.trim().is_empty() {
+                return Err("El episodio no tiene una URL válida".to_string());
             }
-        };
-
-        let servers = match extractor.get_servers(&item.episode_url).await {
-            Ok(servers) => servers,
-            Err(e) => {
-                results.push(BatchDownloadResult {
-                    episode_number: item.episode_number,
-                    download_id: None,
-                    error: Some(format!("No se pudieron obtener servidores: {e}")),
-                });
-                continue;
+            if crate::scrapers::create_extractor(&item.source).is_none() {
+                return Err(format!("Fuente desconocida: {}", item.source));
             }
-        };
-
-        let mut resolved = None;
-        let mut last_error = None;
-        for server in servers {
-            match extractor.resolve_stream(&server).await {
-                Ok(media) if !media.direct_url.trim().is_empty() => {
-                    resolved = Some(media);
-                    break;
-                }
-                Ok(_) => {
-                    last_error = Some("El servidor no devolvió una URL directa".to_string());
-                }
-                Err(e) => {
-                    last_error = Some(e.to_string());
-                }
+            let record = create_download_record(
+                item.anime_title.clone(),
+                item.episode_number,
+                String::new(),
+                None,
+                None,
+                &app_handle,
+            )?;
+            if let Some(saved) = existing_download(&existing, &record.output_path) {
+                let _ = app_handle.emit("download-created", saved);
+                return Ok(saved.id.clone());
             }
-        }
-
-        let Some(media) = resolved else {
-            results.push(BatchDownloadResult {
-                episode_number: item.episode_number,
-                download_id: None,
-                error: last_error.or_else(|| Some("No hay servidores reproducibles".to_string())),
-            });
-            continue;
-        };
-
-        match start_download_internal(
-            item.anime_title,
-            item.episode_number,
-            media.direct_url,
-            media.referer,
-            None,
-            app_handle.clone(),
-            state.inner(),
-        )
-        .await
-        {
+            let request = serde_json::to_string(&item).map_err(|e| e.to_string())?;
+            let id = record.id.clone();
+            existing.push(record.clone());
+            prepared.push((record, request));
+            Ok(id)
+        })();
+        match result {
             Ok(download_id) => results.push(BatchDownloadResult {
                 episode_number: item.episode_number,
                 download_id: Some(download_id),
@@ -749,7 +790,18 @@ pub async fn start_batch_download(
             }),
         }
     }
-
+    storage::save_download_batch(&prepared).map_err(|e| e.to_string())?;
+    let ids: std::collections::HashSet<_> = prepared.iter().map(|(task, _)| task.id.as_str()).collect();
+    let records = storage::get_all_downloads_db().map_err(|e| e.to_string())?;
+    // Reserve ALL tickets before launching the first worker.
+    let reserved: Vec<_> = records.into_iter().filter(|task| ids.contains(task.id.as_str()))
+        .map(|task| {
+            let ticket = manager.queue.reserve(task.queue_order, &task.id);
+            (task, ticket)
+        }).collect();
+    for (record, ticket) in reserved {
+        launch_download(record, ticket, app_handle.clone(), manager).await;
+    }
     Ok(results)
 }
 
@@ -795,36 +847,32 @@ pub async fn resume_download(
     app_handle: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    let _submission = state.download_manager.submission_lock.lock().await;
     let _operation = state.download_manager.lock_task(&download_id).await;
     let all = storage::get_all_downloads_db().map_err(|e| e.to_string())?;
+    if let Some(record) = all.iter().find(|task| task.id == download_id) {
+        if all.iter().any(|task| task.id != download_id && task.output_path == record.output_path && matches!(task.status.as_str(), "queued" | "downloading")) {
+            return Err("Este episodio ya tiene una descarga activa".to_string());
+        }
+    }
     let task_record = all.into_iter()
         .find(|t| t.id == download_id)
         .ok_or_else(|| "Descarga no encontrada".to_string())?;
 
     // Si ya está activa en memoria, no volver a iniciar
-    let mut tasks = state.download_manager.tasks.lock().await;
+    let tasks = state.download_manager.tasks.lock().await;
     if tasks.contains_key(&download_id) {
         return Ok(());
     }
+    drop(tasks);
 
     let mut record = task_record;
     record.status = "queued".to_string();
     record.error = None;
     storage::save_download_task(&record).map_err(|e| e.to_string())?;
 
-    let (cancel_tx, cancel_rx) = oneshot::channel::<()>();
-    let tasks_map = state.download_manager.tasks.clone();
-    let handle = spawn_download(
-        download_id.clone(),
-        record,
-        app_handle,
-        state.download_manager.active_slots.clone(),
-        state.download_manager.slot_notify.clone(),
-        cancel_rx,
-        tasks_map.clone(),
-    );
-
-    tasks.insert(download_id, DownloadHandle { task: handle, cancel_tx });
+    let ticket = state.download_manager.queue.reserve(record.queue_order, &download_id);
+    launch_download(record, ticket, app_handle, &state.download_manager).await;
     Ok(())
 }
 
@@ -835,9 +883,15 @@ pub async fn retry_download(
     app_handle: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    let _submission = state.download_manager.submission_lock.lock().await;
     let _operation = state.download_manager.lock_task(&download_id).await;
     if state.download_manager.tasks.lock().await.contains_key(&download_id) { return Ok(()); }
     let all = storage::get_all_downloads_db().map_err(|e| e.to_string())?;
+    if let Some(record) = all.iter().find(|task| task.id == download_id) {
+        if all.iter().any(|task| task.id != download_id && task.output_path == record.output_path && matches!(task.status.as_str(), "queued" | "downloading")) {
+            return Err("Este episodio ya tiene una descarga activa".to_string());
+        }
+    }
     let task_record = all.into_iter()
         .find(|t| t.id == download_id)
         .ok_or_else(|| "Descarga no encontrada".to_string())?;
@@ -859,19 +913,8 @@ pub async fn retry_download(
     record.error = None;
     storage::save_download_task(&record).map_err(|e| e.to_string())?;
 
-    let (cancel_tx, cancel_rx) = oneshot::channel::<()>();
-    let tasks_map = state.download_manager.tasks.clone();
-    let handle = spawn_download(
-        download_id.clone(),
-        record,
-        app_handle,
-        state.download_manager.active_slots.clone(),
-        state.download_manager.slot_notify.clone(),
-        cancel_rx,
-        tasks_map.clone(),
-    );
-
-    state.download_manager.tasks.lock().await.insert(download_id, DownloadHandle { task: handle, cancel_tx });
+    let ticket = state.download_manager.queue.reserve(record.queue_order, &download_id);
+    launch_download(record, ticket, app_handle, &state.download_manager).await;
     Ok(())
 }
 
@@ -2168,6 +2211,7 @@ pub async fn get_storage_space_info(app_handle: AppHandle) -> Result<StorageSpac
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::Ordering;
 
     #[tokio::test]
     async fn pause_waits_for_worker_before_returning() {

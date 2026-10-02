@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { DownloadTask, DownloadProgress } from '@/types';
+import { orderDownloadTasks } from '@/utils/downloadQueue';
 import {
   getAllDownloads,
   pauseDownload,
@@ -8,6 +9,7 @@ import {
   cancelDownload,
   deleteDownloadRecord,
   onDownloadProgress,
+  onDownloadCreated,
   onDownloadCompleted,
   onDownloadPaused,
   notifyServiceStart,
@@ -42,11 +44,15 @@ interface DownloadStore {
 }
 
 let unlistenProgress: (() => void) | null = null;
+let unlistenCreated: (() => void) | null = null;
 let unlistenCompleted: (() => void) | null = null;
 let unlistenPaused: (() => void) | null = null;
 
 let lastNotifyTime = 0;
 let notifyTimer: ReturnType<typeof setTimeout> | null = null;
+const pendingProgress = new Map<string, DownloadProgress>();
+let listenerGeneration = 0;
+let handleVisibilityOrFocus: (() => void) | null = null;
 
 function triggerNotificationSync() {
   const now = Date.now();
@@ -155,8 +161,11 @@ export const useDownloadStore = create<DownloadStore>((set, get) => ({
   },
 
   syncWithDb: async () => {
+    const generation = listenerGeneration;
+    const initialTasks = get().tasks;
     try {
       const saved = await getAllDownloads();
+      if (generation !== listenerGeneration) return;
       set((state) => {
         const next = new Map(state.tasks);
         for (const t of saved) {
@@ -164,18 +173,23 @@ export const useDownloadStore = create<DownloadStore>((set, get) => ({
           if (existing) {
             next.set(t.id, {
               ...existing,
-              status: t.status,
+              status: existing === initialTasks.get(t.id) ? t.status : existing.status,
               progress: Math.max(existing.progress || 0, t.progress || 0),
               downloadedBytes: Math.max(existing.downloadedBytes || 0, t.downloadedBytes || 0),
               totalBytes: t.totalBytes ?? existing.totalBytes,
-              error: t.error,
+              error: existing === initialTasks.get(t.id) ? t.error : existing.error,
               outputPath: t.outputPath || existing.outputPath,
+              streamUrl: t.streamUrl,
+              referer: t.referer,
+              queueOrder: t.queueOrder,
             });
           } else {
-            next.set(t.id, t);
+            const pending = pendingProgress.get(t.id);
+            next.set(t.id, pending ? { ...t, ...pending } : t);
           }
+          pendingProgress.delete(t.id);
         }
-        return { tasks: next };
+        return { tasks: orderDownloadTasks(next) };
       });
       triggerNotificationSync();
     } catch (e) {
@@ -185,22 +199,35 @@ export const useDownloadStore = create<DownloadStore>((set, get) => ({
 
   init: async () => {
     if (get().initialized) return;
+    const generation = ++listenerGeneration;
+    set({ initialized: true });
 
-    try {
-      // 1. Hidratar tareas guardadas desde SQLite
-      const saved = await getAllDownloads();
-      const taskMap = new Map<string, DownloadTask>();
-      for (const t of saved) {
-        taskMap.set(t.id, t);
-      }
-      set({ tasks: taskMap, initialized: true });
-    } catch (e) {
-      console.error('Error hydrating downloads from SQLite:', e);
-      set({ initialized: true });
-    }
+    // Subscribe before hydrating: new backend tasks must enter the store before
+    // their progress arrives, including while a batch is being registered.
+    const stopCreated = await onDownloadCreated(task => {
+      if (generation !== listenerGeneration) return;
+      set(state => {
+        const next = new Map(state.tasks);
+        const pending = pendingProgress.get(task.id);
+        const existing = next.get(task.id);
+        next.set(task.id, { ...existing, ...task, ...(pending ?? {}) });
+        pendingProgress.delete(task.id);
+        return { tasks: orderDownloadTasks(next) };
+      });
+      triggerNotificationSync();
+    });
+
+    if (generation !== listenerGeneration) { stopCreated(); return; }
+    unlistenCreated = stopCreated;
 
     // 2. Escuchar progreso en tiempo real
-    unlistenProgress = await onDownloadProgress((p) => {
+    const stopProgress = await onDownloadProgress((p) => {
+      if (generation !== listenerGeneration) return;
+      if (!get().tasks.has(p.id)) {
+        pendingProgress.set(p.id, p);
+        void get().syncWithDb();
+        return;
+      }
       set((state) => {
         const next = new Map(state.tasks);
         const existing = next.get(p.id);
@@ -219,13 +246,15 @@ export const useDownloadStore = create<DownloadStore>((set, get) => ({
       });
 
       // Sincronización inteligente de la notificación en Android
-      if (p.status === 'downloading') {
-        triggerNotificationSync();
-      }
+      triggerNotificationSync();
     });
 
+    if (generation !== listenerGeneration) { stopProgress(); return; }
+    unlistenProgress = stopProgress;
+
     // 3. Escuchar completados
-    unlistenCompleted = await onDownloadCompleted((res) => {
+    const stopCompleted = await onDownloadCompleted((res) => {
+      if (generation !== listenerGeneration) return;
       let completedTask: DownloadTask | undefined;
       set((state) => {
         const next = new Map(state.tasks);
@@ -266,8 +295,12 @@ export const useDownloadStore = create<DownloadStore>((set, get) => ({
       triggerNotificationSync();
     });
 
+    if (generation !== listenerGeneration) { stopCompleted(); return; }
+    unlistenCompleted = stopCompleted;
+
     // 4. Escuchar pausados
-    unlistenPaused = await onDownloadPaused((res) => {
+    const stopPaused = await onDownloadPaused((res) => {
+      if (generation !== listenerGeneration) return;
       set((state) => {
         const next = new Map(state.tasks);
         const existing = next.get(res.id);
@@ -284,8 +317,26 @@ export const useDownloadStore = create<DownloadStore>((set, get) => ({
       triggerNotificationSync();
     });
 
+    if (generation !== listenerGeneration) { stopPaused(); return; }
+    unlistenPaused = stopPaused;
+
+    // Hydrate after registering all listeners. Live events take precedence over
+    // a snapshot fetched while a worker was changing state.
+    try {
+      const saved = await getAllDownloads();
+      if (generation !== listenerGeneration) return;
+      set(state => {
+        const taskMap = new Map(saved.map(task => [task.id, task]));
+        for (const [id, task] of state.tasks) taskMap.set(id, task);
+        return { tasks: orderDownloadTasks(taskMap) };
+      });
+    } catch (e) {
+      console.error('Error hydrating downloads from SQLite:', e);
+    }
+
+    if (generation !== listenerGeneration) return;
     if (typeof window !== 'undefined') {
-      const handleVisibilityOrFocus = () => {
+      handleVisibilityOrFocus = () => {
         if (document.visibilityState === 'visible') {
           get().syncWithDb();
         }
@@ -296,10 +347,20 @@ export const useDownloadStore = create<DownloadStore>((set, get) => ({
   },
 
   cleanup: () => {
+    listenerGeneration++;
+    if (handleVisibilityOrFocus) {
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      handleVisibilityOrFocus = null;
+    }
+    unlistenCreated?.();
     unlistenProgress?.();
     unlistenCompleted?.();
     unlistenPaused?.();
     unlistenProgress = null;
+    unlistenCreated = null;
+    pendingProgress.clear();
+    lastNotifyTime = 0;
     unlistenCompleted = null;
     unlistenPaused = null;
     if (notifyTimer) {
@@ -329,11 +390,13 @@ export const useDownloadStore = create<DownloadStore>((set, get) => ({
     const wasEmpty = get().activeCount() === 0;
     set((state) => {
       const next = new Map(state.tasks);
-      next.set(task.id, task);
-      return { tasks: next };
+      // The caller's placeholder must not overwrite a backend event that has
+      // already provided the real status and FIFO position.
+      next.set(task.id, { ...task, ...next.get(task.id) });
+      return { tasks: orderDownloadTasks(next) };
     });
 
-    if (wasEmpty) {
+    if (wasEmpty && isActiveStatus(get().tasks.get(task.id)?.status ?? task.status)) {
       notifyServiceStart(
         `${task.animeTitle} · Ep ${task.episodeNumber}`,
         'Iniciando descarga...'
@@ -388,15 +451,7 @@ export const useDownloadStore = create<DownloadStore>((set, get) => ({
     }
     try {
       await resumeDownload(id);
-      set((state) => {
-        const next = new Map(state.tasks);
-        const t = next.get(id);
-        if (t) {
-          next.set(id, { ...t, status: 'queued', error: undefined });
-        }
-        return { tasks: next };
-      });
-      triggerNotificationSync();
+      await get().syncWithDb();
     } catch (e) {
       console.error('Error resuming download:', e);
     }
@@ -412,19 +467,7 @@ export const useDownloadStore = create<DownloadStore>((set, get) => ({
     }
     try {
       await retryDownload(id);
-      set((state) => {
-        const next = new Map(state.tasks);
-        const t = next.get(id);
-        if (t) {
-          next.set(id, {
-            ...t,
-            status: 'queued',
-            error: undefined,
-          });
-        }
-        return { tasks: next };
-      });
-      triggerNotificationSync();
+      await get().syncWithDb();
     } catch (e) {
       console.error('Error retrying download:', e);
     }

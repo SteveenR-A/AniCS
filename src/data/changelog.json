@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.3.0",
+    "date": "2026-10-02",
+    "title": "Arquitectura Multiplataforma y Núcleo Rust Desacoplado",
+    "type": "patch",
+    "highlights": [
+      "Núcleo Rust puro anics-core desacoplado sin dependencias de SQLite ni Tauri",
+      "Soporte inicial para Android nativo preview (Kotlin, Jetpack Compose, Media3)",
+      "Mejoras de estabilidad y compatibilidad en descargas y streaming"
+    ]
+  },
+  {
     "version": "0.2.11",
     "date": "2026-10-01",
     "title": "Estabilidad de Streaming, Auditoría de Seguridad y Optimización de Rendimiento",

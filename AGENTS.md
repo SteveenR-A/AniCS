@@ -54,7 +54,7 @@ AniCS/
 - **Perfiles Locales**: Cada perfil posee su propio historial y favoritos indexados por `profile_id` en SQLite.
 - **Almacenamiento Seguro (Keyring v3)**: El token de GitHub se almacena en el gestor de credenciales nativo (`new_with_target("AniCS/{key}", "AniCS", key)` en Windows / Android EncryptedSharedPreferences). Nunca guardar tokens en SQLite en texto plano.
 - **Migraciones SQLite**: Mantener estrictamente el orden: `CREATE TABLE IF NOT EXISTS` -> `ALTER TABLE ADD COLUMN` -> `CREATE INDEX IF NOT EXISTS` -> inserción de perfil default para evitar fallos de columnas ausentes en bases de datos existentes.
-- **Sincronización Gist**: Multi-archivo (`profiles.json`, `history.json`, `favorites.json`, `settings.json`, `sync_meta.json`) con fusión bidireccional (`mergeSyncData`), lápidas (`tombstones`) para borrados, debounce de 30s y arranque en frío optimizado con ETag.
+- **Sincronización Cloud vigente (Firestore)**: Documento `users/{userId}/sync/data`, esquema v2 y campos JSON serializados (`profiles`, `history`, `favorites`, `settings`, `settingsDesktop`, `settingsMobile`, `syncMeta`), con cifrado opcional de datos, fusión bidireccional (`mergeSyncData`), lápidas (`tombstones`) y debounce de 30s. Los nombres Gist son aliases heredados; no sustituir el proveedor ni asumir soporte ETag. La versión nativa debe preservar este contrato y el modo local con Auth desactivado; detalles y diferencias existentes en `docs/android-native/sync-contracts.md`.
 
 ### 5. Flujo de Git y Compilación
 - **No hacer `git push`** a menos que el usuario lo solicite explícitamente.

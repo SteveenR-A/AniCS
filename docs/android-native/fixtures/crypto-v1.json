@@ -1,0 +1,14 @@
+{
+  "fixtureVersion": 1,
+  "pin": "1234",
+  "wrongPin": "0000",
+  "saltBase64": "AAECAwQFBgcICQoLDA0ODw==",
+  "iterations": 100000,
+  "hash": "SHA-256",
+  "keyBits": 256,
+  "ivBase64": "EBESExQVFhcYGRob",
+  "tagBits": 128,
+  "plaintext": "{\"title\":\"Café 龍\",\"watchProgress\":0.375,\"profileId\":\"kid\"}",
+  "ciphertextBase64": "EBESExQVFhcYGRobH2+XYZsa6ZWpZ+l5CdSOH5IWSyqr/8minjH7IeuuAYMaOmBcgx623VcgBpkBTb7jGgMccCriv2zNMbIIX2Wn2dzIlMaI8SQE1EiKBU8=",
+  "plaintextSha256": "b742a344eb2054e354c8a04b0a6647853302b249753cba472aa03f939850ce07"
+}

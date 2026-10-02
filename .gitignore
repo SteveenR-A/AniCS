@@ -69,3 +69,12 @@ packaging/arch/pkg/
 packaging/arch/src/
 packaging/arch/AniCS/
 
+# Android Native & Gradle
+.gradle/
+android-native/.gradle/
+android-native/build/
+android-native/app/build/
+android-native/app/src/main/jniLibs/
+crates/anics-core/target/
+crates/anics-ffi/target/
+

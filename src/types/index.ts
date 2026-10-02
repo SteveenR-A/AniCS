@@ -190,6 +190,7 @@ export type GistFilesPayload = CloudSyncPayload;
 export type DownloadStatus = 'queued' | 'downloading' | 'paused' | 'completed' | 'failed' | 'canceled';
 
 export interface DownloadTask {
+  queueOrder?: number;
   id: string;
   animeTitle: string;
   episodeNumber: number;

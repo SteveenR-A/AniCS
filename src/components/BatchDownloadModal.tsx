@@ -1,8 +1,9 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { DownloadCloud, X, Layers, ListFilter, CheckSquare, Check, Loader2, Crown } from 'lucide-react';
 import type { Episode } from '@/types';
-import { notifyServiceStart, startBatchDownloads } from '@/services/downloadService';
+import { notifyServiceStart, startBatchDownloads, getBatchDownloadServers, MAX_BATCH_EPISODES } from '@/services/downloadService';
+import type { BatchServerChoice } from '@/services/downloadService';
 import { useDownloadStore } from '@/stores/useDownloadStore';
 import { useSubscriptionStore } from '@/stores/useSubscriptionStore';
 import { FEATURE_FLAGS } from '@/config/features';
@@ -25,12 +26,21 @@ export const BatchDownloadModal: React.FC<BatchDownloadModalProps> = ({
   onSuccessToast,
 }) => {
   const [activeTab, setActiveTab] = useState<'unseen' | 'range' | 'manual'>('unseen');
-  const [rangeFrom, setRangeFrom] = useState<number>(episodes[episodes.length - 1]?.number || 1);
-  const [rangeTo, setRangeTo] = useState<number>(episodes[0]?.number || 1);
+  const minEpisode = episodes.reduce((min, ep) => Math.min(min, ep.number), episodes[0]?.number ?? 1);
+  const maxEpisode = episodes.reduce((max, ep) => Math.max(max, ep.number), episodes[0]?.number ?? 1);
+  const [rangeFrom, setRangeFrom] = useState<number>(minEpisode);
+  const [rangeTo, setRangeTo] = useState<number>(maxEpisode);
   const [selectedEpNumbers, setSelectedEpNumbers] = useState<Set<number>>(new Set());
   const [isProcessing, setIsProcessing] = useState(false);
   const [progressText, setProgressText] = useState('');
   const [enqueuedCount, setEnqueuedCount] = useState(0);
+  const [serverChoices, setServerChoices] = useState<BatchServerChoice[]>([]);
+  const [preferredServer, setPreferredServer] = useState('');
+  const [allowFallback, setAllowFallback] = useState(true);
+  const [isLoadingServers, setIsLoadingServers] = useState(false);
+  const [serverError, setServerError] = useState('');
+  const [submitError, setSubmitError] = useState('');
+  const submitting = useRef(false);
 
   // Episodios no vistos
   const unseenEpisodes = useMemo(() => {
@@ -49,6 +59,28 @@ export const BatchDownloadModal: React.FC<BatchDownloadModalProps> = ({
       return episodes.filter(ep => selectedEpNumbers.has(ep.number));
     }
   }, [activeTab, unseenEpisodes, rangeFrom, rangeTo, episodes, selectedEpNumbers]);
+
+  const previewEpisode = useMemo(() => [...targetEpisodes].sort((a, b) => a.number - b.number)[0], [targetEpisodes]);
+  const exceedsLimit = targetEpisodes.length > MAX_BATCH_EPISODES;
+
+  useEffect(() => {
+    let canceled = false;
+    setServerChoices([]);
+    setServerError('');
+    if (!isOpen || !previewEpisode?.url) {
+      setIsLoadingServers(false);
+      return;
+    }
+    setIsLoadingServers(true);
+    getBatchDownloadServers(previewEpisode.url, source).then(choices => {
+      if (!canceled) setServerChoices(choices);
+    }).catch(() => {
+      if (!canceled) setServerError('No se pudieron consultar los servidores. Puedes intentar la selección automática.');
+    }).finally(() => {
+      if (!canceled) setIsLoadingServers(false);
+    });
+    return () => { canceled = true; };
+  }, [isOpen, previewEpisode?.url, source]);
 
   const toggleEp = (num: number) => {
     const next = new Set(selectedEpNumbers);
@@ -73,21 +105,19 @@ export const BatchDownloadModal: React.FC<BatchDownloadModalProps> = ({
       onClose();
       return;
     }
-    if (targetEpisodes.length === 0 || isProcessing) return;
+    if (targetEpisodes.length === 0 || exceedsLimit || submitting.current) return;
 
+    submitting.current = true;
     setIsProcessing(true);
+    setSubmitError('');
     const sorted = [...targetEpisodes].sort((a, b) => a.number - b.number);
     const total = sorted.length;
 
-    setProgressText(`Preparando ${total} episodios en segundo plano...`);
+    setProgressText(`Registrando ${total} episodios en la cola...`);
     notifyServiceStart(
       `AniCS · ${total} episodios`,
       'Resolviendo servidores y preparando la cola...'
     );
-
-    // La resolución ocurre en Rust. Cerramos el modal para que la operación no dependa
-    // del ciclo de vida del WebView cuando Android bloquea la pantalla.
-    onClose();
 
     try {
       const results = await startBatchDownloads(
@@ -96,6 +126,8 @@ export const BatchDownloadModal: React.FC<BatchDownloadModalProps> = ({
           episodeNumber: ep.number,
           episodeUrl: ep.url,
           source,
+          preferredServer: preferredServer || undefined,
+          allowFallback,
         }))
       );
 
@@ -106,27 +138,32 @@ export const BatchDownloadModal: React.FC<BatchDownloadModalProps> = ({
       // de progreso ocurrieron mientras el WebView estaba suspendido.
       await useDownloadStore.getState().syncWithDb();
 
-      const failed = results
-        .filter((item) => !item.downloadId)
-        .map((item) => item.episodeNumber);
+      const failed = results.filter(item => !item.downloadId);
+      const failureDetails = failed.slice(0, 3)
+        .map(item => `Ep. ${item.episodeNumber}: ${item.error || 'No se pudo registrar'}`).join(' · ');
+
+      if (successCount === 0) {
+        setSubmitError(failureDetails || 'No se pudo registrar el lote. Inténtalo de nuevo.');
+        return;
+      }
 
       if (onSuccessToast) {
         if (successCount > 0) {
           const suffix = failed.length > 0
-            ? ` · Fallaron: ${failed.slice(0, 5).join(', ')}${failed.length > 5 ? '…' : ''}`
+            ? ` · ${failureDetails}${failed.length > 3 ? '…' : ''}`
             : '';
           onSuccessToast(
             `Se encolaron ${successCount} de ${total} episodios${suffix}`
           );
-        } else {
-          onSuccessToast('No se pudieron resolver servidores para el lote seleccionado');
         }
       }
+      onClose();
     } catch (err) {
       console.warn('Error preparando descarga por lotes:', err);
       await useDownloadStore.getState().syncWithDb();
-      onSuccessToast?.('No se pudo preparar la descarga por lotes');
+      setSubmitError(`No se pudo registrar el lote: ${String(err)}`);
     } finally {
+      submitting.current = false;
       setIsProcessing(false);
     }
   };
@@ -351,8 +388,8 @@ export const BatchDownloadModal: React.FC<BatchDownloadModalProps> = ({
                     </label>
                     <input
                       type="number"
-                      min={1}
-                      max={episodes[0]?.number || 1000}
+                      min={minEpisode}
+                      max={maxEpisode}
                       value={rangeFrom}
                       onChange={(e) => setRangeFrom(parseInt(e.target.value) || 1)}
                       style={{
@@ -373,8 +410,8 @@ export const BatchDownloadModal: React.FC<BatchDownloadModalProps> = ({
                     </label>
                     <input
                       type="number"
-                      min={1}
-                      max={episodes[0]?.number || 1000}
+                      min={minEpisode}
+                      max={maxEpisode}
                       value={rangeTo}
                       onChange={(e) => setRangeTo(parseInt(e.target.value) || 1)}
                       style={{
@@ -474,6 +511,39 @@ export const BatchDownloadModal: React.FC<BatchDownloadModalProps> = ({
               </div>
             )}
 
+            <div style={{ marginTop: 18, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <label htmlFor="batch-download-server" style={{ fontSize: 12, fontWeight: 700 }}>
+                Servidor de descarga
+              </label>
+              <select
+                id="batch-download-server"
+                value={preferredServer}
+                disabled={isProcessing}
+                onChange={event => setPreferredServer(event.target.value)}
+                style={{ padding: '10px 12px', borderRadius: 'var(--radius-md)', background: 'var(--bg-elevated)', color: 'var(--text-primary)', border: '1px solid var(--border-moderate)' }}
+              >
+                <option value="">Automático</option>
+                {preferredServer && !serverChoices.some(choice => choice.key === preferredServer) && (
+                  <option value={preferredServer}>{preferredServer} (no encontrado en este episodio)</option>
+                )}
+                {serverChoices.map(choice => <option key={choice.key} value={choice.key}>{choice.name}</option>)}
+              </select>
+              <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: 0 }}>
+                {isLoadingServers ? 'Consultando servidores...' : previewEpisode
+                  ? `Servidores del Ep. ${previewEpisode.number}. La disponibilidad puede variar entre episodios.`
+                  : 'Selecciona episodios para consultar los servidores.'}
+              </p>
+              {preferredServer && (
+                <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <input type="checkbox" checked={allowFallback} disabled={isProcessing} onChange={event => setAllowFallback(event.target.checked)} />
+                  Usar otro servidor si el elegido no está disponible
+                </label>
+              )}
+              {serverError && <p role="status" style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>{serverError}</p>}
+              {exceedsLimit && <p role="alert" style={{ fontSize: 12, color: 'var(--accent-error)', margin: 0 }}>Selecciona como máximo {MAX_BATCH_EPISODES} episodios por lote.</p>}
+              {submitError && <p role="alert" style={{ fontSize: 12, color: 'var(--accent-error)', margin: 0 }}>{submitError}</p>}
+            </div>
+
             {isProcessing && (
               <div style={{
                 marginTop: 16,
@@ -523,7 +593,7 @@ export const BatchDownloadModal: React.FC<BatchDownloadModalProps> = ({
 
             <button
               onClick={handleStartBatch}
-              disabled={targetEpisodes.length === 0 || isProcessing}
+              disabled={targetEpisodes.length === 0 || exceedsLimit || isProcessing}
               style={{
                 padding: '9px 20px',
                 borderRadius: 'var(--radius-md)',
