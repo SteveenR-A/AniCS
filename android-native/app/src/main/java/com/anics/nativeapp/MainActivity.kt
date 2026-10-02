@@ -195,12 +195,12 @@ class MainActivity : ComponentActivity() {
                                 viewModel = detailsVm,
                                 onBack = { navController.popBackStack() },
                                 onPlayEpisode = { media, animeTitle, episodeNumber ->
-                                    val isHls = media.media_type == com.anics.nativeapp.ffi.NativeMediaType.Hls
+                                    val isHls = media.mediaType == com.anics.nativeapp.ffi.NativeMediaType.HLS
                                     playerController.prepareStream(
-                                        directUrl = media.direct_url,
+                                        directUrl = media.directUrl,
                                         isHls = isHls,
                                         referer = media.referer,
-                                        userAgent = media.user_agent
+                                        userAgent = media.userAgent
                                     )
                                     val encodedTitle = URLEncoder.encode(animeTitle, StandardCharsets.UTF_8.toString())
                                     navController.navigate("player/$encodedTitle/$episodeNumber")
