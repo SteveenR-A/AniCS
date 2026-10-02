@@ -29,8 +29,11 @@ env:
 
 jobs:
   prepare-release:
-    name: Validate release version
+    name: Validate release version & purge old artifacts
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
     outputs:
       tag: ${{ steps.version.outputs.tag }}
     steps:
@@ -38,6 +41,34 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+
+      - name: Purge old workflow artifacts from repository
+        uses: actions/github-script@v7
+        continue-on-error: true
+        with:
+          script: |
+            try {
+              const res = await github.rest.actions.listArtifactsForRepo({
+                ...context.repo,
+                per_page: 100,
+              });
+              const artifacts = res.data.artifacts || [];
+              core.info(`Encontrados ${artifacts.length} artefactos almacenados en el repositorio.`);
+              for (const art of artifacts) {
+                try {
+                  await github.rest.actions.deleteArtifact({
+                    ...context.repo,
+                    artifact_id: art.id,
+                  });
+                  core.info(`Eliminado artefacto antiguo: ${art.name} (${art.id}, ${Math.round(art.size_in_bytes / 1024 / 1024)}MB)`);
+                } catch (delErr) {
+                  core.warning(`Error al eliminar artefacto ${art.id}: ${delErr.message}`);
+                }
+              }
+            } catch (err) {
+              core.warning(`No se pudieron listar artefactos antiguos: ${err.message}`);
+            }
+
       - name: Validate synchronized versions and patch notes
         id: version
         env:
