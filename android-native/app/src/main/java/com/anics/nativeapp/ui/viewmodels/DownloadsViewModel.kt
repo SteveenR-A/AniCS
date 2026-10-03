@@ -65,6 +65,25 @@ class DownloadsViewModel(
         viewModelScope.launch { settingsRepository.updateDownloadFolderUri(uri); scan(uri) }
     }
     fun refreshLibrary() { scan(_uiState.value.folderUri) }
+    fun importTauriDatabase(uri: android.net.Uri) {
+        viewModelScope.launch {
+            try {
+                val count = com.anics.nativeapp.downloads.TauriLibraryMetadata(context).importDatabase(uri)
+                showMessage("Metadatos de $count animes importados")
+                if (_uiState.value.folderUri.isNotBlank()) scan(_uiState.value.folderUri)
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { showMessage(e.localizedMessage ?: "No se pudo importar anics.db") }
+        }
+    }
+    fun deleteVideo(id: String) { viewModelScope.launch {
+        try {
+            val row = downloadDao.getDownloadById(id) ?: return@launch
+            if (row.status == "completed") kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                com.anics.nativeapp.downloads.StorageManager(context).deleteFile(row.outputPath)
+                require(com.anics.nativeapp.downloads.StorageManager(context).getFileLength(row.outputPath) == 0L) { "No se pudo borrar el video; revisa el permiso de la carpeta" }
+                downloadDao.deleteDownload(id)
+            } else action(id, com.anics.nativeapp.downloads.DownloadService.ACTION_CANCEL)
+        } catch (e: Exception) { showMessage(e.localizedMessage ?: "No se pudo borrar el video") }
+    } }
     fun showMessage(message: String) { _uiState.update { it.copy(message = message) } }
     private fun scan(uri: String) {
         if (_uiState.value.isScanning) return
@@ -103,7 +122,7 @@ class DownloadsViewModel(
     fun cancelDownload(id: String) {
         viewModelScope.launch {
             val row = downloadDao.getDownloadById(id) ?: return@launch
-            if (row.status == "completed" || row.streamUrl.isBlank()) downloadDao.deleteDownload(id)
+            if (row.status == "completed") downloadDao.deleteDownload(id)
             else action(id, com.anics.nativeapp.downloads.DownloadService.ACTION_CANCEL)
         }
     }

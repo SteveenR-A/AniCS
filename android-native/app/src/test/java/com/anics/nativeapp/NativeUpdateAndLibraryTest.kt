@@ -6,6 +6,19 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class NativeUpdateAndLibraryTest {
+    @Test fun duplicateDonghuaCardsAreSafeForComposeAndKeepDifferentEpisodes() {
+        val card = com.anics.nativeapp.ffi.NativeAnimeResult("Donghua", "https://catalog/anime", "", null, "1", null, null, null, null, null, "mundodonghua", null)
+        val rows = com.anics.nativeapp.data.repository.safeCards(listOf(card, card.copy(), card.copy(episode = "2"), card.copy(url = "")))
+        assertEquals(2, rows.size)
+        assertEquals(listOf("1", "2"), rows.map { it.episode })
+    }
+    @Test fun unsupportedServersDoNotEnterAutomaticPlayback() {
+        val mega = com.anics.nativeapp.ffi.NativeVideoServer("Mega", "https://mega.nz/123", true, null)
+        val magi = com.anics.nativeapp.ffi.NativeVideoServer("Magi", "https://jkanime.net/jkplayer/magi", false, null)
+        assertFalse(com.anics.nativeapp.downloads.ServerSupport.playable(mega))
+        assertTrue(com.anics.nativeapp.downloads.ServerSupport.playable(magi))
+        assertEquals(listOf(magi, mega), com.anics.nativeapp.downloads.ServerSupport.ordered(listOf(mega, magi, magi)))
+    }
     @Test fun versionsCompareNumerically() {
         assertTrue(UpdateVersions.isNewer("v0.10.0", "0.3.0-preview"))
         assertFalse(UpdateVersions.isNewer("v0.3.0", "0.3.0-preview"))

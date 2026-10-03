@@ -14,7 +14,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         DownloadEntity::class,
         TombstoneEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -25,6 +25,13 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun downloadDao(): DownloadDao
 
     companion object {
+        val MIGRATION_2_3 = object : androidx.room.migration.Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE downloads ADD COLUMN speedBytesPerSecond INTEGER NOT NULL DEFAULT 0")
+                for (column in listOf("animeUrl", "episodeUrl", "thumbnailUrl")) db.execSQL("ALTER TABLE downloads ADD COLUMN $column TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE downloads ADD COLUMN source TEXT NOT NULL DEFAULT 'jkanime'")
+            }
+        }
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
@@ -44,6 +51,7 @@ abstract class AppDatabase : RoomDatabase() {
                             db.execSQL("ALTER TABLE history ADD COLUMN watchProgress REAL DEFAULT NULL")
                         }
                     })
+                    .addMigrations(MIGRATION_2_3)
                     .addCallback(object : Callback() {
                         override fun onCreate(db: SupportSQLiteDatabase) {
                             super.onCreate(db)

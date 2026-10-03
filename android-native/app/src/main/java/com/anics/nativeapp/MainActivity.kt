@@ -35,10 +35,20 @@ import com.anics.nativeapp.ui.theme.AniCSTheme
 import com.anics.nativeapp.ui.viewmodels.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
+import com.anics.nativeapp.downloads.DownloadRequest
+import com.anics.nativeapp.downloads.DownloadService
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 
 private data class NativeTab(val route: String, val title: String, val icon: ImageVector)
 
 class MainActivity : ComponentActivity() {
+    private var notificationOpen by mutableIntStateOf(0)
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.getBooleanExtra("open_downloads", false)) notificationOpen++
+    }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -80,6 +90,21 @@ class MainActivity : ComponentActivity() {
                     if (route != destination) nav.navigate(destination) { popUpTo("home") { saveState = true }; launchSingleTop = true; restoreState = true }
                 }
                 val anime: (String, String) -> Unit = { url, source -> nav.navigate("details?url=${Uri.encode(url)}&source=${Uri.encode(source)}") }
+                LaunchedEffect(notificationOpen) { if (intent.getBooleanExtra("open_downloads", false)) go("downloads") }
+                var pendingDownloads by remember { mutableStateOf<List<DownloadRequest>>(emptyList()) }
+                val submitDownloads: (List<DownloadRequest>) -> Unit = { requests ->
+                    try { if (requests.isNotEmpty()) { DownloadService.enqueue(this@MainActivity, requests); scope.launch { snackbar.showSnackbar("Episodios añadidos a la cola") } } }
+                    catch (e: Exception) { scope.launch { snackbar.showSnackbar(e.localizedMessage ?: "No se pudo iniciar la descarga") } }
+                }
+                val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { allowed ->
+                    submitDownloads(pendingDownloads); pendingDownloads = emptyList()
+                    if (!allowed) scope.launch { snackbar.showSnackbar("Activa las notificaciones de AniCS para ver las descargas fuera de la app") }
+                }
+                val enqueue: (List<DownloadRequest>) -> Unit = { requests ->
+                    if (android.os.Build.VERSION.SDK_INT >= 33 && androidx.core.content.ContextCompat.checkSelfPermission(this@MainActivity, android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                        pendingDownloads = requests; notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                    } else submitDownloads(requests)
+                }
                 val playRoute: () -> Unit = { if (route != "player") nav.navigate("player") { launchSingleTop = true } }
                 val offline: (String, String, Int) -> Unit = { path, title, episode ->
                     lifecycleScope.launch {
@@ -107,7 +132,7 @@ class MainActivity : ComponentActivity() {
                 Scaffold(
                     topBar = { if (!player) AniHeader(sources, settings.defaultSource,
                         onSource = { source -> scope.launch { preferences.updateDefaultSource(source) } }, onHome = { go("home") },
-                        onFavorites = { go("favorites") }, onSettings = { go("settings") }, favoritesActive = route == "favorites", settingsActive = route == "settings") },
+                        onFavorites = { go("favorites") }, onSettings = { go("settings") }, favoritesActive = route == "favorites", settingsActive = route == "settings", showSource = route?.startsWith("search") != true) },
                     bottomBar = { if (!player) AniBottomBar(route, go) },
                     snackbarHost = { SnackbarHost(snackbar) }, containerColor = MaterialTheme.colorScheme.background
                 ) { padding ->
@@ -117,9 +142,10 @@ class MainActivity : ComponentActivity() {
                             LaunchedEffect(settings.defaultSource) { vm.selectSource(settings.defaultSource) }
                             HomeScreen(vm, anime, { go("search") }, resume)
                         }
-                        composable("search") {
+                        composable("search?query={query}", arguments = listOf(navArgument("query") { defaultValue = "" })) { entry ->
                             val vm = viewModel { SearchViewModel(catalog, preferences) }
                             LaunchedEffect(settings.defaultSource) { vm.selectSource(settings.defaultSource) }
+                            LaunchedEffect(entry.id) { entry.arguments?.getString("query")?.takeIf { it.isNotBlank() }?.let(vm::onQueryChanged) }
                             SearchScreen(vm, anime, { source -> scope.launch { preferences.updateDefaultSource(source) } })
                         }
                         composable("schedule") { val vm = viewModel { BrowseViewModel(catalog, preferences, false) }; BrowseScreen(vm, anime) }
@@ -129,7 +155,7 @@ class MainActivity : ComponentActivity() {
                         composable("settings") { val vm = viewModel { SettingsViewModel(preferences, profiles, catalog, com.anics.nativeapp.sync.BackupManager(database, preferences)) }; SettingsScreen(vm) }
                         composable("downloads") {
                             val vm = viewModel { DownloadsViewModel(database.downloadDao(), com.anics.nativeapp.downloads.LocalLibrary(applicationContext, database.downloadDao()), preferences, applicationContext) }
-                            DownloadsScreen(vm, offline)
+                            DownloadsScreen(vm, offline, onAnime = anime, onSearch = { nav.navigate("search?query=${Uri.encode(it)}") })
                         }
                         composable("details?url={url}&source={source}", arguments = listOf(navArgument("url") { type = NavType.StringType }, navArgument("source") { type = NavType.StringType })) { entry ->
                             val url = entry.arguments?.getString("url") ?: ""
@@ -148,14 +174,13 @@ class MainActivity : ComponentActivity() {
                                         } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { vm.reportError(e.localizedMessage ?: "No se pudo abrir el video") }
                                     }
                                 }, onDownloadEpisode = { media, title, episode ->
-                                    try {
-                                        val service = com.anics.nativeapp.downloads.DownloadService
-                                        val intent = android.content.Intent(this@MainActivity, com.anics.nativeapp.downloads.DownloadService::class.java)
-                                            .setAction(service.ACTION_START).putExtra(service.EXTRA_ID, java.util.UUID.randomUUID().toString())
-                                            .putExtra(service.EXTRA_TITLE, title).putExtra(service.EXTRA_EPISODE, episode).putExtra(service.EXTRA_URL, media.directUrl).putExtra(service.EXTRA_REFERER, media.referer)
-                                        androidx.core.content.ContextCompat.startForegroundService(this@MainActivity, intent)
-                                        go("downloads")
-                                    } catch (e: Exception) { vm.reportError(e.localizedMessage ?: "No se pudo iniciar la descarga") }
+                                    val details = vm.uiState.value
+                                    enqueue(listOf(DownloadRequest(java.util.UUID.randomUUID().toString(), title, episode, media.directUrl, media.referer,
+                                        url, details.selectedEpisode?.url.orEmpty(), details.details?.thumbnailUrl.orEmpty(), source)))
+                                }, onDownloadEpisodes = { episodes ->
+                                    val details = vm.uiState.value.details
+                                    enqueue(episodes.distinctBy { it.url }.sortedBy { it.number }.map { episode -> DownloadRequest(java.util.UUID.randomUUID().toString(), details?.title ?: "Anime", episode.number.toInt(),
+                                        animeUrl = url, episodeUrl = episode.url, thumbnailUrl = details?.thumbnailUrl.orEmpty(), source = source) })
                                 })
                         }
                         composable("player") {
@@ -176,11 +201,11 @@ fun AniBottomBar(current: String?, onNavigate: (String) -> Unit) {
         NativeTab("downloads", "Descargas", AniIcons.Download), NativeTab("history", "Historial", AniIcons.History))
     Surface(color = MaterialTheme.colorScheme.surface) {
         Column { HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            Row(Modifier.fillMaxWidth().navigationBarsPadding().heightIn(min = 68.dp)) {
-                tabs.forEach { tab -> val active = current == tab.route
-                    Column(Modifier.weight(1f).semantics { selected = active }.clickable { onNavigate(tab.route) }.padding(vertical = 9.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                        Box(Modifier.size(32.dp).background(if (active) MaterialTheme.colorScheme.primary.copy(alpha = .15f) else androidx.compose.ui.graphics.Color.Transparent, RoundedCornerShape(10.dp)), contentAlignment = Alignment.Center) {
-                            Icon(tab.icon, tab.title, Modifier.size(22.dp), tint = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(Modifier.fillMaxWidth().navigationBarsPadding().heightIn(min = 56.dp)) {
+                tabs.forEach { tab -> val active = current?.substringBefore('?') == tab.route
+                    Column(Modifier.weight(1f).semantics { selected = active }.clickable { onNavigate(tab.route) }.padding(vertical = 6.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                        Box(Modifier.size(28.dp).background(if (active) MaterialTheme.colorScheme.primary.copy(alpha = .15f) else androidx.compose.ui.graphics.Color.Transparent, RoundedCornerShape(10.dp)), contentAlignment = Alignment.Center) {
+                            Icon(tab.icon, tab.title, Modifier.size(20.dp), tint = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Text(tab.title, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                     }

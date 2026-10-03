@@ -24,7 +24,7 @@ import com.anics.nativeapp.ui.viewmodels.*
 fun BrowseScreen(viewModel: BrowseViewModel, onAnime: (String, String) -> Unit) {
     val state by viewModel.state.collectAsState()
     var day by remember { mutableStateOf<String?>(null) }
-    LazyVerticalGrid(GridCells.Adaptive(145.dp), Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    LazyVerticalGrid(GridCells.Adaptive(145.dp), Modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item(span = { GridItemSpan(maxLineSpan) }) {
             SectionTitle(if (viewModel.ranking) "Top ranking" else "Horario semanal", "${sourceLabel(state.source)} · ${if (viewModel.ranking) "Animes populares" else "Estrenos semanales"}",
                 if (viewModel.ranking) AniIcons.Trophy else AniIcons.CalendarDays, action = { IconButton(onClick = viewModel::refresh) { Icon(AniIcons.RefreshCw, "Actualizar") } })
@@ -62,7 +62,7 @@ fun HistoryScreen(viewModel: HistoryViewModel, onResume: (HistoryEntity) -> Unit
     val groups = state.entries.groupBy { com.anics.nativeapp.sync.SyncContract.titleKey(it.animeTitle) }.values
         .filter { rows -> query.isBlank() || rows.any { it.animeTitle.contains(query, true) || it.episodeNumber.toString() == query.trim() } }
         .sortedByDescending { rows -> rows.maxOf { it.lastWatchedAt } }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item { SectionTitle("Historial (${state.entries.size})", state.profileName, AniIcons.History, action = { IconButton(onClick = { clear = true }, enabled = state.entries.isNotEmpty()) { Icon(AniIcons.Trash2, "Borrar todo el historial") } }) }
         item { OutlinedTextField(query, { query = it }, placeholder = { Text("Buscar anime o capítulo…") }, leadingIcon = { Icon(AniIcons.Search, null, Modifier.size(20.dp)) }, singleLine = true, shape = RoundedCornerShape(50), modifier = Modifier.fillMaxWidth()) }
         state.message?.let { item { Text(it, color = MaterialTheme.colorScheme.error) } }
@@ -71,7 +71,7 @@ fun HistoryScreen(viewModel: HistoryViewModel, onResume: (HistoryEntity) -> Unit
             val latest = rows.maxBy { it.lastWatchedAt }
             var expanded by remember { mutableStateOf(false) }
             AniPanel {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     AsyncImage(latest.thumbnailUrl, latest.animeTitle, Modifier.width(60.dp).height(88.dp).clip(RoundedCornerShape(10.dp)), contentScale = ContentScale.Crop)
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(latest.animeTitle, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)

@@ -144,6 +144,9 @@ class SettingsViewModel(
 
     fun selectDownloadFolder(uri: String) { viewModelScope.launch { settingsRepository.updateDownloadFolderUri(uri); showMessage("Carpeta guardada. Busca los videos en Descargas.") } }
     fun selectPreferredServer(server: String) { viewModelScope.launch { settingsRepository.updatePreferredServer(server) } }
+    fun selectDownloadServer(server: String) { viewModelScope.launch { settingsRepository.updateDownloadServer(server) } }
+    fun selectDownloadLimit(limit: Int) { viewModelScope.launch { settingsRepository.updateMaxDownloads(limit) } }
+    fun selectImageCache(limit: Int) { viewModelScope.launch { settingsRepository.updateImageCache(limit); showMessage("El límite de caché se aplicará al volver a abrir AniCS") } }
     fun toggleFallback(allow: Boolean) { viewModelScope.launch { settingsRepository.updateAllowFallback(allow) } }
 
     fun selectDefaultQuality(quality: String) {

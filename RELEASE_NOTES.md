@@ -1,13 +1,14 @@
-# AniCS v0.3.2 — Paridad de Gestos y Optimización del Reproductor
+# AniCS v0.3.3 — Optimización de UI Nativa, Gestor de Descargas y Correcciones
 
 **Fecha de lanzamiento:** 2026-10-02
 
 ### Novedades y correcciones
 
-- Reproductor: Corrección del tiempo de auto-ocultación de controles (4.5s en móvil y retención durante la pausa)
-- Reproductor: Gesto de toque único optimizado para alternar HUD sin pausar el video, respetando el diámetro circular del botón central (72px)
-- Reproductor: Doble toque en el centro para alternar reproducción y pausa en móvil con indicador animado SVG
-- Móvil nativo: Paridad de controles y gestos en Android (Tauri y Kotlin) con soporte completo de auto-actualización in-app
+- Android Nativo: Interfaz compacta responsive, controles optimizados en horizontal/vertical y paginación en búsqueda
+- Android Nativo: Gestor de descargas robusto con transferencias concurrentes (1-4), lotes y reanudación HTTP validada
+- Android Nativo: Notificaciones interactivas de descarga (pausa, reanudación y cancelación)
+- Catálogo y Estabilidad: Deduplicación rigurosa de entradas y episodios para prevenir cierres por claves duplicadas
+- Biblioteca y Almacenamiento: Importación de metadatos/portadas locales y optimización de caché Coil
 
 ---
 *Para ver el historial acumulativo completo de todas las versiones, consulta [CHANGELOG.md](./CHANGELOG.md).*

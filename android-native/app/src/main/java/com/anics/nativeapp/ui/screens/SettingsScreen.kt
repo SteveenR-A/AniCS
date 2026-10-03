@@ -30,6 +30,7 @@ data class SettingsActions(
     val theme: (String) -> Unit = {}, val source: (String) -> Unit = {},
     val autoNext: (Boolean) -> Unit = {}, val fallback: (Boolean) -> Unit = {},
     val quality: (String) -> Unit = {}, val server: (String) -> Unit = {},
+    val downloadServer: (String) -> Unit = {}, val downloadLimit: (Int) -> Unit = {}, val imageCache: (Int) -> Unit = {},
     val switchProfile: (String) -> Unit = {}, val createProfile: (String) -> Unit = {},
     val sourceUrl: (String, String) -> Unit = { _, _ -> },
     val addSource: (String, String, String) -> Unit = { _, _, _ -> },
@@ -55,6 +56,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, modifier: Modifier = Modifier) 
         theme = viewModel::selectTheme, source = viewModel::selectDefaultSource,
         autoNext = viewModel::toggleAutoPlayNext, fallback = viewModel::toggleFallback,
         quality = viewModel::selectDefaultQuality, server = viewModel::selectPreferredServer,
+        downloadServer = viewModel::selectDownloadServer, downloadLimit = viewModel::selectDownloadLimit, imageCache = viewModel::selectImageCache,
         switchProfile = viewModel::switchProfile, createProfile = { viewModel.createProfile(it, "avatar-default") },
         sourceUrl = viewModel::setCatalogUrl, addSource = viewModel::addCatalog, chooseFolder = { folder.launch(null) },
         import = { import.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) },
@@ -77,14 +79,14 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
     var sourceName by remember { mutableStateOf("") }
     var sourceType by remember { mutableStateOf("Anime") }
     var server by remember(state.settings.preferredServer) { mutableStateOf(state.settings.preferredServer) }
-    LazyColumn(modifier.fillMaxSize().testTag("settings-list"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+    LazyColumn(modifier.fillMaxSize().testTag("settings-list"), contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item { SectionTitle("Ajustes", "Las preferencias se guardan automáticamente", AniIcons.Settings) }
         if (state.isExporting) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
         state.message?.let { message -> item { AniPanel { Text(message, style = MaterialTheme.typography.bodyMedium) } } }
         item {
             AniPanel {
                 SectionTitle("Perfiles y datos", icon = AniIcons.Cloud)
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Box(Modifier.size(46.dp).background(Brush.linearGradient(listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.secondary)), RoundedCornerShape(16.dp)), contentAlignment = Alignment.Center) {
                         Icon(AniIcons.Tv, null, tint = MaterialTheme.colorScheme.onPrimary)
                     }
@@ -111,7 +113,7 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
                             val selected = theme.id == state.settings.themeMode
                             Surface(onClick = { actions.theme(theme.id) }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp), color = theme.surface,
                                 border = BorderStroke(if (selected) 2.dp else 1.dp, if (selected) theme.primary else MaterialTheme.colorScheme.outlineVariant)) {
-                                Column(Modifier.heightIn(min = 88.dp).padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Column(Modifier.heightIn(min = 68.dp).padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                     Row(verticalAlignment = Alignment.Top) {
                                         Text(theme.name, color = if (theme.dark) Color(0xFFe0def4) else Color(0xFF242336), fontWeight = FontWeight.SemiBold,
                                             style = MaterialTheme.typography.labelLarge, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
@@ -140,14 +142,16 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     listOf("auto", "1080p", "720p", "480p").forEach { quality -> AniPill(if (quality == "auto") "Automática" else quality, state.settings.defaultQuality == quality, { actions.quality(quality) }) }
                 }
-                OutlinedTextField(server, { server = it }, label = { Text("Servidor preferido (opcional)") }, singleLine = true,
-                    supportingText = { Text("Ejemplo: Magi, Desu o Mediafire") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
-                if (server != state.settings.preferredServer) OutlinedButton(onClick = { actions.server(server.trim()) }) { Icon(AniIcons.Check, null, Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text("Guardar servidor") }
+                Text("La calidad preferida se aplica cuando el servidor ofrece varias resoluciones; un MP4 de calidad única conserva su resolución.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                ServerPreference("Servidor de reproducción", state.settings.preferredServer, actions.server)
             }
         }
         item {
             AniPanel {
                 SectionTitle("Carpeta de descargas", icon = AniIcons.Folder)
+                Text("Descargas simultáneas", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { (1..4).forEach { limit -> AniPill("$limit", state.settings.maxConcurrentDownloads == limit, { actions.downloadLimit(limit) }) } }
+                ServerPreference("Servidor de descarga", state.settings.preferredDownloadServer, actions.downloadServer)
                 Text("Elige la carpeta Anime para guardar y detectar tus videos, incluidos los descargados con Tauri.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(if (state.settings.downloadFolderUri.isBlank()) "Carpeta de la aplicación" else android.net.Uri.parse(state.settings.downloadFolderUri).lastPathSegment?.substringAfter(':') ?: "Carpeta compartida",
                     style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -189,6 +193,13 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
                 }
             }
         }
+        item { AniPanel {
+            SectionTitle("Caché de portadas", icon = AniIcons.HardDrive)
+            Text("Solo se guardan las imágenes que abres. La caché elimina las antiguas al alcanzar su límite.", style = MaterialTheme.typography.bodySmall)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf(100, 300, 500, 1024).forEach { mb -> AniPill(if (mb == 1024) "1 GB" else "$mb MB", state.settings.imageCacheMb == mb, { actions.imageCache(mb) }) }
+            }
+        } }
         item { Text("AniCS para Android · Kotlin + Rust", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 16.dp)) }
     }
     if (profilesOpen) AlertDialog(onDismissRequest = { profilesOpen = false }, title = { Text("Cambiar perfil") },
@@ -219,7 +230,7 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
 
 @Composable
 fun SettingSwitch(title: String, subtitle: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Column(Modifier.weight(1f)) { Text(title, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium); Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         Switch(checked, onChange)
     }
@@ -238,5 +249,23 @@ private fun OptionalCloudSettings(viewModel: SettingsViewModel) {
         OutlinedButton(enabled = !busy, onClick = { scope.launch { busy = true; try { client.signInWithGoogle(); viewModel.showMessage("Sesión iniciada") } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch(e: Exception) { viewModel.showMessage(e.localizedMessage ?: "No se pudo iniciar sesión") } finally { busy = false } } }) { Text("Google") }
         OutlinedButton(enabled = !busy, onClick = { scope.launch { busy = true; try { client.synchronize(pin.takeIf { it.isNotBlank() }); viewModel.showMessage("Datos sincronizados") } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch(e: Exception) { viewModel.showMessage(e.localizedMessage ?: "No se pudo sincronizar") } finally { busy = false; pin = "" } } }) { Text("Sincronizar") }
         TextButton(enabled = !busy, onClick = { client.signOut(); pin = "" }) { Text("Salir") }
+    }
+}
+
+@Composable
+fun ServerPreference(label: String, selected: String, onSelect: (String) -> Unit) {
+    var menu by remember { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Box {
+            OutlinedButton(onClick = { menu = true }, modifier = Modifier.fillMaxWidth()) {
+                Text(selected.ifBlank { "Automático" }, modifier = Modifier.weight(1f)); Icon(AniIcons.ChevronDown, null, Modifier.size(16.dp))
+            }
+            DropdownMenu(menu, { menu = false }) {
+                (listOf("", "Magi", "Desu", "Mediafire", "Vidhide", "Asura", "Uqload", "Lulustream") + listOf(selected)).distinct().forEach { name ->
+                    DropdownMenuItem(text = { Text(name.ifBlank { "Automático" }) }, onClick = { onSelect(name); menu = false })
+                }
+            }
+        }
     }
 }

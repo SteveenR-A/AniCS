@@ -71,6 +71,17 @@ class NativeUiRegressionTest {
         }
     }
     @Test
+    @Config(qualifiers = "w320dp-h640dp-port")
+    fun portraitPlayerShowsEveryControlWithoutHorizontalClipping() {
+        val eps = listOf(PlaybackSessionTest.episode(1), PlaybackSessionTest.episode(2), PlaybackSessionTest.episode(3))
+        val state = com.anics.nativeapp.player.PlaybackSessionState(entry = com.anics.nativeapp.data.local.HistoryEntity(animeTitle = "Anime", animeUrl = "anime", episodeNumber = 2, episodeUrl = "ep2"), episodes = eps)
+        compose.setContent { AniCSTheme { com.anics.nativeapp.player.PlayerHud(com.anics.nativeapp.player.PlaybackState(isLoading = false), state, false,
+            onBack = {}, onPanel = {}, onPlay = {}, onSeek = {}, onPrevious = {}, onNext = {}, onIntro = {}, onMute = {}, onLock = {}, onOrientation = {}, onScrub = {}, onScrubEnd = {}) } }
+        listOf("Episodio anterior", "Siguiente episodio", "Silenciar / activar audio", "Bloquear controles", "Pantalla horizontal").forEach { label -> compose.onNodeWithContentDescription(label).assertIsDisplayed() }
+        compose.onNodeWithText("Intro +85 s").assertIsDisplayed()
+        screenshot("player-portrait")
+    }
+    @Test
     @Config(qualifiers = "w800dp-h360dp-land")
     fun playerLandscapeHasServerEpisodesAndNextControls() {
         val eps = listOf(PlaybackSessionTest.episode(1), PlaybackSessionTest.episode(2), PlaybackSessionTest.episode(3))

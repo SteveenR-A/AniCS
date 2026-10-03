@@ -1,158 +1,130 @@
 package com.anics.nativeapp.downloads
 
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
-import android.app.Service
-import android.content.Context
-import android.content.Intent
+import android.app.*
+import android.content.*
 import android.content.pm.ServiceInfo
-import android.os.Build
-import android.os.IBinder
+import android.os.*
 import androidx.core.app.NotificationCompat
 import com.anics.nativeapp.MainActivity
-import com.anics.nativeapp.data.local.AppDatabase
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
+import com.anics.nativeapp.data.local.*
+import com.anics.nativeapp.ui.components.formatBytes
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
+import kotlinx.serialization.json.Json
 
 class DownloadService : Service() {
-
     companion object {
         const val CHANNEL_ID = "anics_downloads_channel"
         const val NOTIFICATION_ID = 2001
-
         const val ACTION_START = "com.anics.nativeapp.downloads.START"
+        const val ACTION_BATCH = "com.anics.nativeapp.downloads.BATCH"
         const val ACTION_RESUME = "com.anics.nativeapp.downloads.RESUME"
         const val ACTION_PAUSE = "com.anics.nativeapp.downloads.PAUSE"
         const val ACTION_CANCEL = "com.anics.nativeapp.downloads.CANCEL"
-
         const val EXTRA_ID = "extra_download_id"
         const val EXTRA_TITLE = "extra_anime_title"
         const val EXTRA_EPISODE = "extra_episode_num"
         const val EXTRA_URL = "extra_stream_url"
         const val EXTRA_REFERER = "extra_referer"
+        const val EXTRA_BATCH = "extra_batch"
+        fun enqueue(context: Context, requests: List<DownloadRequest>) {
+            // Large seasons use an app-private payload rather than overflowing Binder extras.
+            val file = java.io.File(context.cacheDir, "download-batch-${java.util.UUID.randomUUID()}.json")
+            file.writeText(Json.encodeToString(kotlinx.serialization.builtins.ListSerializer(DownloadRequest.serializer()), requests))
+            androidx.core.content.ContextCompat.startForegroundService(context, Intent(context, DownloadService::class.java)
+                .setAction(ACTION_BATCH).putExtra(EXTRA_BATCH, file.name))
+        }
     }
-
-    private lateinit var downloadManager: DownloadManager
-    private var hasSeenWork = false
-    private val pendingCommands = java.util.concurrent.atomic.AtomicInteger(0)
-    private val serviceScope = CoroutineScope(Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
-
+    private lateinit var manager: DownloadManager
+    private lateinit var dao: DownloadDao
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val commands = java.util.concurrent.atomic.AtomicInteger(0)
+    private var started = false
+    private var sawWork = false
+    @Volatile private var commandError: String? = null
     override fun onCreate() {
         super.onCreate()
-        val database = AppDatabase.getInstance(applicationContext)
-        downloadManager = DownloadManager(applicationContext, database.downloadDao())
-        createNotificationChannel()
-        serviceScope.launch {
-            database.downloadDao().getAllDownloads().collect { rows ->
-                val active = rows.filter { it.status == "queued" || it.status == "downloading" }
-                if (active.isNotEmpty()) {
-                    hasSeenWork = true
-                    val downloading = active.firstOrNull { it.status == "downloading" } ?: active.first()
-                    val manager = getSystemService(NotificationManager::class.java)
-                    manager.notify(NOTIFICATION_ID, buildNotification(downloading.animeTitle + " · Ep. " + downloading.episodeNumber, (downloading.progress * 100).toInt()))
-                } else if (hasSeenWork && pendingCommands.get() == 0) stopSelf()
-            }
-        }
+        dao = AppDatabase.getInstance(applicationContext).downloadDao()
+        val notifications = getSystemService(NotificationManager::class.java)
+        notifications.createNotificationChannel(NotificationChannel(CHANNEL_ID, "Descargas AniCS", NotificationManager.IMPORTANCE_LOW))
+        manager = DownloadManager(applicationContext, dao)
+        scope.launch { dao.getAllDownloads().collect { rows ->
+            if (started) updateNotification(rows)
+        } }
     }
-
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val action = intent?.action
-        val downloadId = intent?.getStringExtra(EXTRA_ID)
-
-        val notification = buildNotification("Descargando contenido...", 0)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-            )
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
-        }
-
-        when (action) {
-            ACTION_START -> {
-                if (downloadId != null) {
-                    val title = intent.getStringExtra(EXTRA_TITLE) ?: "Anime"
-                    val ep = intent.getIntExtra(EXTRA_EPISODE, 1)
-                    val url = intent.getStringExtra(EXTRA_URL) ?: ""
-                    val referer = intent.getStringExtra(EXTRA_REFERER)
-
-                    serviceScope.launch {
-                        try { downloadManager.enqueueDownload(downloadId, title, ep, url, referer) }
-                        catch (e: kotlinx.coroutines.CancellationException) { throw e }
-                        catch (e: Exception) {
-                            AppDatabase.getInstance(applicationContext).downloadDao().insertDownload(com.anics.nativeapp.data.local.DownloadEntity(
-                                id = downloadId, animeTitle = title, episodeNumber = ep, streamUrl = url, referer = referer, outputPath = "", status = "failed",
-                                error = e.localizedMessage ?: "No se pudo crear la descarga", createdAt = java.time.Instant.now().toString()))
-                            stopSelf()
-                        }
+        commands.incrementAndGet()
+        commandError = null
+        val initial = notification(null, emptyList())
+        if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIFICATION_ID, initial, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        else startForeground(NOTIFICATION_ID, initial)
+        started = true
+        scope.launch {
+            val id = intent?.getStringExtra(EXTRA_ID)
+            try {
+                when (intent?.action) {
+                    ACTION_BATCH -> {
+                        val name = intent.getStringExtra(EXTRA_BATCH) ?: error("No hay un lote")
+                        require(Regex("download-batch-[a-f0-9-]+\\.json").matches(name))
+                        val file = java.io.File(cacheDir, name)
+                        try { manager.enqueueRequests(Json.decodeFromString(kotlinx.serialization.builtins.ListSerializer(DownloadRequest.serializer()), file.readText())) }
+                        finally { file.delete() }
                     }
+                    ACTION_START -> if (id != null) manager.enqueueDownload(id, intent.getStringExtra(EXTRA_TITLE) ?: "Anime", intent.getIntExtra(EXTRA_EPISODE, 1), intent.getStringExtra(EXTRA_URL) ?: "", intent.getStringExtra(EXTRA_REFERER))
+                    ACTION_PAUSE -> if (id != null) manager.pauseDownload(id)
+                    ACTION_RESUME -> if (id != null) manager.resumeDownload(id)
+                    ACTION_CANCEL -> if (id != null) manager.cancelDownload(id)
                 }
+                sawWork = true
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) {
+                commandError = e.localizedMessage ?: "No se pudo iniciar la descarga"
+                sawWork = true
+            } finally {
+                commands.decrementAndGet()
+                updateNotification(dao.getAllDownloads().first())
             }
-            ACTION_RESUME -> { downloadId?.let { id -> serviceScope.launch { downloadManager.resumeDownload(id) } } }
-            ACTION_PAUSE -> {
-                downloadId?.let { downloadManager.pauseDownload(it) }
-            }
-            ACTION_CANCEL -> {
-                downloadId?.let { id ->
-                    pendingCommands.incrementAndGet()
-                    serviceScope.launch {
-                        try { downloadManager.cancelDownload(id) }
-                        finally {
-                            pendingCommands.decrementAndGet()
-                            if (AppDatabase.getInstance(applicationContext).downloadDao().getAllDownloads().first().none { it.status == "queued" || it.status == "downloading" }) stopSelf()
-                        }
-                    }
-                }
-            }
-        }
-
-        serviceScope.launch {
-            kotlinx.coroutines.delay(1500)
-            val rows = AppDatabase.getInstance(applicationContext).downloadDao().getAllDownloads().first()
-            if (pendingCommands.get() == 0 && rows.none { it.status == "queued" || it.status == "downloading" }) stopSelf()
         }
         return START_NOT_STICKY
     }
-
-    override fun onDestroy() { downloadManager.close(); serviceScope.coroutineContext[kotlinx.coroutines.Job]?.cancel(); super.onDestroy() }
-
-    override fun onBind(intent: Intent?): IBinder? = null
-
-    private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Descargas AniCS",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Progreso de descargas de episodios"
-            }
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
+    private fun updateNotification(rows: List<DownloadEntity>) {
+        val active = rows.filter { it.status in listOf("queued", "downloading") }
+        if (active.isNotEmpty()) sawWork = true
+        if (active.isNotEmpty() || commands.get() == 0) {
+            val row = active.firstOrNull { it.status == "downloading" } ?: active.firstOrNull()
+                ?: rows.firstOrNull { it.status in listOf("paused", "failed") } ?: rows.lastOrNull()
+            getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification(row, active))
+        }
+        if (active.isEmpty() && commands.get() == 0 && sawWork) {
+            stopForeground(STOP_FOREGROUND_DETACH)
+            stopSelf()
         }
     }
-
-    private fun buildNotification(text: String, progress: Int): android.app.Notification {
-        val launchIntent = Intent(this, MainActivity::class.java)
-        val pendingIntent = PendingIntent.getActivity(
-            this,
-            0,
-            launchIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("AniCS - Gestor de Descargas")
-            .setContentText(text)
-            .setSmallIcon(android.R.drawable.stat_sys_download)
-            .setProgress(100, progress, progress == 0)
-            .setOngoing(true)
-            .setContentIntent(pendingIntent)
-            .build()
+    internal fun notification(row: DownloadEntity?, active: List<DownloadEntity>): Notification {
+        val launch = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java).putExtra("open_downloads", true), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val running = row?.status in listOf("queued", "downloading")
+        val text = when (row?.status) {
+            "downloading" -> "${(row.progress * 100).toInt()}% · ${formatBytes(row.speedBytesPerSecond)}/s · ${active.size} pendientes"
+            "queued" -> "En cola · Preparando servidor"
+            "paused" -> "Pausada · ${formatBytes(row.downloadedBytes)}"
+            "failed" -> row.error ?: "No se pudo descargar"
+            "completed" -> "Descarga completada"
+            else -> commandError ?: "Preparando descargas…"
+        }
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID).setSmallIcon(android.R.drawable.stat_sys_download)
+            .setContentTitle(row?.let { "${it.animeTitle} · Ep. ${it.episodeNumber}" } ?: "Descargas AniCS")
+            .setContentText(text).setOnlyAlertOnce(true).setContentIntent(launch).setOngoing(running).setAutoCancel(!running)
+        if (row != null && row.status != "completed") {
+            builder.setProgress(100, (row.progress * 100).toInt(), row.status == "queued" || (running && row.totalBytes == null))
+            val action = if (running) ACTION_PAUSE else ACTION_RESUME
+            builder.addAction(if (running) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
+                if (running) "Pausar" else "Reanudar", actionIntent(row.id, action))
+            builder.addAction(android.R.drawable.ic_menu_close_clear_cancel, "Cancelar", actionIntent(row.id, ACTION_CANCEL))
+        }
+        return builder.build()
     }
+    private fun actionIntent(id: String, action: String) = PendingIntent.getForegroundService(this, (id + action).hashCode(),
+        Intent(this, DownloadService::class.java).setAction(action).putExtra(EXTRA_ID, id), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+    override fun onBind(intent: Intent?): IBinder? = null
+    override fun onDestroy() { manager.close(); scope.cancel(); super.onDestroy() }
 }

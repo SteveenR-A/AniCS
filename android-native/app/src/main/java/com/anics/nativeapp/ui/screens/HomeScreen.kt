@@ -27,14 +27,13 @@ import com.anics.nativeapp.ui.viewmodels.HomeViewModel
 fun HomeScreen(viewModel: HomeViewModel, onAnimeClick: (String, String) -> Unit, onSearchClick: () -> Unit,
     onResume: (com.anics.nativeapp.data.local.HistoryEntity) -> Unit, modifier: Modifier = Modifier) {
     val state by viewModel.uiState.collectAsState()
-    LazyVerticalGrid(GridCells.Adaptive(145.dp), modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    LazyVerticalGrid(GridCells.Adaptive(145.dp), modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item(span = { GridItemSpan(maxLineSpan) }) {
             SectionTitle("Últimos episodios", "Novedades de ${sourceLabel(state.selectedSource)}", action = {
                 IconButton(onClick = onSearchClick) { Icon(AniIcons.Search, "Buscar anime") }
                 IconButton(onClick = viewModel::refresh) { Icon(AniIcons.RefreshCw, "Actualizar inicio") }
             })
         }
-        item(span = { GridItemSpan(maxLineSpan) }) { SourceTabs(state.availableSources, state.selectedSource, { it?.let(viewModel::selectSource) }) }
         if (state.continueWatching.isNotEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("Continuar viendo", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -63,10 +62,10 @@ fun HomeScreen(viewModel: HomeViewModel, onAnimeClick: (String, String) -> Unit,
 
 @Composable
 fun AnimeCard(anime: NativeAnimeResult, onClick: () -> Unit, modifier: Modifier = Modifier, rank: Int? = null) {
-    Surface(onClick, modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surface,
+    Surface(onClick, modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, if (rank == 1) Color(0xFFc99e39) else MaterialTheme.colorScheme.outlineVariant)) {
         Column {
-            Box(Modifier.fillMaxWidth().aspectRatio(.7f).background(MaterialTheme.colorScheme.surfaceVariant)) {
+            Box(Modifier.fillMaxWidth().aspectRatio(.75f).background(MaterialTheme.colorScheme.surfaceVariant)) {
                 AsyncImage(anime.thumbnailUrl, anime.title, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                 Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Transparent, MaterialTheme.colorScheme.surface.copy(alpha = .8f)))))
                 anime.episode?.takeIf { it.isNotBlank() }?.let { ep -> Surface(color = MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(50), modifier = Modifier.align(Alignment.TopEnd).padding(8.dp)) {

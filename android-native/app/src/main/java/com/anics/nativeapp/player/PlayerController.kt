@@ -23,7 +23,8 @@ data class PlaybackState(
     val error: String? = null,
     val speed: Float = 1f,
     val muted: Boolean = false,
-    val ended: Boolean = false
+    val ended: Boolean = false,
+    val availableQualities: List<String> = emptyList()
 )
 
 @OptIn(UnstableApi::class)
@@ -40,6 +41,12 @@ class PlayerController(private val context: Context) : PlaybackEngine {
             exoPlayer = ExoPlayer.Builder(context).build().apply {
                 playWhenReady = true
                 addListener(object : Player.Listener {
+                    override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
+                        val heights = tracks.groups.filter { it.type == androidx.media3.common.C.TRACK_TYPE_VIDEO }.flatMap { group ->
+                            (0 until group.length).filter { group.isTrackSupported(it) }.map { group.getTrackFormat(it).height }
+                        }.filter { it > 0 }.distinct().sortedDescending().map { "${it}p" }
+                        _playbackState.value = _playbackState.value.copy(availableQualities = heights)
+                    }
                     override fun onIsPlayingChanged(isPlaying: Boolean) {
                         _playbackState.value = _playbackState.value.copy(isPlaying = isPlaying)
                     }
@@ -123,6 +130,12 @@ class PlayerController(private val context: Context) : PlaybackEngine {
     fun pause() { exoPlayer?.pause() }
     fun play() { exoPlayer?.play() }
     fun setSpeed(speed: Float) { exoPlayer?.setPlaybackSpeed(speed); _playbackState.value = _playbackState.value.copy(speed = speed) }
+    override fun setQuality(quality: String) {
+        val player = exoPlayer ?: return
+        val height = quality.removeSuffix("p").toIntOrNull()
+        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().clearVideoSizeConstraints()
+            .apply { if (height != null) setMaxVideoSize(Int.MAX_VALUE, height) }.build()
+    }
     fun toggleMute() { exoPlayer?.let { it.volume = if (it.volume == 0f) 1f else 0f; _playbackState.value = _playbackState.value.copy(muted = it.volume == 0f) } }
     fun togglePlayPause() {
         exoPlayer?.let {

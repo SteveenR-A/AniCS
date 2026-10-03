@@ -1,5 +1,18 @@
 [
   {
+    "version": "0.3.3",
+    "date": "2026-10-02",
+    "title": "Optimización de UI Nativa, Gestor de Descargas y Correcciones",
+    "type": "patch",
+    "highlights": [
+      "Android Nativo: Interfaz compacta responsive, controles optimizados en horizontal/vertical y paginación en búsqueda",
+      "Android Nativo: Gestor de descargas robusto con transferencias concurrentes (1-4), lotes y reanudación HTTP validada",
+      "Android Nativo: Notificaciones interactivas de descarga (pausa, reanudación y cancelación)",
+      "Catálogo y Estabilidad: Deduplicación rigurosa de entradas y episodios para prevenir cierres por claves duplicadas",
+      "Biblioteca y Almacenamiento: Importación de metadatos/portadas locales y optimización de caché Coil"
+    ]
+  },
+  {
     "version": "0.3.2",
     "date": "2026-10-02",
     "title": "Paridad de Gestos y Optimización del Reproductor",

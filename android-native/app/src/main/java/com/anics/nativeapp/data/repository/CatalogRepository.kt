@@ -17,7 +17,7 @@ class CatalogRepository(
     }
 
     suspend fun getLatest(source: String, page: Int = 1): List<NativeAnimeResult> = withContext(Dispatchers.IO) {
-        client.getLatest(source, page.toUInt())
+        safeCards(client.getLatest(source, page.toUInt()))
     }
 
     suspend fun search(query: String, source: String? = null): List<NativeAnimeResult> = withContext(Dispatchers.IO) {
@@ -41,10 +41,10 @@ class CatalogRepository(
     }
 
     suspend fun getScheduleDays(source: String): List<NativeScheduleDay> = withContext(Dispatchers.IO) {
-        client.getScheduleDays(source)
+        client.getScheduleDays(source).distinctBy { it.day }.map { it.copy(animes = safeCards(it.animes).distinctBy { row -> listOf(row.source, row.url) }) }
     }
 
-    suspend fun getTop(source: String): List<NativeAnimeResult> = withContext(Dispatchers.IO) { client.getTop(source) }
+    suspend fun getTop(source: String): List<NativeAnimeResult> = withContext(Dispatchers.IO) { safeCards(client.getTop(source)).distinctBy { listOf(it.source, it.url) } }
 
     suspend fun getGenres(source: String): List<NativeGenreItem> = withContext(Dispatchers.IO) {
         client.getGenres(source)
@@ -62,3 +62,6 @@ class CatalogRepository(
         client.updateSettings(settingsJson)
     }
 }
+
+// Some providers repeat cards for their desktop/mobile carousels. Compose keys must be unique.
+fun safeCards(rows: List<NativeAnimeResult>): List<NativeAnimeResult> = rows.filter { it.url.isNotBlank() }.distinctBy { listOf(it.source, it.url, it.episode.orEmpty()) }

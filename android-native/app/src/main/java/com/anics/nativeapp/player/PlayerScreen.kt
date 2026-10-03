@@ -140,7 +140,7 @@ fun PlayerScreen(controller: PlayerController, viewModel: PlaybackSessionViewMod
         fit = fit, onFit = { fit = it })
 }
 
-@kotlin.OptIn(ExperimentalMaterial3Api::class)
+@kotlin.OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun PlayerHud(playback: PlaybackState, session: PlaybackSessionState, landscape: Boolean, scrubbing: Boolean = false, scrub: Float = 0f,
     onBack: () -> Unit, onPanel: (String) -> Unit, onPlay: () -> Unit, onSeek: (Long) -> Unit, onPrevious: () -> Unit, onNext: () -> Unit,
@@ -171,13 +171,13 @@ fun PlayerHud(playback: PlaybackState, session: PlaybackSessionState, landscape:
                 track = { SliderDefaults.Track(it, Modifier.height(3.dp), colors = SliderDefaults.colors(activeTrackColor = Color.White, inactiveTrackColor = Color.White.copy(alpha = .25f))) }, modifier = Modifier.fillMaxWidth().height(30.dp))
             if (!landscape) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(formatTime((fraction * duration).toLong()), color = Color.White, fontSize = 12.sp); Text(formatTime(playback.durationMs), color = Color.LightGray, fontSize = 12.sp) }
             val wide = landscape && LocalConfiguration.current.screenWidthDp >= 700
-            Row(if (wide) Modifier.fillMaxWidth() else Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 HudIcon(AniIcons.SkipBack, "Episodio anterior", onPrevious, enabled = session.previous != null && !session.isResolving)
                 HudIcon(if (playback.isPlaying) AniIcons.Pause else AniIcons.Play, if (playback.isPlaying) "Pausar" else "Reproducir", onPlay)
                 HudIcon(AniIcons.SkipForward, "Siguiente episodio", onNext, enabled = session.next != null && !session.isResolving)
                 if (landscape) Text("${formatTime((fraction * duration).toLong())} / ${formatTime(playback.durationMs)}", color = Color.White, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 10.dp))
                 if (wide) Spacer(Modifier.weight(1f))
-                HudPill("Saltar intro (+85 s)", onIntro)
+                HudPill("Intro +85 s", onIntro)
                 HudPill("${playback.speed}x", { onPanel("settings") })
                 HudIcon(if (playback.muted) AniIcons.VolumeX else AniIcons.Volume2, "Silenciar / activar audio", onMute)
                 HudIcon(AniIcons.Lock, "Bloquear controles", onLock)
@@ -203,13 +203,23 @@ private fun HudPill(label: String, onClick: () -> Unit) {
 private fun PlayerPanel(panel: String, session: PlaybackSessionState, playback: PlaybackState, onDismiss: () -> Unit,
     onServer: (com.anics.nativeapp.ffi.NativeVideoServer) -> Unit, onEpisode: (com.anics.nativeapp.ffi.NativeEpisode) -> Unit,
     onQuality: (String) -> Unit, onSpeed: (Float) -> Unit, onAutoNext: (Boolean) -> Unit, fit: Int, onFit: (Int) -> Unit) {
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        Text(when(panel) { "servers" -> "Cambiar servidor"; "episodes" -> "Episodios"; else -> "Reproducción" }, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 20.dp))
-        LazyColumn(Modifier.fillMaxWidth().heightIn(max = 360.dp).navigationBarsPadding(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    var unsupported by remember { mutableStateOf(false) }
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetMaxWidth = 520.dp, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        Text(when(panel) { "servers" -> "Cambiar servidor"; "episodes" -> "Episodios"; else -> "Reproducción" }, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 14.dp))
+        LazyColumn(Modifier.fillMaxWidth().heightIn(max = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * .65f).dp).navigationBarsPadding(), contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             when(panel) {
                 "servers" -> {
                     if (session.servers.isEmpty()) item { Text("No hay servidores disponibles. Vuelve a cargar el episodio.") }
-                    items(session.servers, key = { it.name + it.url }) { server -> AniPill(server.name, server == session.selectedServer, { onServer(server) }, Modifier.fillMaxWidth(), AniIcons.Server) }
+                    item { Row(verticalAlignment = Alignment.CenterVertically) { Text("Mostrar no compatibles", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall); Switch(unsupported, { unsupported = it }) } }
+                    items(com.anics.nativeapp.downloads.ServerSupport.ordered(session.servers).filter { unsupported || com.anics.nativeapp.downloads.ServerSupport.playable(it) }, key = { it.name + it.url }) { server ->
+                        val supported = com.anics.nativeapp.downloads.ServerSupport.playable(server)
+                        Surface(onClick = { onServer(server) }, enabled = supported, color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(12.dp)) {
+                            Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) { Text(server.name, color = if (supported) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant); Text(if (supported) "Compatible" else "No compatible en esta versión", style = MaterialTheme.typography.labelSmall) }
+                                if (server == session.selectedServer) Icon(AniIcons.Check, "Servidor activo", Modifier.size(18.dp))
+                            }
+                        }
+                    }
                 }
                 "episodes" -> {
                     items(session.episodes, key = { it.url }) { episode ->
@@ -218,11 +228,11 @@ private fun PlayerPanel(panel: String, session: PlaybackSessionState, playback: 
                 }
                 else -> {
                     item { Text("Velocidad", fontWeight = FontWeight.SemiBold); FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) { listOf(.5f,.75f,1f,1.25f,1.5f,2f).forEach { speed -> AniPill("${speed}x", playback.speed == speed, { onSpeed(speed) }) } } }
-                    if (session.media?.qualities?.isNotEmpty() == true) item {
+                    if (session.media?.qualities?.isNotEmpty() == true || playback.availableQualities.size > 1) item {
                         Text("Calidad", fontWeight = FontWeight.SemiBold)
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             AniPill("Automática", session.quality == "auto", { onQuality("auto") })
-                            session.media.qualities.distinctBy { it.label }.forEach { quality -> AniPill(quality.label, session.quality == quality.label, { onQuality(quality.label) }) }
+                            (session.media?.qualities.orEmpty().map { it.label } + playback.availableQualities).distinct().forEach { quality -> AniPill(quality, session.quality == quality, { onQuality(quality) }) }
                         }
                     }
                     item { Text("Ajuste de imagen", fontWeight = FontWeight.SemiBold); FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {

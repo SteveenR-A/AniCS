@@ -29,13 +29,19 @@ class LocalLibrary(private val context: Context, private val dao: DownloadDao) {
         val root = DocumentFile.fromTreeUri(context, Uri.parse(treeUri)) ?: error("La carpeta no está disponible")
         require(root.exists() && root.canRead()) { "Selecciona de nuevo la carpeta para conceder acceso" }
         val knownPaths = dao.getAllDownloads().first().associateBy { it.outputPath }
+        val metadata = TauriLibraryMetadata(context).read()
+        val db = com.anics.nativeapp.data.local.AppDatabase.getInstance(context)
+        val saved = (db.historyDao().getAllHistorySync().map { LibraryMetadata(it.animeTitle, it.animeUrl, it.thumbnailUrl, it.source) } +
+            db.favoriteDao().getAllFavoritesSync().map { LibraryMetadata(it.title, it.url, it.thumbnailUrl, it.source) }).associateBy { com.anics.nativeapp.sync.SyncContract.titleKey(it.title) }
         var found = 0
         val result = mutableListOf<DownloadEntity>()
         val visited = mutableSetOf<String>()
         fun visit(directory: DocumentFile, depth: Int) {
             require(depth <= 20) { "La carpeta contiene demasiados niveles" }
             if (!visited.add(directory.uri.toString())) return
-            directory.listFiles().forEach { file ->
+            val files = directory.listFiles()
+            val localCover = listOf("poster.jpg", "cover.jpg", "cover.png", "folder.jpg", "thumbnail.jpg").firstNotNullOfOrNull { name -> files.firstOrNull { it.name.equals(name, true) }?.uri?.toString() }
+            files.forEach { file ->
                 if (file.isDirectory) visit(file, depth + 1)
                 else {
                     val name = file.name ?: return@forEach
@@ -43,13 +49,15 @@ class LocalLibrary(private val context: Context, private val dao: DownloadDao) {
                     if (file.length() <= 100) return@forEach
                     val (title, episode) = LocalEpisodeNames.parse(name, if (depth > 0) directory.name else null)
                     val path = file.uri.toString()
+                    val meta = saved[com.anics.nativeapp.sync.SyncContract.titleKey(title)] ?: metadata[com.anics.nativeapp.sync.SyncContract.titleKey(title)]
+                    val cover = localCover ?: meta?.thumbnailUrl.orEmpty()
                     val known = knownPaths[path]
                     if (known != null && known.status != "completed") return@forEach
                     found++
-                    if (known != null) return@forEach
+                    if (known != null) { result.add(known.copy(animeUrl = meta?.animeUrl?.ifBlank { known.animeUrl } ?: known.animeUrl, thumbnailUrl = cover.ifBlank { known.thumbnailUrl }, source = meta?.source ?: known.source)); return@forEach }
                     val id = "local:" + MessageDigest.getInstance("SHA-256").digest(path.toByteArray()).joinToString("") { "%02x".format(it.toInt() and 255) }
                     result.add(DownloadEntity(id = id, animeTitle = title, episodeNumber = episode, streamUrl = "", outputPath = path,
-                        status = "completed", progress = 1f, downloadedBytes = file.length(), totalBytes = file.length(), createdAt = Instant.ofEpochMilli(file.lastModified()).toString()))
+                        status = "completed", progress = 1f, downloadedBytes = file.length(), totalBytes = file.length(), createdAt = Instant.ofEpochMilli(file.lastModified()).toString(), animeUrl = meta?.animeUrl.orEmpty(), thumbnailUrl = cover, source = meta?.source ?: "jkanime"))
                 }
             }
         }

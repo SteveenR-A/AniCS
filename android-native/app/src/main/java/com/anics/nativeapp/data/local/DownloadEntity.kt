@@ -7,6 +7,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
+import androidx.room.ColumnInfo
 import kotlinx.coroutines.flow.Flow
 
 @Entity(tableName = "downloads")
@@ -23,6 +24,11 @@ data class DownloadEntity(
     val progress: Float = 0f,
     val downloadedBytes: Long = 0,
     val totalBytes: Long? = null,
+    @ColumnInfo(defaultValue = "0") val speedBytesPerSecond: Long = 0,
+    @ColumnInfo(defaultValue = "''") val animeUrl: String = "",
+    @ColumnInfo(defaultValue = "''") val episodeUrl: String = "",
+    @ColumnInfo(defaultValue = "''") val thumbnailUrl: String = "",
+    @ColumnInfo(defaultValue = "'jkanime'") val source: String = "jkanime",
     val error: String? = null,
     val createdAt: String
 )
@@ -49,6 +55,12 @@ interface DownloadDao {
 
     @Query("UPDATE downloads SET status = :status, progress = :progress, downloadedBytes = :bytes WHERE id = :id")
     suspend fun updateProgress(id: String, status: String, progress: Float, bytes: Long)
+
+    @Query("UPDATE downloads SET status = :status, progress = :progress, downloadedBytes = :bytes, totalBytes = :total, speedBytesPerSecond = :speed, error = :error WHERE id = :id")
+    suspend fun updateTransfer(id: String, status: String, progress: Float, bytes: Long, total: Long?, speed: Long = 0, error: String? = null)
+
+    @Query("UPDATE downloads SET status = 'paused', speedBytesPerSecond = 0 WHERE status = 'downloading'")
+    suspend fun recoverInterrupted()
 
     @Query("DELETE FROM downloads WHERE id = :id")
     suspend fun deleteDownload(id: String)

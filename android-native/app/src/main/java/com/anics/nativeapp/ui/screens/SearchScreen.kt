@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import com.anics.nativeapp.ui.components.*
 import com.anics.nativeapp.ui.viewmodels.SearchViewModel
 import java.time.Year
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -25,15 +26,23 @@ fun SearchScreen(viewModel: SearchViewModel, onAnimeClick: (String, String) -> U
     val state by viewModel.uiState.collectAsState()
     var showFilters by rememberSaveable { mutableStateOf(false) }
     val keyboard = LocalSoftwareKeyboardController.current
-    LazyVerticalGrid(GridCells.Adaptive(145.dp), modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    val grid = rememberLazyGridState()
+    val scope = rememberCoroutineScope()
+    LazyVerticalGrid(GridCells.Adaptive(145.dp), modifier.fillMaxSize(), state = grid, contentPadding = PaddingValues(12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item(span = { GridItemSpan(maxLineSpan) }) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                OutlinedTextField(state.query, viewModel::onQueryChanged, placeholder = { Text("Buscar en catálogo…") }, singleLine = true,
-                    leadingIcon = { Icon(AniIcons.Search, null, Modifier.size(20.dp)) }, shape = RoundedCornerShape(50),
-                    trailingIcon = { if (state.query.isNotEmpty()) IconButton(onClick = { viewModel.onQueryChanged("") }) { Icon(AniIcons.X, "Limpiar búsqueda", Modifier.size(18.dp)) } },
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search), keyboardActions = KeyboardActions(onSearch = { viewModel.submit(); keyboard?.hide() }), modifier = Modifier.weight(1f))
-                IconButton(onClick = { showFilters = !showFilters }) { Icon(AniIcons.SlidersHorizontal, "Filtros avanzados", tint = if (showFilters) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) }
-                IconButton(onClick = viewModel::refresh) { Icon(AniIcons.RefreshCw, "Actualizar catálogo") }
+                Surface(Modifier.weight(1f), shape = RoundedCornerShape(24.dp), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), color = MaterialTheme.colorScheme.surface) {
+                    Row(Modifier.heightIn(min = 46.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Icon(AniIcons.Search, null, Modifier.size(17.dp))
+                        androidx.compose.foundation.text.BasicTextField(state.query, viewModel::onQueryChanged, singleLine = true,
+                            textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search), keyboardActions = KeyboardActions(onSearch = { viewModel.submit(); keyboard?.hide() }),
+                            modifier = Modifier.weight(1f), decorationBox = { inner -> Box { if (state.query.isEmpty()) Text("Buscar anime…", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1); inner() } })
+                        if (state.query.isNotEmpty()) IconButton(onClick = { viewModel.onQueryChanged("") }, modifier = Modifier.size(28.dp)) { Icon(AniIcons.X, "Limpiar búsqueda", Modifier.size(16.dp)) }
+                    }
+                }
+                IconButton(onClick = { showFilters = !showFilters }, modifier = Modifier.size(36.dp)) { Icon(AniIcons.SlidersHorizontal, "Filtros avanzados", tint = if (showFilters) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) }
+                IconButton(onClick = viewModel::refresh, modifier = Modifier.size(36.dp)) { Icon(AniIcons.RefreshCw, "Actualizar catálogo") }
             }
         }
         item(span = { GridItemSpan(maxLineSpan) }) { SourceTabs(state.availableSources, state.selectedSource, { source -> viewModel.selectSource(source); source?.let(onSource) }, includeAll = true) }
@@ -88,6 +97,9 @@ fun SearchScreen(viewModel: SearchViewModel, onAnimeClick: (String, String) -> U
             }
         }
         items(state.results, key = { it.source + it.url }) { anime -> AnimeCard(anime, { viewModel.rememberQuery(); onAnimeClick(anime.url, anime.source) }) }
+        if (state.totalPages > 1) item(span = { GridItemSpan(maxLineSpan) }) {
+            PageNavigation(state.page, state.totalPages, !state.isLoading) { page -> viewModel.goToPage(page); scope.launch { grid.scrollToItem(0) } }
+        }
         if (state.hasNext) item(span = { GridItemSpan(maxLineSpan) }) { OutlinedButton(onClick = viewModel::nextPage, enabled = !state.isLoading) { Text("Cargar más") } }
     }
 }
@@ -101,5 +113,18 @@ fun FilterMenu(label: String, selected: String?, options: List<Pair<String, Stri
             DropdownMenuItem(text = { Text("Todos") }, onClick = { onSelect(null); expanded = false })
             options.forEach { (value, name) -> DropdownMenuItem(text = { Text(name) }, onClick = { onSelect(value); expanded = false }) }
         }
+    }
+}
+fun pageNumbers(page: Int, total: Int): List<Int> = (listOf(1, total) + ((page - 2).coerceAtLeast(1)..(page + 2).coerceAtMost(total)).toList()).distinct().sorted()
+@Composable
+fun PageNavigation(page: Int, total: Int, enabled: Boolean, select: (Int) -> Unit) {
+    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+        IconButton(onClick = { select(page - 1) }, enabled = enabled && page > 1, modifier = Modifier.size(36.dp)) { Icon(AniIcons.ArrowLeft, "Página anterior", Modifier.size(17.dp)) }
+        val pages = pageNumbers(page, total)
+        pages.forEachIndexed { index, number ->
+            if (index > 0 && number - pages[index - 1] > 1) Text("…")
+            AniPill("$number", page == number, { if (enabled) select(number) })
+        }
+        IconButton(onClick = { select(page + 1) }, enabled = enabled && page < total, modifier = Modifier.size(36.dp)) { Icon(AniIcons.ChevronRight, "Página siguiente", Modifier.size(17.dp)) }
     }
 }

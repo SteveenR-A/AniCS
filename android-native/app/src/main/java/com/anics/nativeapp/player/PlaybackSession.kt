@@ -26,6 +26,7 @@ interface PlaybackEngine {
     fun prepareStream(directUrl: String, isHls: Boolean, referer: String? = null, userAgent: String? = null,
         startPositionMs: Long = 0, resumeFraction: Double? = null, autoPlay: Boolean = true)
     fun resetPlayback()
+    fun setQuality(quality: String) {}
 }
 
 data class PlaybackSessionState(
@@ -90,12 +91,13 @@ class PlaybackSessionViewModel(
     }
     private suspend fun resolveEpisode(url: String, preferredName: String?): NativeResolvedMedia {
         val source = _state.value.entry?.source ?: error("No hay una sesión activa")
-        val servers = catalog.getServers(url, source)
+        val servers = com.anics.nativeapp.downloads.ServerSupport.ordered(catalog.getServers(url, source))
         // Failed next-episode resolution must not replace the current episode's servers.
         _state.update { if (it.entry?.episodeUrl == url) it.copy(servers = servers) else it }
         val preferred = preferredName?.takeIf { it.isNotBlank() } ?: settings.preferredServer
-        val preferredServers = servers.filter { it.name.equals(preferred, true) }
-        val candidates = if (settings.allowFallback || preferred.isBlank()) preferredServers + servers.filter { it !in preferredServers } else preferredServers
+        val supported = servers.filter(com.anics.nativeapp.downloads.ServerSupport::playable)
+        val preferredServers = supported.filter { it.name.equals(preferred, true) }
+        val candidates = if (settings.allowFallback || preferred.isBlank()) preferredServers + supported.filter { it !in preferredServers } else preferredServers
         var lastError: Exception? = null
         for (server in candidates) {
             try {
@@ -114,6 +116,7 @@ class PlaybackSessionViewModel(
         endedEpisode = null
         // prepareStream resets the old stream before replacing it.
         engine.prepareStream(url, media.mediaType == NativeMediaType.HLS, media.referer, media.userAgent, position, resumeFraction, autoPlay)
+        engine.setQuality(quality)
     }
     fun selectServer(server: NativeVideoServer, autoPlay: Boolean = true) {
         val entry = _state.value.entry ?: return

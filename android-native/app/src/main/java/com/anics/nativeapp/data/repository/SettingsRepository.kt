@@ -22,7 +22,10 @@ data class AppSettings(
     val syncUserId: String = "",
     val downloadFolderUri: String = "",
     val allowFallback: Boolean = true,
-    val preferredServer: String = ""
+    val preferredServer: String = "",
+    val preferredDownloadServer: String = "",
+    val maxConcurrentDownloads: Int = 1,
+    val imageCacheMb: Int = 300
 )
 
 class SettingsRepository(private val context: Context) {
@@ -62,8 +65,12 @@ class SettingsRepository(private val context: Context) {
             safe["auto_play_next"]?.toBooleanStrictOrNull()?.let { prefs[PreferencesKeys.AUTO_PLAY_NEXT] = it }
             safe["default_quality"]?.let { prefs[PreferencesKeys.DEFAULT_QUALITY] = it }
             safe["preferred_server"]?.let { prefs[PreferencesKeys.PREFERRED_SERVER] = it }
+            safe["preferred_download_server"]?.let { prefs[PreferencesKeys.DOWNLOAD_SERVER] = it }
+            safe["max_concurrent_downloads"]?.toIntOrNull()?.let { prefs[PreferencesKeys.MAX_DOWNLOADS] = it.coerceIn(1, 4) }
+            safe["max_image_cache_mb"]?.toIntOrNull()?.let { prefs[PreferencesKeys.IMAGE_CACHE] = it.coerceIn(100, 1024) }
             safe["allow_fallback"]?.toBooleanStrictOrNull()?.let { prefs[PreferencesKeys.ALLOW_FALLBACK] = it }
         }
+        values["max_image_cache_mb"]?.toIntOrNull()?.let { context.getSharedPreferences("image_cache", Context.MODE_PRIVATE).edit().putInt("limit_mb", it.coerceIn(100, 1024)).apply() }
     }
 
     suspend fun updateTheme(theme: String) {
@@ -81,6 +88,9 @@ class SettingsRepository(private val context: Context) {
         val DOWNLOAD_FOLDER_URI = stringPreferencesKey("download_folder_uri")
         val ALLOW_FALLBACK = booleanPreferencesKey("allow_fallback")
         val PREFERRED_SERVER = stringPreferencesKey("preferred_server")
+        val DOWNLOAD_SERVER = stringPreferencesKey("preferred_download_server")
+        val MAX_DOWNLOADS = androidx.datastore.preferences.core.intPreferencesKey("max_concurrent_downloads")
+        val IMAGE_CACHE = androidx.datastore.preferences.core.intPreferencesKey("max_image_cache_mb")
     }
 
     val settings: Flow<AppSettings> = context.dataStore.data.map { prefs ->
@@ -93,7 +103,10 @@ class SettingsRepository(private val context: Context) {
             syncUserId = prefs[PreferencesKeys.SYNC_USER_ID] ?: "",
             downloadFolderUri = prefs[PreferencesKeys.DOWNLOAD_FOLDER_URI] ?: "",
             allowFallback = prefs[PreferencesKeys.ALLOW_FALLBACK] ?: true,
-            preferredServer = prefs[PreferencesKeys.PREFERRED_SERVER] ?: ""
+            preferredServer = prefs[PreferencesKeys.PREFERRED_SERVER] ?: "",
+            preferredDownloadServer = prefs[PreferencesKeys.DOWNLOAD_SERVER] ?: "",
+            maxConcurrentDownloads = (prefs[PreferencesKeys.MAX_DOWNLOADS] ?: 1).coerceIn(1, 4),
+            imageCacheMb = prefs[PreferencesKeys.IMAGE_CACHE] ?: 300
         )
     }
 
@@ -119,6 +132,12 @@ class SettingsRepository(private val context: Context) {
     suspend fun updatePreferredServer(server: String) {
         context.dataStore.edit { it[PreferencesKeys.PREFERRED_SERVER] = server }
         applySyncSettings(mapOf("preferred_server" to server.toString()))
+    }
+    suspend fun updateDownloadServer(server: String) = applySyncSettings(mapOf("preferred_download_server" to server))
+    suspend fun updateMaxDownloads(limit: Int) = applySyncSettings(mapOf("max_concurrent_downloads" to limit.coerceIn(1, 4).toString()))
+    suspend fun updateImageCache(limit: Int) {
+        context.getSharedPreferences("image_cache", Context.MODE_PRIVATE).edit().putInt("limit_mb", limit.coerceIn(100, 1024)).apply()
+        applySyncSettings(mapOf("max_image_cache_mb" to limit.toString()))
     }
 
     suspend fun updateAllowFallback(allow: Boolean) {

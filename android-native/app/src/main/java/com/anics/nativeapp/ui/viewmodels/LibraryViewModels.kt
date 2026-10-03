@@ -18,10 +18,10 @@ class BrowseViewModel(private val catalog: CatalogRepository, settings: Settings
     fun refresh() {
         job?.cancel()
         job = viewModelScope.launch {
-            _state.update { it.copy(isLoading = true, error = null) }
+            _state.update { it.copy(isLoading = true, error = null, ranking = emptyList(), days = emptyList()) }
             try {
                 val source = _state.value.source
-                if (ranking) { val rows = catalog.getTop(source); _state.update { it.copy(ranking = rows, isLoading = false) } }
+                if (ranking) { require(source == "jkanime") { "Esta fuente no ofrece un ranking. Selecciona JKAnime para ver el Top." }; val rows = catalog.getTop(source); _state.update { it.copy(ranking = rows, isLoading = false) } }
                 else { val days = catalog.getScheduleDays(source); _state.update { it.copy(days = days, isLoading = false) } }
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) { _state.update { it.copy(isLoading = false, error = e.localizedMessage ?: "No se pudo cargar el catálogo") } }

@@ -1,5 +1,6 @@
 package com.anics.nativeapp.ui.theme
 
+import androidx.compose.ui.unit.sp
 import android.app.Activity
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.*
@@ -48,5 +49,15 @@ fun AniCSTheme(themeId: String = "rosepine", content: @Composable () -> Unit) {
             WindowCompat.getInsetsController(window, view).isAppearanceLightNavigationBars = !dark
         }
     }
-    MaterialTheme(colorScheme = scheme, content = content)
+    val compact = androidx.compose.material3.Typography(
+        headlineSmall = androidx.compose.ui.text.TextStyle(fontSize = 21.sp, lineHeight = 26.sp),
+        titleLarge = androidx.compose.ui.text.TextStyle(fontSize = 18.sp, lineHeight = 23.sp),
+        titleMedium = androidx.compose.ui.text.TextStyle(fontSize = 15.sp, lineHeight = 20.sp),
+        bodyLarge = androidx.compose.ui.text.TextStyle(fontSize = 14.sp, lineHeight = 19.sp),
+        bodyMedium = androidx.compose.ui.text.TextStyle(fontSize = 13.sp, lineHeight = 18.sp),
+        bodySmall = androidx.compose.ui.text.TextStyle(fontSize = 11.sp, lineHeight = 15.sp),
+        labelLarge = androidx.compose.ui.text.TextStyle(fontSize = 12.sp, lineHeight = 16.sp),
+        labelMedium = androidx.compose.ui.text.TextStyle(fontSize = 11.sp, lineHeight = 15.sp),
+        labelSmall = androidx.compose.ui.text.TextStyle(fontSize = 10.sp, lineHeight = 14.sp))
+    MaterialTheme(colorScheme = scheme, typography = compact, content = content)
 }

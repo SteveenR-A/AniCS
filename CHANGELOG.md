@@ -5,6 +5,17 @@ El formato está basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1
 
 ---
 
+## [0.3.3] - 2026-10-02
+
+### Optimización de UI Nativa, Gestor de Descargas y Correcciones
+- Android Nativo: Interfaz compacta responsive, controles optimizados en horizontal/vertical y paginación en búsqueda
+- Android Nativo: Gestor de descargas robusto con transferencias concurrentes (1-4), lotes y reanudación HTTP validada
+- Android Nativo: Notificaciones interactivas de descarga (pausa, reanudación y cancelación)
+- Catálogo y Estabilidad: Deduplicación rigurosa de entradas y episodios para prevenir cierres por claves duplicadas
+- Biblioteca y Almacenamiento: Importación de metadatos/portadas locales y optimización de caché Coil
+
+---
+
 ## [0.3.2] - 2026-10-02
 
 ### Paridad de Gestos y Optimización del Reproductor
