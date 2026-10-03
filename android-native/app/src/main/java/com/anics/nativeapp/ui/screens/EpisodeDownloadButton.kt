@@ -38,8 +38,8 @@ fun EpisodeDownloadButton(episode: UInt, download: DownloadEntity?, onClick: () 
         null -> "Descargar episodio $episode"
         else -> "${episodeDownloadLabel(download!!)} · Episodio $episode"
     }
-    IconButton(onClick = onClick, enabled = !busy, modifier = Modifier.semantics { contentDescription = label }) {
-        Box(Modifier.size(32.dp), contentAlignment = Alignment.Center) {
+    IconButton(onClick = onClick, enabled = !busy, modifier = Modifier.size(34.dp).semantics { contentDescription = label }) {
+        Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
             val tint = if (status == "failed") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
             if (busy || status == "paused") {
                 if (status == "queued" || status == "downloading" && (download?.totalBytes == null || download.totalBytes <= 0))
@@ -53,7 +53,7 @@ fun EpisodeDownloadButton(episode: UInt, download: DownloadEntity?, onClick: () 
                 "completed" -> AniIcons.Check
                 else -> AniIcons.Download
             }
-            Icon(icon, null, Modifier.size(if (busy || status == "paused") 14.dp else 18.dp), tint = tint)
+            Icon(icon, null, Modifier.size(if (busy || status == "paused") 12.dp else 16.dp), tint = tint)
         }
     }
 }

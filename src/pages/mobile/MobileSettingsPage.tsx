@@ -119,6 +119,19 @@ export function MobileSettingsPage() {
   }, []);
 
   useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('section') === 'updates' || window.location.hash === '#updates') {
+      const timer = setTimeout(() => {
+        const el = document.getElementById('updates-section');
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 350);
+      return () => clearTimeout(timer);
+    }
+  }, []);
+
+  useEffect(() => {
     const loadSettings = async () => {
       try {
         const settings: Record<string, string> = await invoke('get_all_settings');
@@ -1309,8 +1322,34 @@ export function MobileSettingsPage() {
         </div>
 
 
-        {/* Actualizaciones APK Móvil */}
+        {/* Acerca de */}
         <div style={{
+          background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)',
+          border: '1px solid var(--border-subtle)', padding: 14,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <ShieldCheck size={20} color="var(--accent-primary)" />
+            <div>
+              <span style={{ fontSize: 13, fontWeight: 700, display: 'block' }}>AniCS Móvil</span>
+              <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>v{CURRENT_VERSION}</span>
+            </div>
+          </div>
+
+          <button
+            onClick={() => setShowChangelog(true)}
+            style={{
+              background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
+              borderRadius: 'var(--radius-full)', padding: '5px 12px',
+              color: 'var(--text-primary)', fontSize: 11, fontWeight: 600,
+            }}
+          >
+            <Sparkles size={11} style={{ display: 'inline', marginRight: 4 }} /> Novedades
+          </button>
+        </div>
+
+        {/* Actualizaciones APK Móvil */}
+        <div id="updates-section" style={{
           background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)',
           border: '1px solid var(--border-subtle)', padding: 14,
         }}>
@@ -1432,8 +1471,28 @@ export function MobileSettingsPage() {
                     }
                   };
 
+                  const isTauriVariant = asset.name.toLowerCase() === 'anics.apk';
+                  const isNativeVariant = asset.name.toLowerCase().includes('native');
+
                   return (
-                    <div key={asset.name} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div key={asset.name} style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 4 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>
+                          {asset.name}
+                        </span>
+                        <span
+                          style={{
+                            fontSize: 10,
+                            padding: '2px 8px',
+                            borderRadius: 6,
+                            background: isTauriVariant ? 'rgba(59, 130, 246, 0.2)' : 'rgba(255, 255, 255, 0.08)',
+                            color: isTauriVariant ? 'var(--accent-primary)' : 'var(--text-muted)',
+                            fontWeight: 600,
+                          }}
+                        >
+                          {isTauriVariant ? 'Recomendado (Edición Tauri / Esta app)' : isNativeVariant ? 'Edición Nativa Kotlin' : 'Variante APK'}
+                        </span>
+                      </div>
                       <button
                         disabled={Boolean(downloadingAsset)}
                         onClick={async () => {
@@ -1499,32 +1558,6 @@ export function MobileSettingsPage() {
                 })}
             </div>
           )}
-        </div>
-
-        {/* Acerca de */}
-        <div style={{
-          background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)',
-          border: '1px solid var(--border-subtle)', padding: 14,
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <ShieldCheck size={20} color="var(--accent-primary)" />
-            <div>
-              <span style={{ fontSize: 13, fontWeight: 700, display: 'block' }}>AniCS Móvil</span>
-              <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>v{CURRENT_VERSION}</span>
-            </div>
-          </div>
-
-          <button
-            onClick={() => setShowChangelog(true)}
-            style={{
-              background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
-              borderRadius: 'var(--radius-full)', padding: '5px 12px',
-              color: 'var(--text-primary)', fontSize: 11, fontWeight: 600,
-            }}
-          >
-            <Sparkles size={11} style={{ display: 'inline', marginRight: 4 }} /> Novedades
-          </button>
         </div>
 
         {/* Aviso de Arquitectura Descentralizada y Exención Legal */}

@@ -123,7 +123,7 @@ function AppContent() {
 
   const handleGoToUpdate = () => {
     setAvailableUpdate(null);
-    navigate('/settings');
+    navigate('/settings?section=updates#updates');
   };
 
   return (

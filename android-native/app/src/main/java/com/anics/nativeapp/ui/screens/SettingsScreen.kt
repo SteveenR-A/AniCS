@@ -45,7 +45,8 @@ data class SettingsActions(
     val clearHistory: () -> Unit = {},
     val resetDb: () -> Unit = {},
     val chooseFolder: () -> Unit = {}, val import: () -> Unit = {}, val export: () -> Unit = {},
-    val checkUpdate: () -> Unit = {}, val downloadUpdate: () -> Unit = {}, val installUpdate: () -> Unit = {}
+    val checkUpdate: () -> Unit = {}, val downloadUpdate: () -> Unit = {}, val installUpdate: () -> Unit = {},
+    val cancelDownload: () -> Unit = {}, val restartDownload: () -> Unit = {}
 )
 
 @Composable
@@ -72,7 +73,17 @@ fun SettingsScreen(viewModel: SettingsViewModel, modifier: Modifier = Modifier, 
             } else context.startActivity(intent)
         } catch (e: Exception) { viewModel.reportUpdateError(e.localizedMessage ?: "No se pudo abrir el instalador") }
     }
-    LaunchedEffect(initialUpdate) { initialUpdate?.let(viewModel::receiveUpdate) }
+    LaunchedEffect(initialUpdate) {
+        initialUpdate?.let { viewModel.receiveUpdate(it, updater) }
+    }
+    LaunchedEffect(Unit) {
+        state.update?.let { u ->
+            val existing = updater.getDownloadedApk(u)
+            if (existing != null && state.updateApk == null) {
+                viewModel.receiveUpdate(u, updater)
+            }
+        }
+    }
     LaunchedEffect(state.installRequested, state.updateApk) {
         if (state.installRequested) { viewModel.consumeInstallRequest(); state.updateApk?.let(install) }
     }
@@ -100,7 +111,9 @@ fun SettingsScreen(viewModel: SettingsViewModel, modifier: Modifier = Modifier, 
         import = { import.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) },
         export = { export.launch("AniCS-respaldo.json") },
         checkUpdate = { viewModel.checkUpdates(updater) }, downloadUpdate = { viewModel.downloadUpdate(updater) },
-        installUpdate = { state.updateApk?.let(install) }
+        installUpdate = { state.updateApk?.let(install) },
+        cancelDownload = { viewModel.cancelOrPauseDownload(updater) },
+        restartDownload = { viewModel.restartDownload(updater) }
     ), modifier, focusUpdates, onUpdateFocused) { OptionalCloudSettings(viewModel) }
 }
 
@@ -108,29 +121,199 @@ fun SettingsScreen(viewModel: SettingsViewModel, modifier: Modifier = Modifier, 
 fun UpdatePanel(state: SettingsUiState, actions: SettingsActions) {
     AniPanel {
         SectionTitle("Actualizar AniCS", icon = AniIcons.RefreshCw)
-        Text("Versión ${state.appVersion}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+        Surface(
+            shape = RoundedCornerShape(8.dp),
+            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+            modifier = Modifier.padding(bottom = 2.dp)
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(AniIcons.Tv, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
+                Text(
+                    text = "Edición Android Nativa (Kotlin & Jetpack Compose)",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+
+        Text("Versión actual: ${state.appVersion}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
         val busy = state.isCheckingUpdate || state.isDownloadingUpdate
-        OutlinedButton(onClick = actions.checkUpdate, enabled = !busy) { Text("Comprobar actualizaciones") }
+        OutlinedButton(onClick = actions.checkUpdate, enabled = !busy) {
+            if (state.isCheckingUpdate) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                    Text("Comprobando...")
+                }
+            } else {
+                Text("Comprobar actualizaciones")
+            }
+        }
         if (state.isCheckingUpdate) LinearProgressIndicator(Modifier.fillMaxWidth())
+
         state.update?.let { update ->
             val reinstall = UpdateVersions.compare(update.version, state.appVersion) == 0
-            Text("${if (reinstall) "Versión publicada" else "Disponible"}: ${update.version}", fontWeight = FontWeight.SemiBold)
-            Text(update.notes.ifBlank { "Esta publicación no incluye notas." }, style = MaterialTheme.typography.bodySmall)
-            if (reinstall) Text("Puedes reinstalar esta versión para recibir un parche publicado con la misma numeración.", style = MaterialTheme.typography.bodySmall)
-            if (update.apkUrl == null) Text("El APK nativo aún no está disponible.")
-            else Button(onClick = if (state.updateApk == null) actions.downloadUpdate else actions.installUpdate, enabled = !busy) {
-                Text(when { state.isDownloadingUpdate -> "Descargando…"; state.updateApk != null -> "Instalar actualización"; reinstall -> "Descargar y reinstalar"; else -> "Descargar actualización" })
+
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+            ) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = "${if (reinstall) "Versión publicada" else "Disponible"}: v${update.version}",
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+
+                    if (update.size > 0) {
+                        Text(
+                            text = "Paquete nativo: AniCS-native.apk · ${formatBytes(update.size)}",
+                            fontWeight = FontWeight.SemiBold,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+
+                    if (update.notes.isNotBlank()) {
+                        Text(update.notes, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+
+                    if (reinstall) {
+                        Text(
+                            text = "Puedes reinstalar esta versión para recibir un parche publicado con la misma numeración.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+
+            if (update.apkUrl == null) {
+                Text("El APK nativo aún no está disponible para esta publicación.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else when {
+                state.isDownloadingUpdate -> {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                        val progress = state.updateProgress
+                        val fraction = progress?.fraction ?: 0f
+                        LinearProgressIndicator(
+                            progress = { fraction },
+                            modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)).testTag("update-progress")
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = if (progress?.verifying == true) "Verificando APK..." else "Descargando: ${(fraction * 100).toInt()}% (${formatBytes(progress?.bytes ?: 0L)} / ${formatBytes(update.size)})",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Medium
+                            )
+                            TextButton(onClick = actions.cancelDownload) {
+                                Text("Pausar", color = MaterialTheme.colorScheme.error)
+                            }
+                        }
+                    }
+                }
+
+                state.updateApk != null -> {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color(0xFF10b981).copy(alpha = 0.15f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(AniIcons.Check, null, tint = Color(0xFF10b981), modifier = Modifier.size(18.dp))
+                                Text(
+                                    "APK descargado y listo para instalar (${formatBytes(state.updateApk.length())})",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color(0xFF10b981)
+                                )
+                            }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                            Button(
+                                onClick = actions.installUpdate,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(AniIcons.Download, null, Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Instalar actualización", fontWeight = FontWeight.Bold)
+                            }
+                            OutlinedButton(onClick = actions.restartDownload) {
+                                Text("Volver a descargar")
+                            }
+                        }
+                    }
+                }
+
+                state.partialDownloadBytes > 0L -> {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        val fraction = (state.partialDownloadBytes.toFloat() / update.size).coerceIn(0f, 1f)
+                        LinearProgressIndicator(
+                            progress = { fraction },
+                            modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp))
+                        )
+                        Text(
+                            text = "Descarga previa pausada: ${(fraction * 100).toInt()}% (${formatBytes(state.partialDownloadBytes)} / ${formatBytes(update.size)})",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                            Button(
+                                onClick = actions.downloadUpdate,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Reanudar descarga")
+                            }
+                            OutlinedButton(onClick = actions.restartDownload) {
+                                Text("Empezar de nuevo")
+                            }
+                        }
+                    }
+                }
+
+                else -> {
+                    Button(onClick = actions.downloadUpdate, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+                        Icon(AniIcons.Download, null, Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(if (reinstall) "Descargar y reinstalar" else "Descargar actualización (${formatBytes(update.size)})")
+                    }
+                }
+            }
+
+            if (update.tauriApkUrl != null) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                ) {
+                    Text(
+                        text = "Nota: La edición alternativa Tauri (WebView) se publica como AniCS.apk (${formatBytes(update.tauriApkSize)}). Para esta aplicación nativa debes utilizar AniCS-native.apk.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(8.dp)
+                    )
+                }
             }
         }
-        if (state.isDownloadingUpdate) {
-            val progress = state.updateProgress
-            if (progress == null) LinearProgressIndicator(Modifier.fillMaxWidth())
-            else {
-                LinearProgressIndicator(progress = { progress.fraction }, modifier = Modifier.fillMaxWidth().testTag("update-progress"))
-                Text(if (progress.verifying) "Verificando APK…" else "Descargando: ${(progress.fraction * 100).toInt()}% · ${formatBytes(progress.bytes)} / ${formatBytes(progress.total)}", style = MaterialTheme.typography.bodySmall)
-            }
+
+        state.updateError?.let {
+            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
         }
-        state.updateError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
     }
 }
 
@@ -150,15 +333,55 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
     var showClearHistoryConfirm by remember { mutableStateOf(false) }
     var showResetDbConfirm by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
+    val coroutineScope = rememberCoroutineScope()
+
     LaunchedEffect(focusUpdates) {
         if (focusUpdates) {
             snapshotFlow { listState.layoutInfo.totalItemsCount }.first { it > 0 }
-            listState.scrollToItem(6 + (if (state.isExporting) 1 else 0) + (if (state.message != null) 1 else 0))
+            kotlinx.coroutines.delay(100)
+            val total = listState.layoutInfo.totalItemsCount
+            if (total > 0) {
+                listState.animateScrollToItem(maxOf(0, total - 1))
+                kotlinx.coroutines.delay(200)
+                val updatedTotal = listState.layoutInfo.totalItemsCount
+                if (updatedTotal > 0) {
+                    listState.scrollToItem(maxOf(0, updatedTotal - 1))
+                }
+            }
             onUpdateFocused()
         }
     }
     LazyColumn(modifier.fillMaxSize().testTag("settings-list"), state = listState, contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item { SectionTitle("Ajustes", "Las preferencias se guardan automáticamente", AniIcons.Settings) }
+        state.update?.takeIf { UpdateVersions.isNewer(it.version, state.appVersion) }?.let { newVer ->
+            item(key = "update_banner") {
+                Surface(
+                    onClick = {
+                        coroutineScope.launch {
+                            val total = listState.layoutInfo.totalItemsCount
+                            if (total > 0) {
+                                listState.animateScrollToItem(maxOf(0, total - 1))
+                            }
+                        }
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(AniIcons.RefreshCw, null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(20.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("¡Nueva versión ${newVer.version} disponible!", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                            Text("Toca para ir a la sección de actualización", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f))
+                        }
+                    }
+                }
+            }
+        }
         if (state.isExporting) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
         state.message?.let { message -> item { AniPanel { Text(message, style = MaterialTheme.typography.bodyMedium) } } }
         item {
@@ -344,7 +567,6 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
                 }
             }
         }
-        item(key = "updates") { UpdatePanel(state, actions) }
         item { AniPanel {
             SectionTitle("Caché de portadas", icon = AniIcons.HardDrive)
             Text("Solo se guardan las imágenes que abres. La caché elimina las antiguas al alcanzar su límite.", style = MaterialTheme.typography.bodySmall)
@@ -352,6 +574,7 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
                 listOf(100, 300, 500, 1024).forEach { mb -> AniPill(if (mb == 1024) "1 GB" else "$mb MB", state.settings.imageCacheMb == mb, { actions.imageCache(mb) }) }
             }
         } }
+        item(key = "updates") { UpdatePanel(state, actions) }
         item { Text("AniCS para Android · Kotlin + Rust", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 16.dp)) }
     }
     if (profilesOpen) AlertDialog(onDismissRequest = { profilesOpen = false }, title = { Text("Cambiar perfil") },

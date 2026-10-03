@@ -30,13 +30,19 @@ class UpdateFlowTest {
     private fun release(bytes: ByteArray = byteArrayOf(1)) = NativeUpdate(BuildConfig.VERSION_NAME, "Todas las notas", "https://github.com/SteveenR-A/AniCS/releases/latest",
         "https://github.com/SteveenR-A/AniCS/releases/download/v0.3.3/AniCS-native.apk", bytes.size.toLong(),
         "sha256:" + MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it.toInt() and 255) }, updatedAt = "2026-10-02T12:00:00Z")
-    private class Connection(url: URL, private val bytes: ByteArray, private val status: Int = 200) : HttpURLConnection(url) {
+    private class Connection(
+        url: URL,
+        private val bytes: ByteArray,
+        private val status: Int = 200,
+        private val headers: Map<String, String> = emptyMap()
+    ) : HttpURLConnection(url) {
         var disconnected = false
         override fun connect() {}
         override fun disconnect() { disconnected = true }
         override fun usingProxy() = false
         override fun getResponseCode() = status
         override fun getInputStream() = bytes.inputStream()
+        override fun getHeaderField(name: String): String? = headers[name]
     }
     @Test fun sameVersionCanBeReinstalledAndNewAssetTriggersPatchNotice() {
         val update = release()
@@ -103,5 +109,44 @@ class UpdateFlowTest {
         val repository = UpdateRepository(context) { url -> Connection(url, body) }
         val update = repository.check(includeCurrent = true)!!
         assertEquals(notes, update.notes); assertNull(update.apkUrl)
+    }
+    @Test fun downloadFollowsRedirectAndSupportsResumption() = runBlocking {
+        val totalBytes = ByteArray(1000) { it.toByte() }
+        val shadow = shadowOf(context.packageManager)
+        shadow.getInternalMutablePackageInfo(context.packageName).apply { longVersionCode = 3003; @Suppress("DEPRECATION") signatures = pkg().signatures }
+        val directory = File(context.cacheDir, "updates").apply { mkdirs() }
+        shadow.setPackageArchiveInfo(File(directory, "native.apk.part").absolutePath, pkg())
+        shadow.setPackageArchiveInfo(File(directory, "native.apk").absolutePath, pkg())
+
+        var callCount = 0
+        val repository = UpdateRepository(context, shareApk = { _, f -> android.net.Uri.fromFile(f) }) { targetUrl ->
+            callCount++
+            if (targetUrl.toString().contains("releases/download")) {
+                Connection(targetUrl, byteArrayOf(), status = 302, headers = mapOf("Location" to "https://release-assets.githubusercontent.com/test.apk"))
+            } else {
+                Connection(targetUrl, totalBytes, status = 200)
+            }
+        }
+        val apk = repository.download(release(totalBytes))
+        assertArrayEquals(totalBytes, apk.readBytes())
+        assertEquals(2, callCount)
+    }
+    @Test fun partialDownloadResumesWhenRangeSupported() = runBlocking {
+        val totalBytes = ByteArray(1000) { it.toByte() }
+        val shadow = shadowOf(context.packageManager)
+        shadow.getInternalMutablePackageInfo(context.packageName).apply { longVersionCode = 3003; @Suppress("DEPRECATION") signatures = pkg().signatures }
+        val directory = File(context.cacheDir, "updates").apply { mkdirs() }
+        val part = File(directory, "native.apk.part").apply { writeBytes(totalBytes.copyOfRange(0, 400)) }
+        shadow.setPackageArchiveInfo(File(directory, "native.apk.part").absolutePath, pkg())
+        shadow.setPackageArchiveInfo(File(directory, "native.apk").absolutePath, pkg())
+
+        val remainingBytes = totalBytes.copyOfRange(400, 1000)
+        val repository = UpdateRepository(context, shareApk = { _, f -> android.net.Uri.fromFile(f) }) { targetUrl ->
+            Connection(targetUrl, remainingBytes, status = 206)
+        }
+        val progress = mutableListOf<UpdateDownloadProgress>()
+        val apk = repository.download(release(totalBytes), progress::add)
+        assertArrayEquals(totalBytes, apk.readBytes())
+        assertEquals(400L, progress.first().bytes)
     }
 }

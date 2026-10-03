@@ -17,6 +17,16 @@ export interface ThemeDefinition {
 
 export const THEMES: ThemeDefinition[] = [
   {
+    id: 'system',
+    name: 'Sistema (Seguir dispositivo)',
+    description: 'Sigue automáticamente el modo oscuro o claro de tu dispositivo',
+    primaryColor: '#6366f1',
+    secondaryColor: '#ec4899',
+    surfaceColor: '#111318',
+    baseColor: '#0a0b0f',
+    isDark: true,
+  },
+  {
     id: 'dark',
     name: 'Dark (Por Defecto)',
     description: 'Modo oscuro moderno con acentos índigo y rosa neón',
@@ -192,8 +202,10 @@ export const useThemeStore = create<ThemeStore>((set) => ({
     }
 
     // Aplicar atributo al HTML si estamos en entorno navegador
+    const isSystemDark = typeof window !== 'undefined' && window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)').matches : true;
+    const effectiveHtmlTheme = themeId === 'system' ? (isSystemDark ? 'dark' : 'light') : themeId;
     if (typeof document !== 'undefined' && document.documentElement) {
-      document.documentElement.setAttribute('data-theme', themeId);
+      document.documentElement.setAttribute('data-theme', effectiveHtmlTheme);
     }
     if (typeof window !== 'undefined' && window.localStorage) {
       window.localStorage.setItem('anics_theme', themeId);
@@ -222,18 +234,23 @@ export const useThemeStore = create<ThemeStore>((set) => ({
       // Fallback
     }
 
-    let themeToApply = savedTheme || 'dark';
+    let themeToApply = savedTheme || 'system';
+    const isSystemDark = typeof window !== 'undefined' && window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)').matches : true;
+    let effectiveHtmlTheme = themeToApply === 'system' ? (isSystemDark ? 'dark' : 'light') : themeToApply;
+
     const target = THEMES.find((t) => t.id === themeToApply);
     if (FEATURE_FLAGS.SHOW_SUBSCRIPTION && target?.isVipOnly) {
       try {
         const { useSubscriptionStore } = await import('@/stores/useSubscriptionStore');
         if (!useSubscriptionStore.getState().isVip) {
-          themeToApply = 'dark';
+          effectiveHtmlTheme = isSystemDark ? 'dark' : 'light';
         }
       } catch {}
     }
 
-    document.documentElement.setAttribute('data-theme', themeToApply);
+    if (typeof document !== 'undefined' && document.documentElement) {
+      document.documentElement.setAttribute('data-theme', effectiveHtmlTheme);
+    }
     set({ currentTheme: themeToApply });
   },
 }));

@@ -81,7 +81,13 @@ class SyncRepository(private val database: AppDatabase, private val settingsRepo
             }
             result
         }
-        settingsRepository.applySyncSettings(settings(merged, "settings").mapValues { it.value.jsonPrimitive.content })
+        val mobileSettings = settings(merged, "settingsMobile")
+        val generalSettings = settings(merged, "settings")
+        val effectiveSettings = (generalSettings + mobileSettings).toMutableMap()
+        if (!mobileSettings.containsKey("app_theme")) {
+            effectiveSettings.remove("app_theme")
+        }
+        settingsRepository.applySyncSettings(effectiveSettings.mapValues { it.value.jsonPrimitive.content })
         merged
     }
 }

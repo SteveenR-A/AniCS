@@ -11,6 +11,7 @@ import androidx.core.view.WindowCompat
 
 data class NativeTheme(val id: String, val name: String, val primary: Color, val secondary: Color, val surface: Color, val background: Color, val dark: Boolean)
 val nativeThemes = listOf(
+    NativeTheme("system", "Sistema (Seguir dispositivo)", Color(0xFF6366f1), Color(0xFFec4899), Color(0xFF181825), Color(0xFF111318), true),
     NativeTheme("dark", "Dark (Por Defecto)", Color(0xFF6366f1), Color(0xFFec4899), Color(0xFF111318), Color(0xFF0a0b0f), true),
     NativeTheme("gruvbox", "Gruvbox Dark", Color(0xFFd79921), Color(0xFFcc241d), Color(0xFF282828), Color(0xFF1d2021), true),
     NativeTheme("rosepine", "Rosé Pine", Color(0xFFebbcba), Color(0xFFc4a7e7), Color(0xFF1f1d2e), Color(0xFF191724), true),
@@ -27,10 +28,12 @@ val nativeThemes = listOf(
 )
 
 @Composable
-fun AniCSTheme(themeId: String = "rosepine", content: @Composable () -> Unit) {
+fun AniCSTheme(themeId: String = "system", content: @Composable () -> Unit) {
     val systemDark = isSystemInDarkTheme()
-    val theme = nativeThemes.firstOrNull { it.id == themeId } ?: nativeThemes.first()
-    val dark = if (themeId == "system") systemDark else theme.dark
+    val isSystem = themeId == "system" || themeId.isBlank()
+    val baseThemeId = if (isSystem) (if (systemDark) "dark" else "light") else themeId
+    val theme = nativeThemes.firstOrNull { it.id == baseThemeId } ?: nativeThemes.firstOrNull { it.id == "dark" } ?: nativeThemes.first()
+    val dark = if (isSystem) systemDark else theme.dark
     val scheme = if (dark) darkColorScheme(primary = theme.primary, onPrimary = theme.background, secondary = theme.secondary,
         onSecondary = theme.background, background = theme.background, surface = theme.surface,
         surfaceVariant = androidx.compose.ui.graphics.lerp(theme.surface, Color.White, .05f),

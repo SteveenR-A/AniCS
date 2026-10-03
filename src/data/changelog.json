@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.3.5",
+    "date": "2026-10-03",
+    "title": "Actualización v0.3.5",
+    "type": "patch",
+    "highlights": [
+      "Lista de episodios compacta y modo cuadrícula",
+      "Tema del sistema automático sin sobrescritura",
+      "Navegación directa desde notificaciones de actualización",
+      "Ajustes reordenados con actualizaciones al final"
+    ]
+  },
+  {
     "version": "0.3.4",
     "date": "2026-10-03",
     "title": "Mejoras de Reproductor, Portadas Compartidas y Base de Datos SQLite",

@@ -40,6 +40,7 @@ data class SettingsUiState(
     val isCheckingUpdate: Boolean = false,
     val isDownloadingUpdate: Boolean = false,
     val updateProgress: com.anics.nativeapp.updates.UpdateDownloadProgress? = null,
+    val partialDownloadBytes: Long = 0L,
     val updateError: String? = null,
     val installRequested: Boolean = false,
     val isExporting: Boolean = false
@@ -150,34 +151,122 @@ class SettingsViewModel(
         }
         backupManager.restoreBackupJson(raw)
     }
-    fun receiveUpdate(update: com.anics.nativeapp.updates.NativeUpdate) {
-        _uiState.update { it.copy(update = update, updateApk = if (it.update?.identity == update.identity) it.updateApk else null, updateError = null) }
+    private var downloadJob: kotlinx.coroutines.Job? = null
+
+    fun receiveUpdate(update: com.anics.nativeapp.updates.NativeUpdate, repository: com.anics.nativeapp.updates.UpdateRepository? = null) {
+        val existingApk = repository?.getDownloadedApk(update)
+        val partialBytes = repository?.getPartialDownloadSize() ?: 0L
+        _uiState.update {
+            it.copy(
+                update = update,
+                updateApk = existingApk ?: if (it.update?.identity == update.identity) it.updateApk else null,
+                partialDownloadBytes = partialBytes,
+                updateError = null
+            )
+        }
     }
+
     fun checkUpdates(repository: com.anics.nativeapp.updates.UpdateRepository) {
         if (_uiState.value.isCheckingUpdate || _uiState.value.isDownloadingUpdate) return
         viewModelScope.launch {
             _uiState.update { it.copy(isCheckingUpdate = true, updateError = null) }
             try {
                 val update = repository.check(includeCurrent = true)
-                _uiState.update { it.copy(update = update, updateApk = if (it.update?.identity == update?.identity) it.updateApk else null,
-                    updateError = if (update == null) "No hay una versión compatible publicada" else null) }
+                val existingApk = update?.let { repository.getDownloadedApk(it) }
+                val partialBytes = repository.getPartialDownloadSize()
+                _uiState.update {
+                    it.copy(
+                        update = update,
+                        updateApk = existingApk,
+                        partialDownloadBytes = partialBytes,
+                        updateError = if (update == null) "No hay una versión compatible publicada" else null
+                    )
+                }
             } catch (e: kotlinx.coroutines.CancellationException) { throw e }
               catch (e: Exception) { reportUpdateError(e.localizedMessage ?: "No se pudo comprobar la versión") }
             finally { _uiState.update { it.copy(isCheckingUpdate = false) } }
         }
     }
+
     fun downloadUpdate(repository: com.anics.nativeapp.updates.UpdateRepository) {
         if (_uiState.value.isDownloadingUpdate || _uiState.value.isCheckingUpdate) return
         val update = _uiState.value.update ?: return
-        viewModelScope.launch {
-            _uiState.update { it.copy(isDownloadingUpdate = true, updateApk = null, updateProgress = null, updateError = null, installRequested = false) }
-            try {
-                val apk = repository.download(update) { progress -> _uiState.update { it.copy(updateProgress = progress) } }
-                _uiState.update { it.copy(updateApk = apk, installRequested = true) }
-            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
-              catch (e: Exception) { reportUpdateError(e.localizedMessage ?: "No se pudo descargar el APK") }
-            finally { _uiState.update { it.copy(isDownloadingUpdate = false) } }
+
+        val existing = repository.getDownloadedApk(update)
+        if (existing != null) {
+            _uiState.update { it.copy(updateApk = existing, installRequested = true) }
+            return
         }
+
+        downloadJob = viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    isDownloadingUpdate = true,
+                    updateApk = null,
+                    updateError = null,
+                    installRequested = false
+                )
+            }
+            try {
+                val apk = repository.download(update) { progress ->
+                    _uiState.update {
+                        it.copy(
+                            updateProgress = progress,
+                            partialDownloadBytes = progress.bytes
+                        )
+                    }
+                }
+                _uiState.update {
+                    it.copy(
+                        updateApk = apk,
+                        installRequested = true,
+                        partialDownloadBytes = 0L,
+                        updateProgress = null
+                    )
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                _uiState.update {
+                    it.copy(
+                        partialDownloadBytes = repository.getPartialDownloadSize()
+                    )
+                }
+                throw e
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        partialDownloadBytes = repository.getPartialDownloadSize()
+                    )
+                }
+                reportUpdateError(e.localizedMessage ?: "No se pudo descargar el APK")
+            } finally {
+                _uiState.update { it.copy(isDownloadingUpdate = false) }
+            }
+        }
+    }
+
+    fun cancelOrPauseDownload(repository: com.anics.nativeapp.updates.UpdateRepository? = null) {
+        downloadJob?.cancel()
+        downloadJob = null
+        _uiState.update {
+            it.copy(
+                isDownloadingUpdate = false,
+                partialDownloadBytes = repository?.getPartialDownloadSize() ?: it.partialDownloadBytes
+            )
+        }
+    }
+
+    fun restartDownload(repository: com.anics.nativeapp.updates.UpdateRepository) {
+        cancelOrPauseDownload(repository)
+        repository.deleteDownloadedApk()
+        _uiState.update {
+            it.copy(
+                partialDownloadBytes = 0L,
+                updateApk = null,
+                updateProgress = null,
+                updateError = null
+            )
+        }
+        downloadUpdate(repository)
     }
     fun consumeInstallRequest() { _uiState.update { it.copy(installRequested = false) } }
     fun reportUpdateError(message: String) { _uiState.update { it.copy(updateError = message) } }

@@ -12,6 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.anics.nativeapp.ffi.*
 import com.anics.nativeapp.ui.components.*
 import com.anics.nativeapp.ui.viewmodels.DetailsViewModel
@@ -28,6 +29,7 @@ fun DetailsScreen(url: String, source: String, viewModel: DetailsViewModel, onBa
     var servers by remember { mutableStateOf(false) }
     var batch by remember { mutableStateOf(false) }
     var unsupported by remember { mutableStateOf(false) }
+    var viewMode by remember { mutableStateOf("list") }
     LaunchedEffect(url, source) { viewModel.loadAnimeDetails(url, source) }
     when {
         state.isLoading -> Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
@@ -35,14 +37,14 @@ fun DetailsScreen(url: String, source: String, viewModel: DetailsViewModel, onBa
         else -> {
             val details = state.details!!
             val episodeDownloads = remember(downloads, details.title, url, source) { downloadsForAnime(downloads, details.title, url, source) }
-            LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 item {
                     AnimeDetailHeader(details.title, details.thumbnailUrl,
                         listOfNotNull(details.status, details.year, sourceLabel(details.source)).joinToString(" · "),
                         state.isFavorite, onBack, viewModel::toggleFavorite)
                 }
                 item {
-                    Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             details.genres.forEach { genre -> Surface(color = MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(50)) { Text(genre, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) } }
                         }
@@ -53,19 +55,85 @@ fun DetailsScreen(url: String, source: String, viewModel: DetailsViewModel, onBa
                             Icon(AniIcons.Play, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp))
                             Text(if ((episode.watchProgress ?: 0.0) in .01.. .89) "Reanudar episodio ${episode.number}" else "Ver episodio ${episode.number}")
                         } }
-                        Text("Episodios (${details.episodes.size})", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Episodios (${details.episodes.size})", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                            if (details.episodes.size > 1) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = if (viewMode == "list") MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                        onClick = { viewMode = "list" },
+                                        modifier = Modifier.size(34.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                AniIcons.List,
+                                                "Vista de lista compacta",
+                                                Modifier.size(16.dp),
+                                                tint = if (viewMode == "list") MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = if (viewMode == "grid") MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                        onClick = { viewMode = "grid" },
+                                        modifier = Modifier.size(34.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                AniIcons.LayoutGrid,
+                                                "Vista de cuadrícula compacta",
+                                                Modifier.size(16.dp),
+                                                tint = if (viewMode == "grid") MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         if (details.episodes.isNotEmpty()) OutlinedButton(onClick = { batch = true }, modifier = Modifier.fillMaxWidth()) {
                             Icon(AniIcons.Download, null, Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text("Descargar lote / temporada")
                         }
+                        Spacer(Modifier.height(2.dp))
                     }
                 }
                 if (state.error != null && !servers) item { Text(state.error!!, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 16.dp)) }
-                items(details.episodes.distinctBy { it.url }.sortedBy { it.number }, key = { it.url }) { episode ->
-                    val download = episodeDownloads[episode.number.toInt()]
-                    EpisodeItem(episode, { viewModel.selectEpisode(episode); servers = true }, download = download, onDownload = {
-                        if (download?.status == "paused") onResumeDownload(download.id)
-                        else onDownloadEpisodes(listOf(episode))
-                    })
+                if (viewMode == "grid") {
+                    val chunked = remember(details.episodes) {
+                        details.episodes.distinctBy { it.url }.sortedBy { it.number }.chunked(5)
+                    }
+                    items(chunked) { row ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            row.forEach { episode ->
+                                val download = episodeDownloads[episode.number.toInt()]
+                                EpisodeGridItem(
+                                    episode = episode,
+                                    download = download,
+                                    onClick = { viewModel.selectEpisode(episode); servers = true },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                            repeat(5 - row.size) {
+                                Spacer(Modifier.weight(1f))
+                            }
+                        }
+                    }
+                } else {
+                    items(details.episodes.distinctBy { it.url }.sortedBy { it.number }, key = { it.url }) { episode ->
+                        val download = episodeDownloads[episode.number.toInt()]
+                        EpisodeItem(episode, { viewModel.selectEpisode(episode); servers = true }, download = download, onDownload = {
+                            if (download?.status == "paused") onResumeDownload(download.id)
+                            else onDownloadEpisodes(listOf(episode))
+                        })
+                    }
                 }
             }
         }
@@ -105,21 +173,73 @@ fun DetailsScreen(url: String, source: String, viewModel: DetailsViewModel, onBa
 @Composable
 fun EpisodeItem(episode: NativeEpisode, onClick: () -> Unit, modifier: Modifier = Modifier, onDownload: () -> Unit = {},
     download: com.anics.nativeapp.data.local.DownloadEntity? = null) {
-    Surface(onClick, modifier.fillMaxWidth().padding(horizontal = 16.dp), shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surface, border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Surface(
+        onClick = onClick,
+        modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp),
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("Episodio ${episode.number}", fontWeight = FontWeight.SemiBold)
+                    Text("Episodio ${episode.number}", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
                     val progress = episode.watchProgress ?: 0.0
                     if (episode.watched) Text("Visto · Reproducir de nuevo", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     else if (progress > .01) Text("Reanudar · ${(progress * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                     download?.let { Text(episodeDownloadLabel(it), style = MaterialTheme.typography.labelSmall,
-                        color = if (it.status == "failed") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary, maxLines = 2, overflow = TextOverflow.Ellipsis) }
+                        color = if (it.status == "failed") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis) }
                 }
                 EpisodeDownloadButton(episode.number, download, onDownload)
-                IconButton(onClick = onClick) { Icon(if (episode.watched) AniIcons.CheckCheck else AniIcons.Play, "Seleccionar episodio ${episode.number}", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary) }
+                Spacer(Modifier.width(2.dp))
+                IconButton(onClick = onClick, modifier = Modifier.size(34.dp)) {
+                    Icon(if (episode.watched) AniIcons.CheckCheck else AniIcons.Play, "Seleccionar episodio ${episode.number}", Modifier.size(17.dp), tint = MaterialTheme.colorScheme.primary)
+                }
             }
-            episode.watchProgress?.takeIf { it > .01 && it < .9 }?.let { progress -> LinearProgressIndicator(progress = { progress.toFloat() }, modifier = Modifier.fillMaxWidth().height(3.dp)) }
+            episode.watchProgress?.takeIf { it > .01 && it < .9 }?.let { progress -> LinearProgressIndicator(progress = { progress.toFloat() }, modifier = Modifier.fillMaxWidth().height(2.5.dp)) }
+        }
+    }
+}
+
+@Composable
+fun EpisodeGridItem(
+    episode: NativeEpisode,
+    download: com.anics.nativeapp.data.local.DownloadEntity?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val progress = episode.watchProgress ?: 0.0
+    val isWatched = episode.watched || progress >= 0.85
+    val isDownloaded = download?.status == "completed"
+
+    Surface(
+        onClick = onClick,
+        modifier = modifier.height(42.dp),
+        shape = RoundedCornerShape(8.dp),
+        color = if (isWatched) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f) else MaterialTheme.colorScheme.surface,
+        border = BorderStroke(
+            1.dp,
+            if (isDownloaded) MaterialTheme.colorScheme.primary
+            else if (progress > 0.01) MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+            else MaterialTheme.colorScheme.outlineVariant
+        )
+    ) {
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                Text(
+                    text = "${episode.number}",
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (isWatched) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface
+                )
+                if (isWatched) {
+                    Text("Visto", style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else if (progress > 0.01) {
+                    Text("${(progress * 100).toInt()}%", style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp), color = MaterialTheme.colorScheme.primary)
+                } else if (isDownloaded) {
+                    Text("Listo", style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp), color = MaterialTheme.colorScheme.primary)
+                }
+            }
         }
     }
 }

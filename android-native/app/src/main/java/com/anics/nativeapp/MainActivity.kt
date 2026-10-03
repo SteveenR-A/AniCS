@@ -44,10 +44,12 @@ private data class NativeTab(val route: String, val title: String, val icon: Ima
 
 class MainActivity : ComponentActivity() {
     private var notificationOpen by mutableIntStateOf(0)
+    private var updateNotificationOpen by mutableIntStateOf(0)
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         if (intent.getBooleanExtra("open_downloads", false)) notificationOpen++
+        if (intent.getBooleanExtra("open_updates", false)) updateNotificationOpen++
     }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -91,6 +93,18 @@ class MainActivity : ComponentActivity() {
                 }
                 val anime: (String, String) -> Unit = { url, source -> nav.navigate("details?url=${Uri.encode(url)}&source=${Uri.encode(source)}") }
                 LaunchedEffect(notificationOpen) { if (intent.getBooleanExtra("open_downloads", false)) go("downloads") }
+                LaunchedEffect(updateNotificationOpen) {
+                    if (intent.getBooleanExtra("open_updates", false)) {
+                        focusUpdates = true
+                        go("settings")
+                    }
+                }
+                LaunchedEffect(Unit) {
+                    if (intent.getBooleanExtra("open_updates", false)) {
+                        focusUpdates = true
+                        go("settings")
+                    }
+                }
                 var pendingDownloads by remember { mutableStateOf<List<DownloadRequest>>(emptyList()) }
                 val submitDownloads: (List<DownloadRequest>) -> Unit = { requests ->
                     try { if (requests.isNotEmpty()) { DownloadService.enqueue(this@MainActivity, requests); scope.launch { snackbar.showSnackbar("Episodios añadidos a la cola") } } }

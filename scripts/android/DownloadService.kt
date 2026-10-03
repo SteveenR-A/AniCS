@@ -294,10 +294,13 @@ class DownloadService : Service() {
 
     private fun showUpdateAvailableNotification(title: String, body: String) {
         try {
+            val launchIntent = (packageManager.getLaunchIntentForPackage(packageName) ?: Intent(this, MainActivity::class.java)).apply {
+                putExtra("open_updates", true)
+            }
             val openIntent = PendingIntent.getActivity(
                 this,
                 0,
-                packageManager.getLaunchIntentForPackage(packageName),
+                launchIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
 
