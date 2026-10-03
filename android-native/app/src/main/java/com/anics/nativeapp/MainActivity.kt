@@ -92,6 +92,7 @@ class MainActivity : ComponentActivity() {
                     if (route != destination) nav.navigate(destination) { popUpTo("home") { saveState = true }; launchSingleTop = true; restoreState = true }
                 }
                 val anime: (String, String) -> Unit = { url, source -> nav.navigate("details?url=${Uri.encode(url)}&source=${Uri.encode(source)}") }
+                var focusUpdates by remember { mutableStateOf(false) }
                 LaunchedEffect(notificationOpen) { if (intent.getBooleanExtra("open_downloads", false)) go("downloads") }
                 LaunchedEffect(updateNotificationOpen) {
                     if (intent.getBooleanExtra("open_updates", false)) {
@@ -140,7 +141,6 @@ class MainActivity : ComponentActivity() {
                 }
                 var update by remember { mutableStateOf<com.anics.nativeapp.updates.NativeUpdate?>(null) }
                 var selectedUpdate by remember { mutableStateOf<com.anics.nativeapp.updates.NativeUpdate?>(null) }
-                var focusUpdates by remember { mutableStateOf(false) }
                 LaunchedEffect(Unit) { try { update = com.anics.nativeapp.updates.UpdateRepository(applicationContext).check() }
                     catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) {} }
                 update?.let { release -> AlertDialog(onDismissRequest = { update = null }, title = { Text("Actualización disponible") }, text = { Text("AniCS ${release.version} está disponible en GitHub.") },

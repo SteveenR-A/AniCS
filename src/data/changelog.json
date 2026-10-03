@@ -1,5 +1,18 @@
 [
   {
+    "version": "0.3.6",
+    "date": "2026-10-03",
+    "title": "Actualización v0.3.6",
+    "type": "patch",
+    "highlights": [
+      "Corrección de compilación en Android Native (referencias y ciclo de vida Compose)",
+      "Lista compacta de episodios y modo cuadrícula",
+      "Tema del sistema automático sin sobrescritura",
+      "Navegación directa desde notificaciones de actualización",
+      "Ajustes reordenados con actualizaciones al final"
+    ]
+  },
+  {
     "version": "0.3.5",
     "date": "2026-10-03",
     "title": "Actualización v0.3.5",

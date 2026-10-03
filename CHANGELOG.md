@@ -5,6 +5,17 @@ El formato está basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1
 
 ---
 
+## [0.3.6] - 2026-10-03
+
+### Actualización v0.3.6
+- Corrección de compilación en Android Native (referencias y ciclo de vida Compose)
+- Lista compacta de episodios y modo cuadrícula
+- Tema del sistema automático sin sobrescritura
+- Navegación directa desde notificaciones de actualización
+- Ajustes reordenados con actualizaciones al final
+
+---
+
 ## [0.3.5] - 2026-10-03
 
 ### Actualización v0.3.5

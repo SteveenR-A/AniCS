@@ -37,6 +37,9 @@ fun DetailsScreen(url: String, source: String, viewModel: DetailsViewModel, onBa
         else -> {
             val details = state.details!!
             val episodeDownloads = remember(downloads, details.title, url, source) { downloadsForAnime(downloads, details.title, url, source) }
+            val gridEpisodes = remember(details.episodes) {
+                details.episodes.distinctBy { it.url }.sortedBy { it.number }.chunked(5)
+            }
             LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 item {
                     AnimeDetailHeader(details.title, details.thumbnailUrl,
@@ -104,10 +107,7 @@ fun DetailsScreen(url: String, source: String, viewModel: DetailsViewModel, onBa
                 }
                 if (state.error != null && !servers) item { Text(state.error!!, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 16.dp)) }
                 if (viewMode == "grid") {
-                    val chunked = remember(details.episodes) {
-                        details.episodes.distinctBy { it.url }.sortedBy { it.number }.chunked(5)
-                    }
-                    items(chunked) { row ->
+                    items(gridEpisodes) { row ->
                         Row(
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
