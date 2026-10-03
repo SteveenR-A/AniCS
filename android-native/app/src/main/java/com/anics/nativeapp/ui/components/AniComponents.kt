@@ -94,9 +94,33 @@ fun AniHeader(sources: List<NativeSourceConfig>, selectedSource: String, onSourc
                             Icon(AniIcons.ChevronDown, "Fuente activa", Modifier.size(14.dp))
                         }
                     }
-                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        sources.forEach { source -> DropdownMenuItem(text = { Text(source.name) }, onClick = { onSource(source.id); menu = false },
-                            leadingIcon = { if (source.id == selectedSource) Icon(AniIcons.Check, null) }) }
+                    DropdownMenu(
+                        expanded = menu,
+                        onDismissRequest = { menu = false },
+                        shape = RoundedCornerShape(16.dp),
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        shadowElevation = 8.dp
+                    ) {
+                        sources.forEach { source ->
+                            val isSelected = source.id == selectedSource
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        source.name,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                    )
+                                },
+                                onClick = { onSource(source.id); menu = false },
+                                trailingIcon = {
+                                    if (isSelected) {
+                                        Icon(AniIcons.Check, "Activo", Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                                    }
+                                },
+                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp)
+                            )
+                        }
                     }
                 }
                 IconButton(onClick = onFavorites, modifier = Modifier.size(38.dp)) { Icon(AniIcons.Heart, "Favoritos", tint = if (favoritesActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) }

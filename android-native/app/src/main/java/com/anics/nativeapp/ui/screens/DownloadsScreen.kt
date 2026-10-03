@@ -40,7 +40,7 @@ fun DownloadsScreen(viewModel: DownloadsViewModel, onPlayOffline: (String, Strin
             viewModel.selectFolder(uri.toString())
         } catch (e: Exception) { viewModel.showMessage(e.localizedMessage ?: "No se pudo acceder a la carpeta") }
     }
-    LaunchedEffect(Unit) { viewModel.refreshStorage() }
+    LaunchedEffect(Unit) { viewModel.refreshStorage(); if (state.folderUri.isNotBlank()) viewModel.refreshLibrary() }
     LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item { SectionTitle("Descargas", "Tu biblioteca sin conexión", AniIcons.Download) }
         if (state.totalSpace > 0) item {
@@ -58,7 +58,10 @@ fun DownloadsScreen(viewModel: DownloadsViewModel, onPlayOffline: (String, Strin
             }
         }
         state.message?.let { message -> item { Text(message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } }
-        item { TextButton(onClick = { databasePicker.launch(arrayOf("application/octet-stream", "application/vnd.sqlite3", "application/x-sqlite3", "*/*")) }) { Text("Importar metadatos de Tauri (anics.db)") } }
+        item {
+            Text("Los metadatos y portadas de Tauri se detectan automáticamente en la carpeta Anime.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            TextButton(onClick = { databasePicker.launch(arrayOf("application/octet-stream", "application/vnd.sqlite3", "application/x-sqlite3", "*/*")) }) { Text("Importar una copia antigua de anics.db") }
+        }
         if (state.isScanning) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -76,7 +79,9 @@ fun DownloadsScreen(viewModel: DownloadsViewModel, onPlayOffline: (String, Strin
             items(groups, key = { com.anics.nativeapp.sync.SyncContract.titleKey(it.first().animeTitle) }) { rows ->
                 var expanded by remember { mutableStateOf(false) }
                 val title = rows.first().animeTitle
-                val cover = rows.firstNotNullOfOrNull { it.thumbnailUrl.takeIf(String::isNotBlank) } ?: state.covers[com.anics.nativeapp.sync.SyncContract.titleKey(title)]
+                val cover = rows.firstNotNullOfOrNull { it.thumbnailUrl.takeIf(String::isNotBlank) }
+                    ?: state.covers[com.anics.nativeapp.sync.SyncContract.titleKey(title)]
+                    ?: com.anics.nativeapp.downloads.LocalCovers.cdnCover(title).takeIf(String::isNotBlank)
                 AniPanel {
                     Row(Modifier.fillMaxWidth().clickable { expanded = !expanded }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (cover != null) AsyncImage(cover, title, Modifier.width(42.dp).height(62.dp).clip(RoundedCornerShape(8.dp)), contentScale = ContentScale.Crop)
@@ -88,7 +93,7 @@ fun DownloadsScreen(viewModel: DownloadsViewModel, onPlayOffline: (String, Strin
                         Icon(AniIcons.ChevronDown, if (expanded) "Ocultar episodios" else "Mostrar episodios", Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     TextButton(onClick = { val anime = rows.firstOrNull { it.animeUrl.startsWith("http") }; if (anime != null) onAnime(anime.animeUrl, anime.source) else onSearch(title) }) {
-                        Icon(AniIcons.Tv, null, Modifier.size(15.dp)); Spacer(Modifier.width(6.dp)); Text("Ver anime / descargar más")
+                        Icon(AniIcons.Tv, null, Modifier.size(15.dp)); Spacer(Modifier.width(6.dp)); Text("Ver en línea")
                     }
                     if (expanded) rows.sortedBy { it.episodeNumber }.forEach { row ->
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)

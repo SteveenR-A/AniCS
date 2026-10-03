@@ -47,6 +47,9 @@ class DownloadManager(private val context: Context, private val downloadDao: Dow
         require(requests.size <= 5000) { "El lote supera 5000 episodios" }
         val folder = settings.settings.first().downloadFolderUri
         val known = downloadDao.getAllDownloads().first().associateBy { it.outputPath }.toMutableMap()
+        // A restart or clock adjustment must not place new requests ahead of saved ones.
+        val lastOrder = known.values.maxOfOrNull { it.queueOrder } ?: 0L
+        order.updateAndGet { maxOf(it, lastOrder) }
         val rows = mutableListOf<DownloadEntity>()
         for (request in requests) {
             require(!request.streamUrl.contains(".m3u8", true)) { "Elige un servidor MP4 para descargar" }

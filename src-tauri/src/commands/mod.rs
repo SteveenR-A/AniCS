@@ -1,5 +1,7 @@
 pub mod anime_cmd;
 pub mod download_cmd;
+#[cfg(any(target_os = "android", test))]
+mod library_bridge;
 pub mod storage_cmd;
 pub mod stream_cmd;
 pub mod window_cmd;

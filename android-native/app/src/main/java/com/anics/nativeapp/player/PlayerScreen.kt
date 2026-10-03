@@ -5,8 +5,13 @@ import androidx.annotation.OptIn
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -68,11 +73,20 @@ fun PlayerScreen(controller: PlayerController, viewModel: PlaybackSessionViewMod
     }
     DisposableEffect(lifecycleOwner, controller) {
         val orientation = activity?.requestedOrientation
+        val originalCutoutMode = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+            activity?.window?.attributes?.layoutInDisplayCutoutMode
+        } else null
         var resumeAfterBackground = false
         activity?.window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        activity?.window?.let { window -> WindowCompat.getInsetsController(window, window.decorView).apply {
-            hide(WindowInsetsCompat.Type.systemBars()); systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        } }
+        activity?.window?.let { window ->
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                window.attributes.layoutInDisplayCutoutMode =
+                    android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
+            WindowCompat.getInsetsController(window, window.decorView).apply {
+                hide(WindowInsetsCompat.Type.systemBars()); systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            }
+        }
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_STOP -> { resumeAfterBackground = player.isPlaying; viewModel.saveProgress(); controller.pause() }
@@ -86,7 +100,12 @@ fun PlayerScreen(controller: PlayerController, viewModel: PlaybackSessionViewMod
             controller.resetPlayback()
             lifecycleOwner.lifecycle.removeObserver(observer)
             activity?.window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            activity?.window?.let { WindowCompat.getInsetsController(it, it.decorView).show(WindowInsetsCompat.Type.systemBars()) }
+            activity?.window?.let { window ->
+                WindowCompat.getInsetsController(window, window.decorView).show(WindowInsetsCompat.Type.systemBars())
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P && originalCutoutMode != null) {
+                    window.attributes.layoutInDisplayCutoutMode = originalCutoutMode
+                }
+            }
             orientation?.let { activity?.requestedOrientation = it }
         }
     }
@@ -163,15 +182,51 @@ fun PlayerHud(playback: PlaybackState, session: PlaybackSessionState, landscape:
             }
             HudIcon(AniIcons.RotateCw, "Avanzar 10 segundos", { onSeek(10000) }, size = 48)
         }
-        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().safeDrawingPadding().padding(horizontal = if (landscape) 24.dp else 16.dp, vertical = 8.dp)) {
+        val insets = WindowInsets.safeDrawing.asPaddingValues()
+        val sideInset = maxOf(
+            insets.calculateStartPadding(androidx.compose.ui.unit.LayoutDirection.Ltr),
+            insets.calculateEndPadding(androidx.compose.ui.unit.LayoutDirection.Ltr)
+        )
+        Column(
+            Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))
+                .padding(bottom = 8.dp)
+        ) {
             val duration = playback.durationMs.coerceAtLeast(1)
             val fraction = if (scrubbing) scrub else (playback.currentPositionMs.toFloat() / duration).coerceIn(0f, 1f)
-            Slider(fraction, onScrub, onValueChangeFinished = onScrubEnd, enabled = playback.durationMs > 0 && !session.isResolving,
-                thumb = { Box(Modifier.size(12.dp).background(Color.White, CircleShape)) },
-                track = { SliderDefaults.Track(it, Modifier.height(3.dp), colors = SliderDefaults.colors(activeTrackColor = Color.White, inactiveTrackColor = Color.White.copy(alpha = .25f))) }, modifier = Modifier.fillMaxWidth().height(30.dp))
-            if (!landscape) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(formatTime((fraction * duration).toLong()), color = Color.White, fontSize = 12.sp); Text(formatTime(playback.durationMs), color = Color.LightGray, fontSize = 12.sp) }
+            val bufferedFraction = (playback.bufferedPositionMs.toFloat() / duration).coerceIn(0f, 1f)
+            VideoProgressBar(
+                fraction = fraction,
+                durationMs = playback.durationMs,
+                bufferedFraction = bufferedFraction,
+                enabled = playback.durationMs > 0 && !session.isResolving,
+                isScrubbing = scrubbing,
+                onScrub = onScrub,
+                onScrubEnd = onScrubEnd,
+                modifier = Modifier.fillMaxWidth()
+            )
+            if (!landscape) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(formatTime((fraction * duration).toLong()), color = Color.White, fontSize = 12.sp)
+                    Text(formatTime(playback.durationMs), color = Color.LightGray, fontSize = 12.sp)
+                }
+            }
             val wide = landscape && LocalConfiguration.current.screenWidthDp >= 700
-            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            val controlSidePadding = if (landscape) maxOf(sideInset, 20.dp) else 16.dp
+            FlowRow(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = controlSidePadding),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
                 HudIcon(AniIcons.SkipBack, "Episodio anterior", onPrevious, enabled = session.previous != null && !session.isResolving)
                 HudIcon(if (playback.isPlaying) AniIcons.Pause else AniIcons.Play, if (playback.isPlaying) "Pausar" else "Reproducir", onPlay)
                 HudIcon(AniIcons.SkipForward, "Siguiente episodio", onNext, enabled = session.next != null && !session.isResolving)
@@ -195,6 +250,109 @@ private fun HudIcon(icon: androidx.compose.ui.graphics.vector.ImageVector, label
 private fun HudPill(label: String, onClick: () -> Unit) {
     Surface(onClick, color = Color.White.copy(alpha = .12f), shape = RoundedCornerShape(50), border = BorderStroke(1.dp, Color.White.copy(alpha = .15f))) {
         Text(label, color = Color.White, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+    }
+}
+
+@Composable
+fun VideoProgressBar(
+    fraction: Float,
+    durationMs: Long,
+    bufferedFraction: Float = 0f,
+    enabled: Boolean = true,
+    isScrubbing: Boolean = false,
+    onScrub: (Float) -> Unit,
+    onScrubEnd: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var isDragging by remember { mutableStateOf(false) }
+    val dragging = isScrubbing || isDragging
+    val trackHeight = if (dragging) 5.dp else 3.5.dp
+    val thumbRadius = if (dragging) 7.5.dp else 5.5.dp
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(30.dp)
+            .pointerInput(enabled) {
+                if (!enabled) return@pointerInput
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    down.consume()
+                    isDragging = true
+                    val width = size.width.toFloat().coerceAtLeast(1f)
+                    val startFraction = (down.position.x / width).coerceIn(0f, 1f)
+                    onScrub(startFraction)
+
+                    try {
+                        val pointerId = down.id
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull { it.id == pointerId } ?: break
+                            if (change.changedToUp()) {
+                                change.consume()
+                                break
+                            }
+                            change.consume()
+                            val currentFraction = (change.position.x / width).coerceIn(0f, 1f)
+                            onScrub(currentFraction)
+                        }
+                    } finally {
+                        isDragging = false
+                        onScrubEnd()
+                    }
+                }
+            },
+        contentAlignment = Alignment.CenterStart
+    ) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val canvasWidth = size.width
+            val canvasHeight = size.height
+            val centerY = canvasHeight / 2f
+            val trackH = trackHeight.toPx()
+            val thumbR = thumbRadius.toPx()
+
+            // 1. Inactive background track: spans from 0 to full width
+            drawRect(
+                color = Color.White.copy(alpha = 0.22f),
+                topLeft = Offset(0f, centerY - trackH / 2f),
+                size = Size(canvasWidth, trackH)
+            )
+
+            // 2. Buffered track (if any)
+            if (bufferedFraction > 0f) {
+                val bufferedWidth = canvasWidth * bufferedFraction.coerceIn(0f, 1f)
+                drawRect(
+                    color = Color.White.copy(alpha = 0.40f),
+                    topLeft = Offset(0f, centerY - trackH / 2f),
+                    size = Size(bufferedWidth, trackH)
+                )
+            }
+
+            // 3. Active played track
+            val activeWidth = canvasWidth * fraction.coerceIn(0f, 1f)
+            drawRect(
+                color = Color.White,
+                topLeft = Offset(0f, centerY - trackH / 2f),
+                size = Size(activeWidth, trackH)
+            )
+
+            // 4. Scrubber Thumb
+            if (durationMs > 0) {
+                val thumbX = activeWidth.coerceIn(thumbR, canvasWidth - thumbR)
+                if (dragging) {
+                    drawCircle(
+                        color = Color.White.copy(alpha = 0.35f),
+                        radius = thumbR + 4.dp.toPx(),
+                        center = Offset(thumbX, centerY)
+                    )
+                }
+                drawCircle(
+                    color = Color.White,
+                    radius = thumbR,
+                    center = Offset(thumbX, centerY)
+                )
+            }
+        }
     }
 }
 

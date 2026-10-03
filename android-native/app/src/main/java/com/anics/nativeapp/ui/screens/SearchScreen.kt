@@ -22,7 +22,10 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun SearchScreen(viewModel: SearchViewModel, onAnimeClick: (String, String) -> Unit, onSource: (String) -> Unit, modifier: Modifier = Modifier) {
+fun SearchScreen(viewModel: SearchViewModel, onAnimeClick: (String, String) -> Unit, onSource: (String) -> Unit, modifier: Modifier = Modifier, onBack: () -> Unit = {}, canGoBack: Boolean = false) {
+    if (canGoBack) {
+        androidx.activity.compose.BackHandler(onBack = onBack)
+    }
     val state by viewModel.uiState.collectAsState()
     var showFilters by rememberSaveable { mutableStateOf(false) }
     val keyboard = LocalSoftwareKeyboardController.current
@@ -31,6 +34,11 @@ fun SearchScreen(viewModel: SearchViewModel, onAnimeClick: (String, String) -> U
     LazyVerticalGrid(GridCells.Adaptive(145.dp), modifier.fillMaxSize(), state = grid, contentPadding = PaddingValues(12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item(span = { GridItemSpan(maxLineSpan) }) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (canGoBack) {
+                    IconButton(onClick = onBack, modifier = Modifier.size(36.dp)) {
+                        Icon(AniIcons.ArrowLeft, "Volver", tint = MaterialTheme.colorScheme.onSurface)
+                    }
+                }
                 Surface(Modifier.weight(1f), shape = RoundedCornerShape(24.dp), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), color = MaterialTheme.colorScheme.surface) {
                     Row(Modifier.heightIn(min = 46.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Icon(AniIcons.Search, null, Modifier.size(17.dp))

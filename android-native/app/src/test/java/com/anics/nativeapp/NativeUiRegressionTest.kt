@@ -57,6 +57,18 @@ class NativeUiRegressionTest {
         scroll("Reproducción"); compose.onNodeWithText("Reproducción").assertIsDisplayed()
         scroll("Actualizar AniCS"); compose.onNodeWithText("Actualizar AniCS").assertIsDisplayed()
     }
+    @Test fun updateNoticeFocusesSectionAndShowsNotesAndDownloadProgress() {
+        val update = com.anics.nativeapp.updates.NativeUpdate("v0.3.3", "Correcciones del reproductor y las descargas", "", "https://github.com/apk", 1000, null)
+        val state = fixture().copy(update = update, isDownloadingUpdate = true,
+            updateProgress = com.anics.nativeapp.updates.UpdateDownloadProgress(420, 1000))
+        compose.setContent { AniCSTheme { SettingsContent(state, SettingsActions(), focusUpdates = true) } }
+        compose.onNodeWithText("Actualizar AniCS").assertIsDisplayed()
+        compose.onNodeWithText(update.notes).assertIsDisplayed()
+        compose.onNodeWithTag("update-progress").assertIsDisplayed()
+        compose.onNodeWithText("Descargando…").assertIsNotEnabled()
+        compose.onNodeWithText("Descargando: 42%", substring = true).assertIsDisplayed()
+        screenshot("update-progress")
+    }
     private fun scroll(text: String) { compose.onNodeWithTag("settings-list").performScrollToNode(hasText(text)) }
     private fun screenshot(name: String) {
         compose.runOnIdle {

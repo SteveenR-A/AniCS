@@ -20,6 +20,7 @@ data class PlaybackState(
     val isLoading: Boolean = true,
     val currentPositionMs: Long = 0L,
     val durationMs: Long = 0L,
+    val bufferedPositionMs: Long = 0L,
     val error: String? = null,
     val speed: Float = 1f,
     val muted: Boolean = false,
@@ -60,7 +61,8 @@ class PlayerController(private val context: Context) : PlaybackEngine {
                             isLoading = isLoading,
                             ended = playbackState == Player.STATE_ENDED,
                             durationMs = duration.coerceAtLeast(0L),
-                            currentPositionMs = currentPosition.coerceAtLeast(0L)
+                            currentPositionMs = currentPosition.coerceAtLeast(0L),
+                            bufferedPositionMs = bufferedPosition.coerceAtLeast(0L)
                         )
                     }
 
@@ -123,7 +125,8 @@ class PlayerController(private val context: Context) : PlaybackEngine {
     override fun updatePosition(): Pair<Long, Long> {
         val position = exoPlayer?.currentPosition?.coerceAtLeast(0) ?: 0L
         val duration = exoPlayer?.duration?.coerceAtLeast(0) ?: 0L
-        _playbackState.value = _playbackState.value.copy(currentPositionMs = position, durationMs = duration)
+        val buffered = exoPlayer?.bufferedPosition?.coerceAtLeast(0) ?: 0L
+        _playbackState.value = _playbackState.value.copy(currentPositionMs = position, durationMs = duration, bufferedPositionMs = buffered)
         return position to duration
     }
     fun reportError(message: String) { _playbackState.value = _playbackState.value.copy(error = message, isLoading = false) }

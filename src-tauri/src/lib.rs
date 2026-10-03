@@ -108,6 +108,16 @@ pub fn run() {
                 storage::warmup_image_cache(&app_handle_warmup).await;
             });
 
+            #[cfg(target_os = "android")]
+            {
+                let app_handle_library = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(error) = commands::scan_local_downloads(None, app_handle_library).await {
+                        log::warn!("No se pudo preparar la biblioteca compartida: {}", error);
+                    }
+                });
+            }
+
             log::info!("AniCS started with media server on port {}", media_port);
             Ok(())
         })

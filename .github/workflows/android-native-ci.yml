@@ -80,15 +80,23 @@ jobs:
 
       - name: Build Android Native APK
         env:
-          ANICS_NATIVE_KEYSTORE_BASE64: ${{ secrets.ANICS_NATIVE_KEYSTORE_BASE64 }}
-          ANICS_NATIVE_STORE_PASSWORD: ${{ secrets.ANICS_NATIVE_STORE_PASSWORD }}
-          ANICS_NATIVE_KEY_ALIAS: ${{ secrets.ANICS_NATIVE_KEY_ALIAS }}
-          ANICS_NATIVE_KEY_PASSWORD: ${{ secrets.ANICS_NATIVE_KEY_PASSWORD }}
+          ANICS_NATIVE_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANICS_NATIVE_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANICS_NATIVE_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANICS_NATIVE_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           cd android-native
+          if [[ "$GITHUB_REF" == refs/tags/v* ]] && [ -z "$ANICS_NATIVE_KEYSTORE_BASE64" ]; then
+            echo "::error::Una publicación necesita ANDROID_KEYSTORE_BASE64; no se publicará un APK con firma debug efímera."
+            exit 1
+          fi
           gradle testDebugUnitTest --no-daemon --stacktrace
           if [ -n "$ANICS_NATIVE_KEYSTORE_BASE64" ]; then
+            : "${ANICS_NATIVE_STORE_PASSWORD:?Falta ANDROID_KEYSTORE_PASSWORD}"
+            : "${ANICS_NATIVE_KEY_ALIAS:?Falta ANDROID_KEY_ALIAS}"
+            export ANICS_NATIVE_KEY_PASSWORD="${ANICS_NATIVE_KEY_PASSWORD:-$ANICS_NATIVE_STORE_PASSWORD}"
             printf '%s' "$ANICS_NATIVE_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/anics-native.jks"
+            trap 'rm -f "$RUNNER_TEMP/anics-native.jks"' EXIT
             export ANICS_NATIVE_KEYSTORE="$RUNNER_TEMP/anics-native.jks"
             gradle assembleRelease --no-daemon --stacktrace
           else

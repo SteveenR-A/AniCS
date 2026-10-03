@@ -125,10 +125,12 @@ class MainActivity : ComponentActivity() {
                     else { playback.open(entry, emptyList()); playRoute() }
                 }
                 var update by remember { mutableStateOf<com.anics.nativeapp.updates.NativeUpdate?>(null) }
+                var selectedUpdate by remember { mutableStateOf<com.anics.nativeapp.updates.NativeUpdate?>(null) }
+                var focusUpdates by remember { mutableStateOf(false) }
                 LaunchedEffect(Unit) { try { update = com.anics.nativeapp.updates.UpdateRepository(applicationContext).check() }
                     catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) {} }
                 update?.let { release -> AlertDialog(onDismissRequest = { update = null }, title = { Text("Actualización disponible") }, text = { Text("AniCS ${release.version} está disponible en GitHub.") },
-                    confirmButton = { TextButton(onClick = { update = null; go("settings") }) { Text("Ver en Ajustes") } }, dismissButton = { TextButton(onClick = { update = null }) { Text("Más tarde") } }) }
+                    confirmButton = { TextButton(onClick = { selectedUpdate = release; focusUpdates = true; update = null; go("settings") }) { Text("Ver en Ajustes") } }, dismissButton = { TextButton(onClick = { update = null }) { Text("Más tarde") } }) }
                 Scaffold(
                     topBar = { if (!player) AniHeader(sources, settings.defaultSource,
                         onSource = { source -> scope.launch { preferences.updateDefaultSource(source) } }, onHome = { go("home") },
@@ -146,21 +148,23 @@ class MainActivity : ComponentActivity() {
                             val vm = viewModel { SearchViewModel(catalog, preferences) }
                             LaunchedEffect(settings.defaultSource) { vm.selectSource(settings.defaultSource) }
                             LaunchedEffect(entry.id) { entry.arguments?.getString("query")?.takeIf { it.isNotBlank() }?.let(vm::onQueryChanged) }
-                            SearchScreen(vm, anime, { source -> scope.launch { preferences.updateDefaultSource(source) } })
+                            val canGoBack = nav.previousBackStackEntry != null
+                            SearchScreen(vm, anime, { source -> scope.launch { preferences.updateDefaultSource(source) } }, onBack = { nav.popBackStack() }, canGoBack = canGoBack)
                         }
                         composable("schedule") { val vm = viewModel { BrowseViewModel(catalog, preferences, false) }; BrowseScreen(vm, anime) }
                         composable("top") { val vm = viewModel { BrowseViewModel(catalog, preferences, true) }; BrowseScreen(vm, anime) }
                         composable("history") { val vm = viewModel { HistoryViewModel(history, profiles) }; HistoryScreen(vm, resume) }
                         composable("favorites") { val vm = viewModel { FavoritesViewModel(favorites, profiles) }; FavoritesScreen(vm, anime) }
-                        composable("settings") { val vm = viewModel { SettingsViewModel(preferences, profiles, catalog, com.anics.nativeapp.sync.BackupManager(database, preferences)) }; SettingsScreen(vm) }
+                        composable("settings") { val vm = viewModel { SettingsViewModel(preferences, profiles, catalog, com.anics.nativeapp.sync.BackupManager(database, preferences), database, applicationContext) }; SettingsScreen(vm, initialUpdate = selectedUpdate, focusUpdates = focusUpdates, onUpdateFocused = { focusUpdates = false; selectedUpdate = null }) }
                         composable("downloads") {
-                            val vm = viewModel { DownloadsViewModel(database.downloadDao(), com.anics.nativeapp.downloads.LocalLibrary(applicationContext, database.downloadDao()), preferences, applicationContext) }
+                            val vm = viewModel { DownloadsViewModel(database.downloadDao(), com.anics.nativeapp.downloads.LocalLibrary(applicationContext, database.downloadDao()), preferences, applicationContext, catalog) }
                             DownloadsScreen(vm, offline, onAnime = anime, onSearch = { nav.navigate("search?query=${Uri.encode(it)}") })
                         }
                         composable("details?url={url}&source={source}", arguments = listOf(navArgument("url") { type = NavType.StringType }, navArgument("source") { type = NavType.StringType })) { entry ->
                             val url = entry.arguments?.getString("url") ?: ""
                             val source = entry.arguments?.getString("source") ?: settings.defaultSource
                             val vm: DetailsViewModel = viewModel(key = url + source) { DetailsViewModel(catalog, favorites, history, profiles) }
+                            val episodeDownloads by database.downloadDao().getAllDownloads().collectAsState(initial = emptyList())
                             DetailsScreen(url, source, vm, onBack = { nav.popBackStack() },
                                 onPlayEpisode = { media, title, episode ->
                                     lifecycleScope.launch {
@@ -181,11 +185,15 @@ class MainActivity : ComponentActivity() {
                                     val details = vm.uiState.value.details
                                     enqueue(episodes.distinctBy { it.url }.sortedBy { it.number }.map { episode -> DownloadRequest(java.util.UUID.randomUUID().toString(), details?.title ?: "Anime", episode.number.toInt(),
                                         animeUrl = url, episodeUrl = episode.url, thumbnailUrl = details?.thumbnailUrl.orEmpty(), source = source) })
+                                }, downloads = episodeDownloads, onResumeDownload = { id ->
+                                    try {
+                                        androidx.core.content.ContextCompat.startForegroundService(this@MainActivity, android.content.Intent(this@MainActivity, DownloadService::class.java)
+                                            .setAction(DownloadService.ACTION_RESUME).putExtra(DownloadService.EXTRA_ID, id))
+                                    } catch (e: Exception) { scope.launch { snackbar.showSnackbar(e.localizedMessage ?: "No se pudo reanudar la descarga") } }
                                 })
                         }
                         composable("player") {
-                            if (session.entry == null) LaunchedEffect(Unit) { nav.popBackStack() }
-                            else PlayerScreen(playback.engine as PlayerController, playback, onBack = { playback.close(); nav.popBackStack() }, onAutoNext = { scope.launch { preferences.updateAutoPlayNext(it) } })
+                            PlayerScreen(playback.engine as PlayerController, playback, onBack = { playback.close(); nav.popBackStack() }, onAutoNext = { scope.launch { preferences.updateAutoPlayNext(it) } })
                         }
                     }
                 }

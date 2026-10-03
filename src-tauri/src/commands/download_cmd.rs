@@ -1430,10 +1430,14 @@ pub async fn scan_local_downloads(
         }
     }
 
+    #[cfg(target_os = "android")]
+    let bridge_roots = scan_dirs.clone();
     for dir in scan_dirs {
         let Ok(mut entries) = tokio::fs::read_dir(&dir).await else { continue; };
         while let Ok(Some(entry)) = entries.next_entry().await {
             let path = entry.path();
+            #[cfg(target_os = "android")]
+            if path.file_name().and_then(|name| name.to_str()) == Some(".anics") { continue; }
             if path.is_dir() {
                 let folder_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("Anime").to_string();
                 let clean_title = sanitize_anime_folder_name(&folder_name.replace('_', " "));
@@ -1583,6 +1587,18 @@ pub async fn scan_local_downloads(
 
     // Ordenar animes alfabéticamente
     result.sort_by(|a, b| a.anime_title.cmp(&b.anime_title));
+
+    #[cfg(target_os = "android")]
+    {
+        let bridge_history = storage::get_all_history(None).unwrap_or_default();
+        let bridge_favorites = storage::get_all_favorites_for_sync(None).unwrap_or_default();
+        for root in bridge_roots {
+            let rows = super::library_bridge::rows_for_root(&root, &result, &bridge_history, &bridge_favorites);
+            if let Err(error) = super::library_bridge::publish(&root, rows) {
+                log::warn!("No se pudo compartir la biblioteca con la app nativa: {}", error);
+            }
+        }
+    }
 
     Ok(result)
 }
@@ -1741,6 +1757,21 @@ pub async fn save_local_anime_cover(
         }
     }
 
+    #[cfg(target_os = "android")]
+    {
+        if let Some(ref fp) = folder_path {
+            let parent_dir = Path::new(fp).parent().unwrap_or(Path::new(fp));
+            let shared_covers = parent_dir.join(".anics").join("covers");
+            if fs::create_dir_all(&shared_covers).is_ok() {
+                let _ = fs::write(parent_dir.join(".anics").join(".nomedia"), []);
+                let dest = shared_covers.join(format!("{}.{}", safe_title, ext));
+                let _ = fs::copy(&cached_file, dest);
+            }
+        }
+        if let Err(error) = scan_local_downloads(None, app_handle.clone()).await {
+            log::warn!("No se pudo actualizar la biblioteca compartida: {}", error);
+        }
+    }
     Ok(internal_cover_path.to_string_lossy().to_string())
 }
 

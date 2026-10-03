@@ -81,4 +81,10 @@ interface HistoryDao {
 
     @Query("DELETE FROM history WHERE profileId = :profileId")
     suspend fun clearHistoryForProfile(profileId: String)
+
+    @Query("SELECT * FROM history WHERE profileId = :profileId")
+    suspend fun getHistoryForProfileSync(profileId: String): List<HistoryEntity>
+
+    @Query("SELECT COUNT(*) FROM history")
+    suspend fun getHistoryCount(): Int
 }

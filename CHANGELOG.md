@@ -5,6 +5,17 @@ El formato está basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1
 
 ---
 
+## [0.3.4] - 2026-10-03
+
+### Mejoras de Reproductor, Portadas Compartidas y Base de Datos SQLite
+- Barra de reproducción de borde a borde sin asimetrías de notch y soporte de buffer en tiempo real
+- Corrección de navegación al volver del reproductor de descargas y opción Ver en línea
+- Compatibilidad cruzada de portadas y metadatos de animes descargados entre Tauri y Kotlin Native
+- Nuevo panel de gestión de base de datos SQLite (VACUUM, limpieza y estadísticas de perfil) en Ajustes
+- Eliminación de selector de resolución obsoleto y estilización de lista de servidores preferidos
+
+---
+
 ## [0.3.3] - 2026-10-02
 
 ### Optimización de UI Nativa, Gestor de Descargas y Correcciones

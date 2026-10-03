@@ -38,6 +38,7 @@ class DownloadService : Service() {
     private lateinit var manager: DownloadManager
     private lateinit var dao: DownloadDao
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private var lastCommand: Job? = null
     private val commands = java.util.concurrent.atomic.AtomicInteger(0)
     private var started = false
     private var sawWork = false
@@ -59,7 +60,10 @@ class DownloadService : Service() {
         if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIFICATION_ID, initial, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         else startForeground(NOTIFICATION_ID, initial)
         started = true
-        scope.launch {
+        // Preserve Intent arrival order even when an earlier season takes longer to parse.
+        val previousCommand = lastCommand
+        lastCommand = scope.launch {
+            previousCommand?.join()
             val id = intent?.getStringExtra(EXTRA_ID)
             try {
                 when (intent?.action) {

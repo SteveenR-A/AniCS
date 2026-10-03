@@ -8,19 +8,40 @@ import com.anics.nativeapp.data.repository.CatalogRepository
 import com.anics.nativeapp.data.repository.ProfileRepository
 import com.anics.nativeapp.data.repository.SettingsRepository
 import com.anics.nativeapp.ffi.NativeSourceConfig
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
+
+data class DatabaseStats(
+    val sizeFormatted: String = "0 KB",
+    val historyCount: Int = 0,
+    val favoritesCount: Int = 0
+)
+
+data class NativeProfileStats(
+    val animesCount: Int = 0,
+    val episodesCount: Int = 0,
+    val hoursWatched: Double = 0.0
+)
 
 data class SettingsUiState(
     val settings: AppSettings = AppSettings(),
     val profiles: List<ProfileEntity> = emptyList(),
     val activeProfile: ProfileEntity? = null,
+    val profileStats: Map<String, NativeProfileStats> = emptyMap(),
+    val databaseStats: DatabaseStats = DatabaseStats(),
     val availableSources: List<NativeSourceConfig> = emptyList(),
     val appVersion: String = com.anics.nativeapp.BuildConfig.VERSION_NAME,
     val message: String? = null,
     val update: com.anics.nativeapp.updates.NativeUpdate? = null,
     val updateApk: java.io.File? = null,
+    val isCheckingUpdate: Boolean = false,
+    val isDownloadingUpdate: Boolean = false,
+    val updateProgress: com.anics.nativeapp.updates.UpdateDownloadProgress? = null,
+    val updateError: String? = null,
+    val installRequested: Boolean = false,
     val isExporting: Boolean = false
 )
 
@@ -28,7 +49,9 @@ class SettingsViewModel(
     private val settingsRepository: SettingsRepository,
     private val profileRepository: ProfileRepository,
     private val catalogRepository: CatalogRepository,
-    private val backupManager: com.anics.nativeapp.sync.BackupManager
+    private val backupManager: com.anics.nativeapp.sync.BackupManager,
+    private val database: com.anics.nativeapp.data.local.AppDatabase? = null,
+    private val context: android.content.Context? = null
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -36,6 +59,8 @@ class SettingsViewModel(
 
     init {
         loadSettingsAndProfiles()
+        refreshDatabaseStats()
+        refreshProfileStats()
     }
 
     private fun loadSettingsAndProfiles() {
@@ -70,6 +95,22 @@ class SettingsViewModel(
         val current = raw?.let { Json.parseToJsonElement(it).jsonArray } ?: JsonArray(emptyList())
         val source = buildJsonObject { put("name", name.trim()); put("url", url.trim()); put("type", type) }
         settingsRepository.applySyncSettings(mapOf("custom_sources" to JsonArray(current + source).toString()))
+        val values = settingsRepository.syncSettings.first()
+        catalogRepository.updateSettings(JsonObject(values.mapValues { JsonPrimitive(it.value) }).toString())
+        val sources = catalogRepository.getAvailableSources()
+        _uiState.update { it.copy(availableSources = sources) }
+    }
+    fun deleteCatalog(sourceId: String) = operation("Fuente eliminada") {
+        val customIndex = sourceId.removePrefix("custom_").toIntOrNull() ?: error("Solo se pueden eliminar fuentes personalizadas")
+        val raw = settingsRepository.syncSettings.first()["custom_sources"] ?: error("La fuente ya no existe")
+        val sources = Json.parseToJsonElement(raw).jsonArray.toMutableList()
+        require(customIndex in sources.indices) { "Índice de fuente no válido" }
+        sources.removeAt(customIndex)
+        settingsRepository.applySyncSettings(mapOf("custom_sources" to JsonArray(sources).toString()))
+        val values = settingsRepository.syncSettings.first()
+        catalogRepository.updateSettings(JsonObject(values.mapValues { JsonPrimitive(it.value) }).toString())
+        val available = catalogRepository.getAvailableSources()
+        _uiState.update { it.copy(availableSources = available) }
     }
     fun setCatalogUrl(key: String, url: String) {
         viewModelScope.launch {
@@ -109,15 +150,37 @@ class SettingsViewModel(
         }
         backupManager.restoreBackupJson(raw)
     }
-    fun checkUpdates(repository: com.anics.nativeapp.updates.UpdateRepository) = operation(null) {
-        val update = repository.check()
-        _uiState.update { it.copy(update = update, updateApk = null, message = if (update == null) "Tienes la versión más reciente" else "Nueva versión disponible: " + update.version) }
+    fun receiveUpdate(update: com.anics.nativeapp.updates.NativeUpdate) {
+        _uiState.update { it.copy(update = update, updateApk = if (it.update?.identity == update.identity) it.updateApk else null, updateError = null) }
     }
-    fun downloadUpdate(repository: com.anics.nativeapp.updates.UpdateRepository) = operation("APK verificado. Pulsa Instalar actualización.") {
-        val update = _uiState.value.update ?: error("Comprueba actualizaciones primero")
-        val apk = repository.download(update)
-        _uiState.update { it.copy(updateApk = apk) }
+    fun checkUpdates(repository: com.anics.nativeapp.updates.UpdateRepository) {
+        if (_uiState.value.isCheckingUpdate || _uiState.value.isDownloadingUpdate) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isCheckingUpdate = true, updateError = null) }
+            try {
+                val update = repository.check(includeCurrent = true)
+                _uiState.update { it.copy(update = update, updateApk = if (it.update?.identity == update?.identity) it.updateApk else null,
+                    updateError = if (update == null) "No hay una versión compatible publicada" else null) }
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+              catch (e: Exception) { reportUpdateError(e.localizedMessage ?: "No se pudo comprobar la versión") }
+            finally { _uiState.update { it.copy(isCheckingUpdate = false) } }
+        }
     }
+    fun downloadUpdate(repository: com.anics.nativeapp.updates.UpdateRepository) {
+        if (_uiState.value.isDownloadingUpdate || _uiState.value.isCheckingUpdate) return
+        val update = _uiState.value.update ?: return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isDownloadingUpdate = true, updateApk = null, updateProgress = null, updateError = null, installRequested = false) }
+            try {
+                val apk = repository.download(update) { progress -> _uiState.update { it.copy(updateProgress = progress) } }
+                _uiState.update { it.copy(updateApk = apk, installRequested = true) }
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+              catch (e: Exception) { reportUpdateError(e.localizedMessage ?: "No se pudo descargar el APK") }
+            finally { _uiState.update { it.copy(isDownloadingUpdate = false) } }
+        }
+    }
+    fun consumeInstallRequest() { _uiState.update { it.copy(installRequested = false) } }
+    fun reportUpdateError(message: String) { _uiState.update { it.copy(updateError = message) } }
     fun showMessage(message: String) { _uiState.update { it.copy(message = message) } }
     private fun operation(success: String?, block: suspend () -> Unit) {
         if (_uiState.value.isExporting) return
@@ -158,18 +221,97 @@ class SettingsViewModel(
     fun switchProfile(profileId: String) {
         viewModelScope.launch {
             profileRepository.switchProfile(profileId)
+            refreshProfileStats()
+            refreshDatabaseStats()
         }
     }
 
     fun createProfile(name: String, avatar: String) {
         viewModelScope.launch {
             profileRepository.createProfile(name, avatar)
+            refreshProfileStats()
+            refreshDatabaseStats()
         }
     }
 
     fun deleteProfile(profileId: String) {
         viewModelScope.launch {
             profileRepository.deleteProfile(profileId)
+            refreshProfileStats()
+            refreshDatabaseStats()
         }
+    }
+
+    fun refreshDatabaseStats() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val dbFile = context?.getDatabasePath("anics.db")
+            val sizeBytes = if (dbFile != null && dbFile.exists()) dbFile.length() else 0L
+            val sizeFormatted = when {
+                sizeBytes >= 1024 * 1024 -> String.format(java.util.Locale.US, "%.1f MB", sizeBytes.toDouble() / (1024 * 1024))
+                sizeBytes >= 1024 -> String.format(java.util.Locale.US, "%.0f KB", sizeBytes.toDouble() / 1024)
+                else -> "$sizeBytes B"
+            }
+            val historyCount = try { database?.historyDao()?.getHistoryCount() ?: 0 } catch (_: Exception) { 0 }
+            val favoritesCount = try { database?.favoriteDao()?.getFavoritesCount() ?: 0 } catch (_: Exception) { 0 }
+            _uiState.update { it.copy(databaseStats = DatabaseStats(sizeFormatted, historyCount, favoritesCount)) }
+        }
+    }
+
+    fun refreshProfileStats() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val currentProfiles = _uiState.value.profiles.ifEmpty {
+                try { profileRepository.getAllProfiles().first() } catch (_: Exception) { emptyList() }
+            }
+            val statsMap = mutableMapOf<String, NativeProfileStats>()
+            for (p in currentProfiles) {
+                val list = try { database?.historyDao()?.getHistoryForProfileSync(p.id) ?: emptyList() } catch (_: Exception) { emptyList() }
+                val completedOr80 = list.filter { item ->
+                    item.completed || (item.watchProgress != null && item.watchProgress >= 0.80) ||
+                        (item.durationSeconds > 0 && item.progressSeconds.toDouble() / item.durationSeconds.toDouble() >= 0.80)
+                }
+                val animesCount = completedOr80.map { it.animeTitle.trim().lowercase() }.distinct().size
+                val episodesCount = completedOr80.map { "${it.animeTitle.trim().lowercase()}-${it.episodeNumber}" }.distinct().size
+                val totalSeconds = completedOr80.sumOf { item ->
+                    if (item.progressSeconds > 0) item.progressSeconds else ((item.watchProgress ?: 0.80) * (if (item.durationSeconds > 0) item.durationSeconds else 1440L)).toLong()
+                }
+                val hoursWatched = Math.round((totalSeconds.toDouble() / 3600.0) * 10.0) / 10.0
+                statsMap[p.id] = NativeProfileStats(
+                    animesCount = animesCount,
+                    episodesCount = episodesCount,
+                    hoursWatched = hoursWatched
+                )
+            }
+            _uiState.update { it.copy(profileStats = statsMap) }
+        }
+    }
+
+    fun optimizeDatabase() = operation("Base de datos optimizada y compactada (VACUUM exitoso).") {
+        withContext(Dispatchers.IO) {
+            database?.openHelper?.writableDatabase?.execSQL("VACUUM")
+        }
+        refreshDatabaseStats()
+    }
+
+    fun clearHistory() = operation("Historial eliminado correctamente.") {
+        withContext(Dispatchers.IO) {
+            val activeId = _uiState.value.activeProfile?.id
+            if (activeId != null) {
+                database?.historyDao()?.clearHistoryForProfile(activeId)
+            } else {
+                database?.historyDao()?.deleteAll()
+            }
+        }
+        refreshDatabaseStats()
+        refreshProfileStats()
+    }
+
+    fun resetDatabase() = operation("Base de datos restablecida.") {
+        withContext(Dispatchers.IO) {
+            database?.historyDao()?.deleteAll()
+            database?.favoriteDao()?.deleteAll()
+            database?.openHelper?.writableDatabase?.execSQL("VACUUM")
+        }
+        refreshDatabaseStats()
+        refreshProfileStats()
     }
 }

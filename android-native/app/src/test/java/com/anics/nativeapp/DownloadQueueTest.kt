@@ -24,6 +24,26 @@ class DownloadQueueTest {
     private suspend fun await(check: suspend () -> Boolean) {
         withTimeout(15000) { while (!check()) { org.robolectric.shadows.ShadowSystemClock.advanceBy(java.time.Duration.ofMillis(50)); delay(20) } }
     }
+    @Test fun queueKeepsArrivalOrderInsteadOfGloballySortingChapterNumbers() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).build()
+        val manager = DownloadManager(context, db.downloadDao())
+        val title = "FIFO fixture ${java.util.UUID.randomUUID()}"
+        try {
+            // Hold transfer workers while testing reservation order, without network activity.
+            manager.close()
+            db.downloadDao().insertDownload(com.anics.nativeapp.data.local.DownloadEntity("saved", queueOrder = System.currentTimeMillis() + 86_400_000,
+                animeTitle = "Earlier request", episodeNumber = 10, streamUrl = "", outputPath = "saved-elsewhere.mp4", status = "paused", createdAt = "2026-10-03"))
+            manager.enqueueRequests(listOf(DownloadRequest("first", title, 7, "https://fixture/video.mp4")))
+            manager.enqueueRequests(listOf(1, 2, 5).map { DownloadRequest("batch-$it", title, it, "https://fixture/video.mp4") })
+            manager.enqueueRequests(listOf(DownloadRequest("last", title, 3, "https://fixture/video.mp4")))
+            val rows = db.downloadDao().getAllDownloads().first()
+            assertEquals("saved", rows.first().id)
+            assertEquals(listOf(7, 1, 2, 5, 3), rows.filter { it.animeTitle == title }.map { it.episodeNumber })
+            assertTrue(rows.zipWithNext().all { (a, b) -> a.queueOrder < b.queueOrder })
+            rows.filter { it.animeTitle == title }.forEach { java.io.File(it.outputPath).delete() }
+        } finally { manager.close(); db.close() }
+    }
     @Test fun queueHonorsLimitPausesResumesByRangeAndPreservesMetadata() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).build()
