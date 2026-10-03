@@ -10,7 +10,7 @@ import kotlinx.coroutines.withContext
  */
 class CatalogRepository(
     private val client: NativeCatalogClient = NativeCatalogClient(null)
-) {
+) : com.anics.nativeapp.player.PlaybackCatalog {
 
     suspend fun getAvailableSources(): List<NativeSourceConfig> = withContext(Dispatchers.IO) {
         client.getAvailableSources()
@@ -28,21 +28,23 @@ class CatalogRepository(
         client.advancedSearch(filters, source)
     }
 
-    suspend fun getDetails(url: String, source: String): NativeAnimeDetails = withContext(Dispatchers.IO) {
+    override suspend fun getDetails(url: String, source: String): NativeAnimeDetails = withContext(Dispatchers.IO) {
         client.getDetails(url, source)
     }
 
-    suspend fun getServers(episodeUrl: String, source: String): List<NativeVideoServer> = withContext(Dispatchers.IO) {
+    override suspend fun getServers(episodeUrl: String, source: String): List<NativeVideoServer> = withContext(Dispatchers.IO) {
         client.getServers(episodeUrl, source)
     }
 
-    suspend fun resolveStream(server: NativeVideoServer, source: String): NativeResolvedMedia = withContext(Dispatchers.IO) {
+    override suspend fun resolveStream(server: NativeVideoServer, source: String): NativeResolvedMedia = withContext(Dispatchers.IO) {
         client.resolveStream(server, source)
     }
 
     suspend fun getScheduleDays(source: String): List<NativeScheduleDay> = withContext(Dispatchers.IO) {
         client.getScheduleDays(source)
     }
+
+    suspend fun getTop(source: String): List<NativeAnimeResult> = withContext(Dispatchers.IO) { client.getTop(source) }
 
     suspend fun getGenres(source: String): List<NativeGenreItem> = withContext(Dispatchers.IO) {
         client.getGenres(source)

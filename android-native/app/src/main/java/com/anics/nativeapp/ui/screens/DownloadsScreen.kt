@@ -1,300 +1,122 @@
 package com.anics.nativeapp.ui.screens
 
-import androidx.compose.foundation.clickable
+import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.platform.LocalContext
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import android.content.Intent
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
 import com.anics.nativeapp.data.local.DownloadEntity
+import com.anics.nativeapp.ui.components.*
 import com.anics.nativeapp.ui.viewmodels.DownloadsViewModel
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DownloadsScreen(
-    viewModel: DownloadsViewModel,
-    onPlayOffline: (filePath: String, animeTitle: String, episodeNumber: Int) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val uiState by viewModel.uiState.collectAsState()
-    var selectedTabIndex by remember { mutableIntStateOf(0) }
-    val tabTitles = listOf("Descargados", "En progreso")
+fun DownloadsScreen(viewModel: DownloadsViewModel, onPlayOffline: (String, String, Int) -> Unit, modifier: Modifier = Modifier) {
+    val state by viewModel.uiState.collectAsState()
     val context = LocalContext.current
-    val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+    var queue by remember { mutableStateOf(false) }
+    var remove by remember { mutableStateOf<DownloadEntity?>(null) }
+    val groups = state.completedDownloads.groupBy { com.anics.nativeapp.sync.SyncContract.titleKey(it.animeTitle) }.values.toList()
+    val folder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) try {
-            try { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION) } catch (_: SecurityException) { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+            try { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
+            catch (_: SecurityException) { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
             viewModel.selectFolder(uri.toString())
         } catch (e: Exception) { viewModel.showMessage(e.localizedMessage ?: "No se pudo acceder a la carpeta") }
     }
-
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        text = "Descargas",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 20.sp,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background
-                )
-            )
-        },
-        containerColor = MaterialTheme.colorScheme.background,
-        modifier = modifier
-    ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-        ) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { folderPicker.launch(null) }, enabled = !uiState.isScanning) { Text("Elegir carpeta") }
-                OutlinedButton(onClick = viewModel::refreshLibrary, enabled = !uiState.isScanning && uiState.folderUri.isNotBlank()) { Text("Buscar videos") }
+    LaunchedEffect(Unit) { viewModel.refreshStorage() }
+    LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item { SectionTitle("Descargas", "Tu biblioteca sin conexión", AniIcons.Download) }
+        if (state.totalSpace > 0) item {
+            AniPanel {
+                SectionTitle("Almacenamiento del dispositivo", icon = AniIcons.HardDrive, action = { IconButton(onClick = viewModel::refreshStorage) { Icon(AniIcons.RefreshCw, "Actualizar almacenamiento") } })
+                Text("${formatBytes(state.freeSpace)} libres de ${formatBytes(state.totalSpace)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                LinearProgressIndicator(progress = { ((state.totalSpace - state.freeSpace).toDouble() / state.totalSpace).toFloat().coerceIn(0f,1f) }, modifier = Modifier.fillMaxWidth().height(7.dp).clip(RoundedCornerShape(50)))
+                Text("Videos de AniCS: ${formatBytes(state.completedDownloads.sumOf { it.downloadedBytes })}", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
             }
-            uiState.message?.let { Text(it, modifier = Modifier.padding(horizontal = 16.dp)) }
-            if (uiState.isScanning) LinearProgressIndicator(Modifier.fillMaxWidth())
-            TabRow(
-                selectedTabIndex = selectedTabIndex,
-                containerColor = MaterialTheme.colorScheme.background,
-                contentColor = MaterialTheme.colorScheme.primary,
-                divider = { HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant) }
-            ) {
-                tabTitles.forEachIndexed { index, title ->
-                    Tab(
-                        selected = selectedTabIndex == index,
-                        onClick = { selectedTabIndex = index },
-                        text = {
-                            Text(
-                                text = title,
-                                fontWeight = if (selectedTabIndex == index) FontWeight.Bold else FontWeight.Normal,
-                                color = if (selectedTabIndex == index) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    )
-                }
+        }
+        item {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { folder.launch(null) }, modifier = Modifier.weight(1f), enabled = !state.isScanning) { Icon(AniIcons.Folder, null, Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text("Carpeta") }
+                OutlinedButton(onClick = viewModel::refreshLibrary, modifier = Modifier.weight(1f), enabled = !state.isScanning && state.folderUri.isNotBlank()) { Icon(AniIcons.RefreshCw, null, Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text("Buscar videos") }
             }
-
-            if (selectedTabIndex == 0) {
-                // Completed Downloads Tab
-                if (uiState.completedDownloads.isEmpty()) {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "No hay descargas completadas",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                    }
-                } else {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        items(uiState.completedDownloads) { download ->
-                            CompletedDownloadItem(
-                                download = download,
-                                onPlay = {
-                                    onPlayOffline(download.outputPath, download.animeTitle, download.episodeNumber)
-                                },
-                                onDelete = { viewModel.cancelDownload(download.id) }
-                            )
+        }
+        state.message?.let { message -> item { Text(message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } }
+        if (state.isScanning) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                AniPill("Animes (${groups.size})", !queue, { queue = false }, Modifier.weight(1f), AniIcons.Folder)
+                AniPill("Cola (${state.activeDownloads.size})", queue, { queue = true }, Modifier.weight(1f), AniIcons.Download)
+            }
+        }
+        if (queue) {
+            if (state.activeDownloads.isEmpty()) item { AniEmptyState("No hay descargas pendientes", "Elige un episodio y un servidor MP4 para descargarlo.", AniIcons.Download) }
+            items(state.activeDownloads, key = { it.id }) { row ->
+                ActiveDownloadItem(row, { viewModel.pauseDownload(row.id) }, { viewModel.resumeDownload(row.id) }, { remove = row })
+            }
+        } else {
+            if (groups.isEmpty()) item { AniEmptyState("Tu biblioteca está vacía", "Selecciona la carpeta Anime para cargar tus videos existentes.", AniIcons.Folder, "Elegir carpeta", { folder.launch(null) }) }
+            items(groups, key = { com.anics.nativeapp.sync.SyncContract.titleKey(it.first().animeTitle) }) { rows ->
+                var expanded by remember { mutableStateOf(false) }
+                val title = rows.first().animeTitle
+                val cover = state.covers[com.anics.nativeapp.sync.SyncContract.titleKey(title)]
+                AniPanel {
+                    Row(Modifier.fillMaxWidth().clickable { expanded = !expanded }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        if (cover != null) AsyncImage(cover, title, Modifier.width(42.dp).height(62.dp).clip(RoundedCornerShape(8.dp)), contentScale = ContentScale.Crop)
+                        else Box(Modifier.width(42.dp).height(62.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp)), contentAlignment = Alignment.Center) { Icon(AniIcons.Tv, null, tint = MaterialTheme.colorScheme.primary) }
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                            Text(title, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
+                            Text("${rows.size} eps · ${formatBytes(rows.sumOf { it.downloadedBytes })}", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
                         }
+                        Icon(AniIcons.ChevronDown, if (expanded) "Ocultar episodios" else "Mostrar episodios", Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                }
-            } else {
-                // Active / In-progress Downloads Tab
-                if (uiState.activeDownloads.isEmpty()) {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "No hay descargas en progreso",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                    }
-                } else {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        items(uiState.activeDownloads) { download ->
-                            ActiveDownloadItem(
-                                download = download,
-                                onPause = { viewModel.pauseDownload(download.id) },
-                                onResume = { viewModel.resumeDownload(download.id) },
-                                onCancel = { viewModel.cancelDownload(download.id) }
-                            )
+                    if (expanded) rows.sortedBy { it.episodeNumber }.forEach { row ->
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        Row(Modifier.fillMaxWidth().clickable { onPlayOffline(row.outputPath, row.animeTitle, row.episodeNumber) }, verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Episodio ${row.episodeNumber}", style = MaterialTheme.typography.bodyMedium)
+                                Text(formatBytes(row.downloadedBytes), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            IconButton(onClick = { onPlayOffline(row.outputPath, row.animeTitle, row.episodeNumber) }) { Icon(AniIcons.Play, "Reproducir episodio ${row.episodeNumber}", tint = MaterialTheme.colorScheme.primary) }
+                            IconButton(onClick = { remove = row }) { Icon(AniIcons.X, "Quitar de la biblioteca", Modifier.size(18.dp)) }
                         }
                     }
                 }
             }
         }
     }
+    remove?.let { row -> AlertDialog(onDismissRequest = { remove = null }, title = { Text(if (row.status == "completed") "Quitar de la biblioteca" else "Cancelar descarga") },
+        text = { Text(if (row.status == "completed") "Se quitará el episodio de la lista. El video se conservará en la carpeta y puedes volver a detectarlo." else "Se eliminará el archivo parcial de este episodio.") },
+        confirmButton = { TextButton(onClick = { viewModel.cancelDownload(row.id); remove = null }) { Text("Confirmar") } }, dismissButton = { TextButton(onClick = { remove = null }) { Text("Volver") } }) }
 }
 
 @Composable
-fun CompletedDownloadItem(
-    download: DownloadEntity,
-    onPlay: () -> Unit,
-    onDelete: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Card(
-        modifier = modifier
-            .fillMaxWidth()
-            .clickable(onClick = onPlay),
-        shape = RoundedCornerShape(10.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = download.animeTitle,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 14.sp
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = "Episodio ${download.episodeNumber}",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 12.sp
-                )
+fun ActiveDownloadItem(download: DownloadEntity, onPause: () -> Unit, onResume: () -> Unit, onCancel: () -> Unit, modifier: Modifier = Modifier) {
+    AniPanel(modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(download.animeTitle, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text("Episodio ${download.episodeNumber} · ${when(download.status) { "downloading" -> "Descargando"; "paused" -> "Pausada"; "failed" -> "Falló"; else -> "En cola" }}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                IconButton(onClick = onPlay) {
-                    Icon(
-                        imageVector = Icons.Default.PlayArrow,
-                        contentDescription = "Reproducir sin conexión",
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                }
-                IconButton(onClick = onDelete) {
-                    Icon(
-                        imageVector = Icons.Default.Delete,
-                        contentDescription = "Quitar de la lista",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
+            if (download.status == "downloading") IconButton(onClick = onPause) { Icon(AniIcons.Pause, "Pausar descarga") }
+            else if (download.status in listOf("paused","failed")) IconButton(onClick = onResume) { Icon(AniIcons.Play, "Reanudar descarga") }
+            IconButton(onClick = onCancel) { Icon(AniIcons.X, "Cancelar descarga") }
         }
+        download.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+        LinearProgressIndicator(progress = { download.progress.coerceIn(0f,1f) }, modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(50)))
+        Text("${(download.progress * 100).toInt()}% · ${formatBytes(download.downloadedBytes)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
-}
-
-@Composable
-fun ActiveDownloadItem(
-    download: DownloadEntity,
-    onPause: () -> Unit,
-    onResume: () -> Unit,
-    onCancel: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(10.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-    ) {
-        Column(modifier = Modifier.padding(14.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = download.animeTitle,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 14.sp
-                    )
-                    Text(
-                        text = "Episodio ${download.episodeNumber} • ${download.status.uppercase()}",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 11.sp
-                    )
-                }
-
-                Row {
-                    if (download.status == "downloading") {
-                        IconButton(onClick = onPause) {
-                            Icon(Icons.Default.Pause, contentDescription = "Pausar", tint = MaterialTheme.colorScheme.onSurface)
-                        }
-                    } else if (download.status == "paused" || download.status == "failed") {
-                        IconButton(onClick = onResume) {
-                            Icon(Icons.Default.PlayArrow, contentDescription = "Reanudar", tint = MaterialTheme.colorScheme.primary)
-                        }
-                    }
-                    IconButton(onClick = onCancel) {
-                        Icon(Icons.Default.Close, contentDescription = "Cancelar", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-            }
-
-            download.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            Spacer(modifier = Modifier.height(8.dp))
-            LinearProgressIndicator(
-                progress = { download.progress },
-                color = MaterialTheme.colorScheme.primary,
-                trackColor = MaterialTheme.colorScheme.surfaceVariant,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(4.dp)
-                    .clip(RoundedCornerShape(2.dp))
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = "${(download.progress * 100).toInt()}%",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 11.sp
-                )
-                if (download.downloadedBytes > 0) {
-                    Text(
-                        text = formatBytes(download.downloadedBytes),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 11.sp
-                    )
-                }
-            }
-        }
-    }
-}
-
-private fun formatBytes(bytes: Long): String {
-    val mb = bytes / (1024.0 * 1024.0)
-    return String.format("%.1f MB", mb)
 }

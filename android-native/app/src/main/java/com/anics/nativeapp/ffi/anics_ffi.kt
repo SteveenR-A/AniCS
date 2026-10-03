@@ -747,6 +747,8 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -787,6 +789,8 @@ internal interface UniffiLib : Library {
     fun uniffi_anics_ffi_fn_method_nativecatalogclient_get_schedule_days(`ptr`: Pointer,`source`: RustBuffer.ByValue,
     ): Long
     fun uniffi_anics_ffi_fn_method_nativecatalogclient_get_servers(`ptr`: Pointer,`episodeUrl`: RustBuffer.ByValue,`source`: RustBuffer.ByValue,
+    ): Long
+    fun uniffi_anics_ffi_fn_method_nativecatalogclient_get_top(`ptr`: Pointer,`source`: RustBuffer.ByValue,
     ): Long
     fun uniffi_anics_ffi_fn_method_nativecatalogclient_resolve_stream(`ptr`: Pointer,`server`: RustBuffer.ByValue,`source`: RustBuffer.ByValue,
     ): Long
@@ -924,6 +928,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_anics_ffi_checksum_method_nativecatalogclient_get_servers(
     ): Short
+    fun uniffi_anics_ffi_checksum_method_nativecatalogclient_get_top(
+    ): Short
     fun uniffi_anics_ffi_checksum_method_nativecatalogclient_resolve_stream(
     ): Short
     fun uniffi_anics_ffi_checksum_method_nativecatalogclient_search(
@@ -973,6 +979,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_anics_ffi_checksum_method_nativecatalogclient_get_servers() != 19081.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_anics_ffi_checksum_method_nativecatalogclient_get_top() != 41534.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_anics_ffi_checksum_method_nativecatalogclient_resolve_stream() != 21678.toShort()) {
@@ -1429,6 +1438,8 @@ public interface NativeCatalogClientInterface {
     
     suspend fun `getServers`(`episodeUrl`: kotlin.String, `source`: kotlin.String): List<NativeVideoServer>
     
+    suspend fun `getTop`(`source`: kotlin.String): List<NativeAnimeResult>
+
     suspend fun `resolveStream`(`server`: NativeVideoServer, `source`: kotlin.String): NativeResolvedMedia
     
     suspend fun `search`(`query`: kotlin.String, `source`: kotlin.String?): List<NativeAnimeResult>
@@ -1679,6 +1690,27 @@ open class NativeCatalogClient: Disposable, AutoCloseable, NativeCatalogClientIn
     }
 
     
+    @Throws(NativeFfiException::class)
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+    override suspend fun `getTop`(`source`: kotlin.String) : List<NativeAnimeResult> {
+        return uniffiRustCallAsync(
+        callWithPointer { thisPtr ->
+            UniffiLib.INSTANCE.uniffi_anics_ffi_fn_method_nativecatalogclient_get_top(
+                thisPtr,
+                FfiConverterString.lower(`source`),
+            )
+        },
+        { future, callback, continuation -> UniffiLib.INSTANCE.ffi_anics_ffi_rust_future_poll_rust_buffer(future, callback, continuation) },
+        { future, continuation -> UniffiLib.INSTANCE.ffi_anics_ffi_rust_future_complete_rust_buffer(future, continuation) },
+        { future -> UniffiLib.INSTANCE.ffi_anics_ffi_rust_future_free_rust_buffer(future) },
+        // lift function
+        { FfiConverterSequenceTypeNativeAnimeResult.lift(it) },
+        // Error FFI converter
+        NativeFfiException.ErrorHandler,
+    )
+    }
+
+
     @Throws(NativeFfiException::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
     override suspend fun `resolveStream`(`server`: NativeVideoServer, `source`: kotlin.String) : NativeResolvedMedia {

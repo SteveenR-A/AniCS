@@ -15,15 +15,16 @@ data class SearchUiState(
     val genres: List<NativeGenreItem> = emptyList(), val genre: String? = null,
     val status: String? = null, val animeType: String? = null,
     val year: String? = null, val orderBy: String? = null,
-    val page: Int = 1, val hasNext: Boolean = false
+    val page: Int = 1, val hasNext: Boolean = false, val recentQueries: List<String> = emptyList()
 )
 
-class SearchViewModel(private val catalogRepository: CatalogRepository) : ViewModel() {
+class SearchViewModel(private val catalogRepository: CatalogRepository, private val settingsRepository: com.anics.nativeapp.data.repository.SettingsRepository) : ViewModel() {
     private val _uiState = MutableStateFlow(SearchUiState())
     val uiState = _uiState.asStateFlow()
     private var searchJob: Job? = null
     private var genresJob: Job? = null
     init {
+        viewModelScope.launch { settingsRepository.recentSearches.collect { queries -> _uiState.update { it.copy(recentQueries = queries) } } }
         viewModelScope.launch {
             try {
                 _uiState.update { it.copy(availableSources = catalogRepository.getAvailableSources()) }
@@ -37,6 +38,7 @@ class SearchViewModel(private val catalogRepository: CatalogRepository) : ViewMo
         executeSearch(debounce = true)
     }
     fun selectSource(source: String?) {
+        if (_uiState.value.selectedSource == source) return
         _uiState.update { it.copy(selectedSource = source, genre = null, status = null, animeType = null, year = null, orderBy = null, genres = emptyList()) }
         loadGenres(); refresh()
     }
@@ -58,6 +60,13 @@ class SearchViewModel(private val catalogRepository: CatalogRepository) : ViewMo
         } }; refresh()
     }
     fun clearSearch() { _uiState.update { SearchUiState(availableSources = it.availableSources, genres = it.genres, selectedSource = it.selectedSource) }; refresh() }
+    fun clearFilters() { _uiState.update { it.copy(genre = null, status = null, animeType = null, year = null, orderBy = null) }; refresh() }
+    fun submit() { rememberQuery(); refresh() }
+    fun rememberQuery() { viewModelScope.launch { settingsRepository.rememberSearch(_uiState.value.query) } }
+    fun forgetQuery(query: String) { viewModelScope.launch { settingsRepository.forgetSearch(query) } }
+    fun quickFilter(value: String) {
+        _uiState.update { it.copy(status = when(value) { "estrenos" -> "estrenos"; "emision" -> "emision"; else -> null }, animeType = if (value == "peliculas") "peliculas" else null) }; refresh()
+    }
     fun refresh() = executeSearch()
     fun nextPage() { if (_uiState.value.hasNext && !_uiState.value.isLoading) executeSearch(append = true) }
     private fun executeSearch(append: Boolean = false, debounce: Boolean = false) {

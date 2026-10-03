@@ -51,14 +51,26 @@ class SettingsViewModel(
             }
         }
         viewModelScope.launch {
-            try {
-                val sources = catalogRepository.getAvailableSources()
-                _uiState.value = _uiState.value.copy(availableSources = sources)
-            } catch (_: Exception) {}
+            settingsRepository.syncSettings.collect { values ->
+                try {
+                    catalogRepository.updateSettings(JsonObject(values.mapValues { JsonPrimitive(it.value) }).toString())
+                    val sources = catalogRepository.getAvailableSources()
+                    _uiState.update { it.copy(availableSources = sources) }
+                } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { showMessage(e.localizedMessage ?: "No se pudieron cargar las fuentes") }
+            }
         }
     }
 
     fun selectTheme(theme: String) { viewModelScope.launch { settingsRepository.updateTheme(theme) } }
+    fun addCatalog(name: String, url: String, type: String) = operation("Fuente agregada") {
+        require(name.trim().isNotBlank()) { "Escribe un nombre para la fuente" }
+        val uri = java.net.URI(url.trim())
+        require(uri.scheme == "https" && !uri.host.isNullOrBlank() && uri.userInfo == null) { "Usa una URL HTTPS válida" }
+        val raw = settingsRepository.syncSettings.first()["custom_sources"]
+        val current = raw?.let { Json.parseToJsonElement(it).jsonArray } ?: JsonArray(emptyList())
+        val source = buildJsonObject { put("name", name.trim()); put("url", url.trim()); put("type", type) }
+        settingsRepository.applySyncSettings(mapOf("custom_sources" to JsonArray(current + source).toString()))
+    }
     fun setCatalogUrl(key: String, url: String) {
         viewModelScope.launch {
             try {

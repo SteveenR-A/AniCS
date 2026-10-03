@@ -28,7 +28,8 @@ class LocalLibrary(private val context: Context, private val dao: DownloadDao) {
     suspend fun scan(treeUri: String): Int = withContext(Dispatchers.IO) {
         val root = DocumentFile.fromTreeUri(context, Uri.parse(treeUri)) ?: error("La carpeta no está disponible")
         require(root.exists() && root.canRead()) { "Selecciona de nuevo la carpeta para conceder acceso" }
-        val knownPaths = dao.getAllDownloads().first().map { it.outputPath }.toSet()
+        val knownPaths = dao.getAllDownloads().first().associateBy { it.outputPath }
+        var found = 0
         val result = mutableListOf<DownloadEntity>()
         val visited = mutableSetOf<String>()
         fun visit(directory: DocumentFile, depth: Int) {
@@ -42,7 +43,10 @@ class LocalLibrary(private val context: Context, private val dao: DownloadDao) {
                     if (file.length() <= 100) return@forEach
                     val (title, episode) = LocalEpisodeNames.parse(name, if (depth > 0) directory.name else null)
                     val path = file.uri.toString()
-                    if (path in knownPaths) return@forEach
+                    val known = knownPaths[path]
+                    if (known != null && known.status != "completed") return@forEach
+                    found++
+                    if (known != null) return@forEach
                     val id = "local:" + MessageDigest.getInstance("SHA-256").digest(path.toByteArray()).joinToString("") { "%02x".format(it.toInt() and 255) }
                     result.add(DownloadEntity(id = id, animeTitle = title, episodeNumber = episode, streamUrl = "", outputPath = path,
                         status = "completed", progress = 1f, downloadedBytes = file.length(), totalBytes = file.length(), createdAt = Instant.ofEpochMilli(file.lastModified()).toString()))
@@ -53,6 +57,6 @@ class LocalLibrary(private val context: Context, private val dao: DownloadDao) {
         coroutineContext.ensureActive()
         // Path-derived IDs make rescans idempotent. Existing cloud/download queues remain intact.
         dao.insertBatch(result)
-        result.size
+        found
     }
 }

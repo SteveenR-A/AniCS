@@ -83,6 +83,7 @@ class HomeViewModel(
     fun selectSource(sourceId: String) {
         if (_uiState.value.selectedSource == sourceId) return
         _uiState.value = _uiState.value.copy(selectedSource = sourceId)
+        viewModelScope.launch { settingsRepository.updateDefaultSource(sourceId) }
         loadLatestForSource(sourceId)
     }
 
@@ -106,7 +107,7 @@ class HomeViewModel(
                     isLoading = false,
                     error = null
                 )
-            } catch (e: Exception) {
+            } catch (e: CancellationException) { throw e } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
                     error = e.localizedMessage ?: "Error al obtener últimos animes"

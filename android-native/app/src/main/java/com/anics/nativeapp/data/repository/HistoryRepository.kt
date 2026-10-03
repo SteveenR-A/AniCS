@@ -8,25 +8,25 @@ import com.anics.nativeapp.data.local.TombstoneEntity
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 
-class HistoryRepository(private val database: com.anics.nativeapp.data.local.AppDatabase) {
+class HistoryRepository(private val database: com.anics.nativeapp.data.local.AppDatabase) : com.anics.nativeapp.player.PlaybackHistory {
     private val historyDao = database.historyDao()
 
     fun getHistoryForProfile(profileId: String): Flow<List<HistoryEntity>> {
         return historyDao.getHistoryForProfile(profileId)
     }
 
-    suspend fun getHistoryItem(profileId: String, episodeUrl: String): HistoryEntity? {
+    override suspend fun getHistoryItem(profileId: String, episodeUrl: String): HistoryEntity? {
         return historyDao.getHistoryItem(profileId, episodeUrl)
     }
 
-    suspend fun getEpisodeProgress(profileId: String, title: String, episode: Int): HistoryEntity? {
+    override suspend fun getEpisodeProgress(profileId: String, title: String, episode: Int): HistoryEntity? {
         val key = com.anics.nativeapp.sync.SyncContract.titleKey(title)
         return historyDao.getHistoryForProfile(profileId).first().firstOrNull {
             it.episodeNumber == episode && com.anics.nativeapp.sync.SyncContract.titleKey(it.animeTitle) == key
         }
     }
 
-    suspend fun recordProgress(
+    override suspend fun recordProgress(
         profileId: String,
         animeTitle: String,
         animeUrl: String,

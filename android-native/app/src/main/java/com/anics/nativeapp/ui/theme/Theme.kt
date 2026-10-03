@@ -26,18 +26,24 @@ val nativeThemes = listOf(
 )
 
 @Composable
-fun AniCSTheme(themeId: String = "dark", content: @Composable () -> Unit) {
+fun AniCSTheme(themeId: String = "rosepine", content: @Composable () -> Unit) {
     val systemDark = isSystemInDarkTheme()
     val theme = nativeThemes.firstOrNull { it.id == themeId } ?: nativeThemes.first()
     val dark = if (themeId == "system") systemDark else theme.dark
-    val scheme = if (dark) darkColorScheme(primary = theme.primary, secondary = theme.secondary,
-        background = theme.background, surface = theme.surface, surfaceVariant = theme.surface)
+    val scheme = if (dark) darkColorScheme(primary = theme.primary, onPrimary = theme.background, secondary = theme.secondary,
+        onSecondary = theme.background, background = theme.background, surface = theme.surface,
+        surfaceVariant = androidx.compose.ui.graphics.lerp(theme.surface, Color.White, .05f),
+        onSurface = if (theme.id == "rosepine") Color(0xFFe0def4) else Color(0xFFe8e8ed),
+        onBackground = if (theme.id == "rosepine") Color(0xFFe0def4) else Color(0xFFe8e8ed),
+        onSurfaceVariant = if (theme.id == "rosepine") Color(0xFF908caa) else Color(0xFFa5a5b4),
+        outlineVariant = androidx.compose.ui.graphics.lerp(theme.surface, Color.White, .09f))
     else lightColorScheme(primary = theme.primary, secondary = theme.secondary,
         background = theme.background, surface = theme.surface, surfaceVariant = theme.surface)
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {
-            val window = (view.context as Activity).window
+            val activity = generateSequence(view.context) { (it as? android.content.ContextWrapper)?.baseContext }.filterIsInstance<Activity>().firstOrNull()
+            val window = activity?.window ?: return@SideEffect
             WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !dark
             WindowCompat.getInsetsController(window, view).isAppearanceLightNavigationBars = !dark
         }

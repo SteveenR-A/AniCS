@@ -40,9 +40,11 @@ Se comprueban compilación Kotlin y 13 pruebas JVM de contratos/streaming, build
 
 Las descargas HLS permanecen pendientes: la UI pide un servidor MP4 y evita guardar una playlist como video. Compilar solo Kotlin no reconstruye las bibliotecas FFI.
 
-## APK generado
+## APK generado originalmente
 
 `android-native/app/build/outputs/apk/debug/AniCS-native.apk`, paquete `com.anics.app.preview.debug`, versión `0.3.0-preview`, código `3000`, 34 654 138 bytes. `assembleDebug` y las 13 pruebas JVM pasan. Se verifica la firma con apksigner, las ABI ARM64/x86_64 con aapt y la presencia de JNA. Los hashes de ambas bibliotecas Rust empaquetadas coinciden con las bibliotecas recién compiladas.
+
+El artefacto de esa ruta se reemplaza al compilar nuevamente. La revisión posterior de interfaz/reproductor está documentada en native-ui-player.md; sus pruebas y metadatos del APK corresponden a la compilación actual.
 
 SHA-256: `a28060b612cfd3bc9ead70a3dcf8333056e4fed9837aa973e4ec5036da34257e`.
 

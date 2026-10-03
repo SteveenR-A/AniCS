@@ -17,7 +17,7 @@ data class AppSettings(
     val defaultSource: String = "jkanime",
     val autoPlayNext: Boolean = true,
     val defaultQuality: String = "auto",
-    val themeMode: String = "dark",
+    val themeMode: String = "rosepine",
     val enableCloudSync: Boolean = false,
     val syncUserId: String = "",
     val downloadFolderUri: String = "",
@@ -26,6 +26,24 @@ data class AppSettings(
 )
 
 class SettingsRepository(private val context: Context) {
+
+    private val searchesKey = stringPreferencesKey("recent_searches")
+    val recentSearches: Flow<List<String>> = context.dataStore.data.map { prefs ->
+        prefs[searchesKey]?.let { runCatching { Json.parseToJsonElement(it).jsonArray.map { value -> value.jsonPrimitive.content } }.getOrDefault(emptyList()) } ?: emptyList()
+    }
+    suspend fun rememberSearch(query: String) {
+        val clean = query.trim().take(200); if (clean.isBlank()) return
+        context.dataStore.edit { prefs ->
+            val previous = prefs[searchesKey]?.let { runCatching { Json.parseToJsonElement(it).jsonArray.map { value -> value.jsonPrimitive.content } }.getOrDefault(emptyList()) } ?: emptyList()
+            prefs[searchesKey] = JsonArray((listOf(clean) + previous.filterNot { it.equals(clean, true) }).take(10).map(::JsonPrimitive)).toString()
+        }
+    }
+    suspend fun forgetSearch(query: String) {
+        context.dataStore.edit { prefs ->
+            val previous = prefs[searchesKey]?.let { runCatching { Json.parseToJsonElement(it).jsonArray.map { value -> value.jsonPrimitive.content } }.getOrDefault(emptyList()) } ?: emptyList()
+            prefs[searchesKey] = JsonArray(previous.filterNot { it == query }.map(::JsonPrimitive)).toString()
+        }
+    }
 
     private val cloudSettingsKey = stringPreferencesKey("compatible_settings")
     val syncSettings: Flow<Map<String, String>> = context.dataStore.data.map { prefs ->
@@ -70,7 +88,7 @@ class SettingsRepository(private val context: Context) {
             defaultSource = prefs[PreferencesKeys.DEFAULT_SOURCE] ?: "jkanime",
             autoPlayNext = prefs[PreferencesKeys.AUTO_PLAY_NEXT] ?: true,
             defaultQuality = prefs[PreferencesKeys.DEFAULT_QUALITY] ?: "auto",
-            themeMode = prefs[PreferencesKeys.THEME_MODE] ?: "dark",
+            themeMode = prefs[PreferencesKeys.THEME_MODE] ?: "rosepine",
             enableCloudSync = prefs[PreferencesKeys.ENABLE_CLOUD_SYNC] ?: false,
             syncUserId = prefs[PreferencesKeys.SYNC_USER_ID] ?: "",
             downloadFolderUri = prefs[PreferencesKeys.DOWNLOAD_FOLDER_URI] ?: "",

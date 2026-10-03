@@ -410,6 +410,11 @@ impl NativeCatalogClient {
         }
     }
 
+    pub async fn get_top(&self, source: String) -> Result<Vec<NativeAnimeResult>, NativeFfiError> {
+        let results = self.get_extractor(&source)?.get_top().await?;
+        Ok(results.into_iter().map(Into::into).collect())
+    }
+
     pub async fn advanced_search(
         &self,
         filters: NativeSearchFilters,

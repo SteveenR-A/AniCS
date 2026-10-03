@@ -21,11 +21,13 @@ data class PlaybackState(
     val currentPositionMs: Long = 0L,
     val durationMs: Long = 0L,
     val error: String? = null,
+    val speed: Float = 1f,
+    val muted: Boolean = false,
     val ended: Boolean = false
 )
 
 @OptIn(UnstableApi::class)
-class PlayerController(private val context: Context) {
+class PlayerController(private val context: Context) : PlaybackEngine {
 
     private var exoPlayer: ExoPlayer? = null
     private var pendingResumeFraction: Double? = null
@@ -44,8 +46,7 @@ class PlayerController(private val context: Context) {
 
                     override fun onPlaybackStateChanged(playbackState: Int) {
                         if (playbackState == Player.STATE_READY && duration > 0) {
-                            pendingResumeFraction?.let { seekTo((duration * it).toLong()) }
-                            pendingResumeFraction = null
+                            pendingResumeFraction?.let { fraction -> pendingResumeFraction = null; seekTo((duration * fraction).toLong()) }
                         }
                         val isLoading = playbackState == Player.STATE_BUFFERING
                         _playbackState.value = _playbackState.value.copy(
@@ -54,6 +55,13 @@ class PlayerController(private val context: Context) {
                             durationMs = duration.coerceAtLeast(0L),
                             currentPositionMs = currentPosition.coerceAtLeast(0L)
                         )
+                    }
+
+                    override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
+                        if (duration > 0) pendingResumeFraction?.let { fraction ->
+                            pendingResumeFraction = null
+                            seekTo((duration * fraction).toLong())
+                        }
                     }
 
                     override fun onPlayerError(error: PlaybackException) {
@@ -69,13 +77,14 @@ class PlayerController(private val context: Context) {
         return exoPlayer!!
     }
 
-    fun prepareStream(
+    override fun prepareStream(
         directUrl: String,
         isHls: Boolean,
-        referer: String? = null,
-        userAgent: String? = null,
-        startPositionMs: Long = 0L,
-        resumeFraction: Double? = null
+        referer: String?,
+        userAgent: String?,
+        startPositionMs: Long,
+        resumeFraction: Double?,
+        autoPlay: Boolean
     ) {
         resetPlayback()
         pendingResumeFraction = resumeFraction?.takeIf { it > 0 && it < 0.9 }
@@ -101,10 +110,10 @@ class PlayerController(private val context: Context) {
             player.seekTo(startPositionMs)
         }
         player.prepare()
-        player.play()
+        player.playWhenReady = autoPlay
     }
 
-    fun updatePosition(): Pair<Long, Long> {
+    override fun updatePosition(): Pair<Long, Long> {
         val position = exoPlayer?.currentPosition?.coerceAtLeast(0) ?: 0L
         val duration = exoPlayer?.duration?.coerceAtLeast(0) ?: 0L
         _playbackState.value = _playbackState.value.copy(currentPositionMs = position, durationMs = duration)
@@ -112,6 +121,9 @@ class PlayerController(private val context: Context) {
     }
     fun reportError(message: String) { _playbackState.value = _playbackState.value.copy(error = message, isLoading = false) }
     fun pause() { exoPlayer?.pause() }
+    fun play() { exoPlayer?.play() }
+    fun setSpeed(speed: Float) { exoPlayer?.setPlaybackSpeed(speed); _playbackState.value = _playbackState.value.copy(speed = speed) }
+    fun toggleMute() { exoPlayer?.let { it.volume = if (it.volume == 0f) 1f else 0f; _playbackState.value = _playbackState.value.copy(muted = it.volume == 0f) } }
     fun togglePlayPause() {
         exoPlayer?.let {
             if (it.isPlaying) it.pause() else it.play()
@@ -133,11 +145,11 @@ class PlayerController(private val context: Context) {
         }
     }
 
-    fun resetPlayback() {
+    override fun resetPlayback() {
         pendingResumeFraction = null
         exoPlayer?.stop()
         exoPlayer?.clearMediaItems()
-        _playbackState.value = PlaybackState()
+        _playbackState.value = PlaybackState(speed = exoPlayer?.playbackParameters?.speed ?: 1f, muted = exoPlayer?.volume == 0f)
     }
 
     fun release() {

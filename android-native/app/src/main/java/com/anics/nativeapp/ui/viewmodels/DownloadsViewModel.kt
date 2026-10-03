@@ -13,7 +13,7 @@ data class DownloadsUiState(
     val isLoading: Boolean = true,
     val isScanning: Boolean = false,
     val message: String? = null,
-    val folderUri: String = ""
+    val folderUri: String = "", val covers: Map<String, String> = emptyMap(), val totalSpace: Long = 0, val freeSpace: Long = 0
 )
 
 class DownloadsViewModel(
@@ -28,9 +28,23 @@ class DownloadsViewModel(
 
     init {
         observeDownloads()
+        refreshStorage()
         viewModelScope.launch { settingsRepository.settings.collect { settings ->
             _uiState.update { it.copy(folderUri = settings.downloadFolderUri) }
         } }
+    }
+
+    fun refreshStorage() {
+        viewModelScope.launch {
+            val values = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                val db = com.anics.nativeapp.data.local.AppDatabase.getInstance(context)
+                val images = db.historyDao().getAllHistorySync().map { it.animeTitle to it.thumbnailUrl } + db.favoriteDao().getAllFavoritesSync().map { it.title to it.thumbnailUrl }
+                val covers = images.filter { it.second.isNotBlank() }.associate { com.anics.nativeapp.sync.SyncContract.titleKey(it.first) to it.second }
+                val storage = runCatching { android.os.StatFs(android.os.Environment.getExternalStorageDirectory().absolutePath) }.getOrNull()
+                Triple(covers, storage?.totalBytes ?: 0, storage?.availableBytes ?: 0)
+            }
+            _uiState.update { it.copy(covers = values.first, totalSpace = values.second, freeSpace = values.third) }
+        }
     }
 
     private fun observeDownloads() {
@@ -59,7 +73,8 @@ class DownloadsViewModel(
             try {
                 require(uri.isNotBlank()) { "Selecciona la carpeta Anime que usa Tauri" }
                 val count = library.scan(uri)
-                _uiState.update { it.copy(message = "$count videos encontrados") }
+                _uiState.update { it.copy(message = "$count videos detectados en la carpeta") }
+                refreshStorage()
             } catch (e: kotlinx.coroutines.CancellationException) { throw e }
               catch (e: Exception) { _uiState.update { it.copy(message = e.localizedMessage) } }
             finally { _uiState.update { it.copy(isScanning = false) } }

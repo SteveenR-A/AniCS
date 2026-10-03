@@ -148,7 +148,7 @@ describe('Player interactions', () => {
 
   it('updates time without notifying the React store while the HUD is hidden', async () => {
     const { video } = await mountPlayer();
-    act(() => { vi.advanceTimersByTime(2800); });
+    act(() => { vi.advanceTimersByTime(5000); });
     const subscriber = vi.fn();
     const unsubscribe = usePlayerStore.subscribe(subscriber);
     video.currentTime = 24.625;
@@ -162,17 +162,66 @@ describe('Player interactions', () => {
   it.each([false, true])('toggles playback in one click while controls are hidden (mobile=%s)', async mobile => {
     mocks.mobile = mobile;
     const { video } = await mountPlayer();
-    act(() => { vi.advanceTimersByTime(2800); });
+    act(() => { vi.advanceTimersByTime(5000); });
     const center = screen.getByRole('button', { name: 'Pausar video' });
     expect(center).toHaveStyle({ opacity: 0 });
     fireEvent.click(center);
     expect(video.paused).toBe(true);
     expect(center).toHaveStyle({ opacity: 1 });
     play.mockClear();
-    act(() => { vi.advanceTimersByTime(2800); });
+    act(() => { vi.advanceTimersByTime(5000); });
     fireEvent.click(screen.getByRole('button', { name: 'Reproducir video' }));
     expect(play).toHaveBeenCalledTimes(1);
     expect(video.paused).toBe(false);
+  });
+
+  it('keeps controls visible when playback is paused', async () => {
+    const { video } = await mountPlayer();
+    act(() => { video.pause(); });
+    const center = screen.getByRole('button', { name: 'Reproducir video' });
+    expect(center).toHaveStyle({ opacity: 1 });
+    act(() => { vi.advanceTimersByTime(10000); });
+    expect(center).toHaveStyle({ opacity: 1 });
+  });
+
+  it('toggles controls HUD on single screen background click without pausing', async () => {
+    const { container, video } = await mountPlayer();
+    const screenSurface = container.firstChild as HTMLElement;
+    const center = screen.getByRole('button', { name: 'Pausar video' });
+
+    expect(center).toHaveStyle({ opacity: 1 });
+    expect(video.paused).toBe(false);
+
+    // Single click on empty screen area toggles controls after 300ms without pausing
+    fireEvent.click(screenSurface, { clientX: 200, clientY: 200 });
+    act(() => { vi.advanceTimersByTime(350); });
+
+    expect(center).toHaveStyle({ opacity: 0 });
+    expect(video.paused).toBe(false);
+
+    // Another single click restores controls without pausing
+    fireEvent.click(screenSurface, { clientX: 200, clientY: 200 });
+    act(() => { vi.advanceTimersByTime(350); });
+
+    expect(center).toHaveStyle({ opacity: 1 });
+    expect(video.paused).toBe(false);
+  });
+
+  it('handles double tap on center to toggle playback on mobile', async () => {
+    mocks.mobile = true;
+    const { container, video } = await mountPlayer();
+    const screenSurface = container.firstChild as HTMLElement;
+
+    // Simulate bounding rect with width 1000
+    vi.spyOn(screenSurface, 'getBoundingClientRect').mockReturnValue({
+      left: 0, top: 0, width: 1000, height: 600, right: 1000, bottom: 600, x: 0, y: 0, toJSON: () => {},
+    });
+
+    // Double tap in center (x = 500)
+    fireEvent.click(screenSurface, { clientX: 500, clientY: 300 });
+    fireEvent.click(screenSurface, { clientX: 500, clientY: 300 });
+
+    expect(video.paused).toBe(true);
   });
 
   it.each([0, 1.25, 67.375])('preserves exact time %s and paused state on a server change', async time => {

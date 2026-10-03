@@ -181,7 +181,8 @@ export function PlayerPage() {
   // Gestos & HUD Toasts
   const [hudToast, setHudToast] = useState<{ icon: 'volume' | 'brightness' | 'seek' | 'aspect' | 'vip' | 'external' | 'server'; text: string; value?: number } | null>(null);
   const [brightness, setBrightness] = useState(1.0);
-  const [doubleTapSide, setDoubleTapSide] = useState<'left' | 'right' | null>(null);
+  const [doubleTapSide, setDoubleTapSide] = useState<'left' | 'right' | 'center' | null>(null);
+  const [doubleTapAction, setDoubleTapAction] = useState<'pause' | 'play' | null>(null);
 
   // Timeline scrubbing (desplazamiento continuo estilo mpv con puntero táctil/ratón)
   const [isScrubbing, setIsScrubbing] = useState(false);
@@ -875,17 +876,33 @@ export function PlayerPage() {
     };
   }, [saveProgress]);
 
-  const showControlsTemp = useCallback(() => {
+  const showControlsTemp = useCallback((customDelay?: number) => {
     setShowControls(true);
     if (!interactionRef.current.showControls && videoRef.current) setPlaybackTime(videoRef.current.currentTime);
-    if (controlsTimeout.current) clearTimeout(controlsTimeout.current);
+    if (controlsTimeout.current) {
+      clearTimeout(controlsTimeout.current);
+      controlsTimeout.current = undefined;
+    }
+
+    // No auto-ocultar los controles si el video está pausado
+    const isPaused = videoRef.current ? videoRef.current.paused : false;
+    if (isPaused) {
+      return;
+    }
+
+    const timeoutMs = customDelay ?? (isMobile ? 4500 : 4000);
     controlsTimeout.current = setTimeout(() => {
-      if (interactionRef.current.activeDrawer === 'none' && !interactionRef.current.showServerDropdown) {
+      if (
+        interactionRef.current.activeDrawer === 'none' &&
+        !interactionRef.current.showServerDropdown &&
+        videoRef.current &&
+        !videoRef.current.paused
+      ) {
         setShowControls(false);
         setShowServerDropdown(false);
       }
-    }, 2800);
-  }, [setPlaybackTime]);
+    }, timeoutMs);
+  }, [isMobile, setPlaybackTime]);
 
   useEffect(() => {
     showControlsTemp();
@@ -910,7 +927,10 @@ export function PlayerPage() {
 
   const toggleControlsManual = () => {
     if (showControls) {
-      if (controlsTimeout.current) clearTimeout(controlsTimeout.current);
+      if (controlsTimeout.current) {
+        clearTimeout(controlsTimeout.current);
+        controlsTimeout.current = undefined;
+      }
       setShowControls(false);
       setShowServerDropdown(false);
     } else {
@@ -1030,7 +1050,7 @@ export function PlayerPage() {
     }
   };
 
-  // Center clicks act immediately; only side taps wait for the double-seek gesture.
+  // 1 solo clic en pantalla alterna HUD (no pausa, respetando el diámetro del botón central); doble clic busca o pausa según zona.
   const handleScreenClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (suppressTouchClickRef.current) {
       suppressTouchClickRef.current = false;
@@ -1051,13 +1071,6 @@ export function PlayerPage() {
     const bounds = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - bounds.left;
     const screenWidth = bounds.width;
-    if (x >= screenWidth * 0.33 && x <= screenWidth * 0.66) {
-      if (clickTimeoutRef.current) clearTimeout(clickTimeoutRef.current);
-      clickTimeoutRef.current = null;
-      lastTapTime.current = 0;
-      togglePlay();
-      return;
-    }
     const now = Date.now();
     const doubleTapDiff = now - lastTapTime.current;
 
@@ -1068,18 +1081,33 @@ export function PlayerPage() {
         clickTimeoutRef.current = null;
       }
 
-      if (x < screenWidth * 0.33) {
+      if (x < screenWidth * 0.35) {
         // Doble clic izquierda: -10s sin HUD
         seekRelative(-10, false);
         setDoubleTapSide('left');
         clearTimeout(doubleTapTimeoutRef.current);
         doubleTapTimeoutRef.current = setTimeout(() => setDoubleTapSide(null), 600);
-      } else if (x > screenWidth * 0.66) {
+      } else if (x > screenWidth * 0.65) {
         // Doble clic derecha: +10s sin HUD
         seekRelative(10, false);
         setDoubleTapSide('right');
         clearTimeout(doubleTapTimeoutRef.current);
         doubleTapTimeoutRef.current = setTimeout(() => setDoubleTapSide(null), 600);
+      } else {
+        // Doble clic en el centro
+        if (isMobile) {
+          const willPause = videoRef.current ? !videoRef.current.paused : isPlaying;
+          togglePlay(false);
+          setDoubleTapAction(willPause ? 'pause' : 'play');
+          setDoubleTapSide('center');
+          clearTimeout(doubleTapTimeoutRef.current);
+          doubleTapTimeoutRef.current = setTimeout(() => {
+            setDoubleTapSide(null);
+            setDoubleTapAction(null);
+          }, 600);
+        } else {
+          toggleFullscreen();
+        }
       }
       lastTapTime.current = 0;
     } else {
@@ -1323,7 +1351,7 @@ export function PlayerPage() {
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         cursor: showControls ? 'default' : 'none',
       }}
-      onMouseMove={showControlsTemp}
+      onMouseMove={() => showControlsTemp()}
       onPointerDownCapture={event => {
         if ((event.target as HTMLElement).closest('[data-interactive], button, input, select')) showControlsTemp();
       }}
@@ -1365,6 +1393,7 @@ export function PlayerPage() {
           onPlay={() => {
             setIsPlaying(true);
             setKeepScreenOn(true);
+            showControlsTemp();
             if (readyToSaveRef.current) {
               saveProgress();
             }
@@ -1372,6 +1401,11 @@ export function PlayerPage() {
           onPause={() => {
             setIsPlaying(false);
             setKeepScreenOn(false);
+            if (controlsTimeout.current) {
+              clearTimeout(controlsTimeout.current);
+              controlsTimeout.current = undefined;
+            }
+            setShowControls(true);
             saveProgress();
           }}
           onLoadedMetadata={async () => {
@@ -1468,17 +1502,23 @@ export function PlayerPage() {
             exit={{ opacity: 0, scale: 0.8 }}
             style={{
               position: 'absolute',
-              [doubleTapSide]: '15%',
-              top: '50%', transform: 'translateY(-50%)',
+              left: doubleTapSide === 'left' ? '15%' : doubleTapSide === 'center' ? '50%' : undefined,
+              right: doubleTapSide === 'right' ? '15%' : undefined,
+              top: '50%',
+              transform: doubleTapSide === 'center' ? 'translate(-50%, -50%)' : 'translateY(-50%)',
               background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(16px)',
               borderRadius: 'var(--radius-xl)', padding: '16px 24px',
               display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
               color: 'white', zIndex: 30, pointerEvents: 'none',
             }}
           >
-            {doubleTapSide === 'left' ? <RotateCcw size={32} /> : <RotateCw size={32} />}
+            {doubleTapSide === 'left' && <RotateCcw size={32} />}
+            {doubleTapSide === 'right' && <RotateCw size={32} />}
+            {doubleTapSide === 'center' && (
+              doubleTapAction === 'pause' ? <Pause size={32} fill="white" /> : <Play size={32} fill="white" />
+            )}
             <span style={{ fontSize: 13, fontWeight: 700 }}>
-              {doubleTapSide === 'left' ? '-10s' : '+10s'}
+              {doubleTapSide === 'left' ? '-10s' : doubleTapSide === 'right' ? '+10s' : (doubleTapAction === 'pause' ? 'Pausa' : 'Reproducir')}
             </span>
           </motion.div>
         )}
@@ -1537,14 +1577,14 @@ export function PlayerPage() {
         aria-label={isPlaying ? 'Pausar video' : 'Reproducir video'}
         onClick={event => { event.stopPropagation(); togglePlay(); }}
         onTouchStart={event => event.stopPropagation()}
-        onFocus={showControlsTemp}
+        onFocus={() => showControlsTemp()}
         style={{
           position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)',
           width: isMobile ? 72 : 88, height: isMobile ? 72 : 88, borderRadius: '50%',
           display: activeDrawer === 'none' && !isResolving && !isLoadingInitial ? 'flex' : 'none',
           alignItems: 'center', justifyContent: 'center',
           color: 'white', background: 'rgba(0,0,0,.45)', border: '1px solid rgba(255,255,255,.35)',
-          zIndex: 21, cursor: 'pointer', opacity: showControls ? 1 : 0, transition: 'opacity .2s',
+          zIndex: 21, cursor: 'pointer', opacity: showControls ? 1 : 0, transition: 'opacity .2s, transform .15s',
           touchAction: 'manipulation',
         }}
       >

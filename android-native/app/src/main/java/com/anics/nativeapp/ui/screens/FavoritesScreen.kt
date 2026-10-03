@@ -1,177 +1,37 @@
 package com.anics.nativeapp.ui.screens
 
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
 import com.anics.nativeapp.data.local.FavoriteEntity
+import com.anics.nativeapp.ffi.NativeAnimeResult
+import com.anics.nativeapp.ui.components.*
 import com.anics.nativeapp.ui.viewmodels.FavoritesViewModel
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun FavoritesScreen(
-    viewModel: FavoritesViewModel,
-    onAnimeClick: (url: String, source: String) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val uiState by viewModel.uiState.collectAsState()
-
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text(
-                            text = "Favoritos",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 20.sp,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        if (uiState.profileName.isNotBlank()) {
-                            Text(
-                                text = "Perfil: ${uiState.profileName}",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background
-                )
-            )
-        },
-        containerColor = MaterialTheme.colorScheme.background,
-        modifier = modifier
-    ) { innerPadding ->
-        when {
-            uiState.isLoading -> {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(innerPadding),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
-                }
-            }
-
-            uiState.favorites.isEmpty() -> {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(innerPadding),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "Aún no tienes animes en favoritos",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                }
-            }
-
-            else -> {
-                LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 150.dp),
-                    contentPadding = PaddingValues(16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(innerPadding)
-                ) {
-                    items(uiState.favorites) { fav ->
-                        FavoriteCard(
-                            favorite = fav,
-                            onClick = { onAnimeClick(fav.url, fav.source) },
-                            onDelete = { viewModel.removeFavorite(fav.url) }
-                        )
-                    }
+fun FavoritesScreen(viewModel: FavoritesViewModel, onAnimeClick: (String, String) -> Unit, modifier: Modifier = Modifier) {
+    val state by viewModel.uiState.collectAsState()
+    var remove by remember { mutableStateOf<FavoriteEntity?>(null) }
+    LazyVerticalGrid(GridCells.Adaptive(145.dp), modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item(span = { GridItemSpan(maxLineSpan) }) { SectionTitle("Favoritos", "Perfil: ${state.profileName}", AniIcons.Heart) }
+        if (state.isLoading) item(span = { GridItemSpan(maxLineSpan) }) { Box(Modifier.fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() } }
+        else if (state.favorites.isEmpty()) item(span = { GridItemSpan(maxLineSpan) }) { Box(Modifier.heightIn(min = 300.dp), contentAlignment = Alignment.Center) { AniEmptyState("Sin favoritos todavía", "Toca el corazón en la ficha de un anime para guardarlo en este perfil.", AniIcons.Heart) } }
+        items(state.favorites, key = { it.id }) { favorite ->
+            Box {
+                AnimeCard(NativeAnimeResult(favorite.title, favorite.url, favorite.thumbnailUrl, null, null, null, null, null, null, null, favorite.source, favorite.profileId), { onAnimeClick(favorite.url, favorite.source) })
+                Surface(Modifier.align(Alignment.TopEnd).padding(6.dp), color = Color.Black.copy(alpha = .6f), shape = RoundedCornerShape(50)) {
+                    IconButton(onClick = { remove = favorite }, modifier = Modifier.size(30.dp)) { Icon(AniIcons.Heart, "Quitar favorito", Modifier.size(17.dp), tint = MaterialTheme.colorScheme.primary) }
                 }
             }
         }
     }
-}
-
-@Composable
-fun FavoriteCard(
-    favorite: FavoriteEntity,
-    onClick: () -> Unit,
-    onDelete: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Card(
-        modifier = modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-    ) {
-        Column {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(0.7f)
-                    .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp))
-            ) {
-                AsyncImage(
-                    model = favorite.thumbnailUrl,
-                    contentDescription = favorite.title,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
-
-                IconButton(
-                    onClick = onDelete,
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(4.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Delete,
-                        contentDescription = "Eliminar de favoritos",
-                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-            }
-
-            Column(modifier = Modifier.padding(10.dp)) {
-                Text(
-                    text = favorite.title,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 14.sp,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = favorite.source.uppercase(),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Medium
-                )
-            }
-        }
-    }
+    remove?.let { favorite -> AlertDialog(onDismissRequest = { remove = null }, title = { Text("Quitar de favoritos") }, text = { Text(favorite.title) },
+        confirmButton = { TextButton(onClick = { viewModel.removeFavorite(favorite.url); remove = null }) { Text("Quitar") } }, dismissButton = { TextButton(onClick = { remove = null }) { Text("Cancelar") } }) }
 }

@@ -5,6 +5,16 @@ El formato está basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1
 
 ---
 
+## [0.3.2] - 2026-10-02
+
+### Paridad de Gestos y Optimización del Reproductor
+- Reproductor: Corrección del tiempo de auto-ocultación de controles (4.5s en móvil y retención durante la pausa)
+- Reproductor: Gesto de toque único optimizado para alternar HUD sin pausar el video, respetando el diámetro circular del botón central (72px)
+- Reproductor: Doble toque en el centro para alternar reproducción y pausa en móvil con indicador animado SVG
+- Móvil nativo: Paridad de controles y gestos en Android (Tauri y Kotlin) con soporte completo de auto-actualización in-app
+
+---
+
 ## [0.3.1] - 2026-10-02
 
 ### Mejoras de paridad nativa y correcciones
