@@ -65,7 +65,7 @@ class NativeUiRegressionTest {
         compose.onNodeWithText("Actualizar AniCS").assertIsDisplayed()
         compose.onNodeWithText(update.notes).assertIsDisplayed()
         compose.onNodeWithTag("update-progress").assertIsDisplayed()
-        compose.onNodeWithText("Descargando…").assertIsNotEnabled()
+        compose.onNodeWithText("Pausar").assertIsDisplayed()
         compose.onNodeWithText("Descargando: 42%", substring = true).assertIsDisplayed()
         screenshot("update-progress")
     }

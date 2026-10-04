@@ -284,9 +284,13 @@ class UpdateRepository(
             if (apk.exists()) check(apk.delete()) { "No se pudo reemplazar el APK anterior" }
             check(pending.renameTo(apk)) { "No se pudo guardar el APK verificado" }
             apk
+        } catch (e: Throwable) {
+            if (e !is CancellationException) {
+                pending.delete()
+            }
+            throw e
         } finally {
             connection.disconnect()
-            // NOTA: NO eliminamos pending (.part) para permitir la reanudación posterior
         }
     }
 

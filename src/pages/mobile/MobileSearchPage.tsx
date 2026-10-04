@@ -118,6 +118,13 @@ export function MobileSearchPage() {
   const lastExecutedKey = useRef<string>('');
   const activeFilterCount = (selectedGenre ? 1 : 0) + (selectedStatus ? 1 : 0) + (selectedType ? 1 : 0) + (selectedYear ? 1 : 0) + (selectedOrder ? 1 : 0);
 
+  useEffect(() => () => {
+    ++searchRequestIdRef.current;
+    lastExecutedKey.current = '';
+    clearTimeout(debounceRef.current);
+    setIsSearching(false);
+  }, [activeSource, setIsSearching]);
+
   useEffect(() => {
     loadGenres(activeSource);
   }, [activeSource, loadGenres]);
@@ -254,6 +261,8 @@ export function MobileSearchPage() {
 
     // Si no hay parámetros ni búsqueda, no disparar consultas pesadas innecesarias
     if (!urlQ && !urlGenre && !urlStatus && !urlType && !urlYear && !urlOrder) {
+      ++searchRequestIdRef.current;
+      setIsSearching(false);
       setSearchResults([], '', activeSource);
       setTotalPages(undefined);
       setHasNextPage(false);
@@ -265,6 +274,8 @@ export function MobileSearchPage() {
 
   const handleInput = (val: string) => {
     setQuery(val);
+    ++searchRequestIdRef.current;
+    setIsSearching(false);
     if (debounceRef.current) clearTimeout(debounceRef.current);
 
     const trimmed = val.trim();
@@ -306,6 +317,8 @@ export function MobileSearchPage() {
   };
 
   const handleClearQuery = () => {
+    ++searchRequestIdRef.current;
+    setIsSearching(false);
     if (debounceRef.current) clearTimeout(debounceRef.current);
     setQuery('');
     const key = `${activeSource}::${selectedGenre}:${selectedStatus}:${selectedType}:${selectedYear}:${selectedOrder}:1`;

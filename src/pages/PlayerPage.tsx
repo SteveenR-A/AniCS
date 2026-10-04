@@ -70,6 +70,7 @@ export function PlayerPage() {
   const queryUrl = searchParams.get('url');
   const queryEp = searchParams.get('ep');
   const querySource = searchParams.get('source') ?? 'jkanime';
+  const queryAnimeUrl = searchParams.get('animeUrl');
 
   const {
     currentAnime, currentEpisode, servers: extractedServers, resolvedMedia,
@@ -396,9 +397,9 @@ export function PlayerPage() {
   }, [isPlaying]);
 
   // Sincronización precisa de Anime y Episodio desde URL (sin mezclar animes previos)
-  const currentLoadedKey = useRef<string>('');
   const failedServersRef = useRef<Set<string>>(new Set());
   const tryFallbackServerRef = useRef<() => void>(() => {});
+  const currentLoadedKey = useRef('');
 
   const handleSelectServer = useCallback(async (server: VideoServer, currentSource?: string, recoverOnFailure = false) => {
     const isTargetVip = isVipServer(server.name);
@@ -531,25 +532,29 @@ export function PlayerPage() {
   useEffect(() => {
     const initFromParams = async () => {
       if (!queryUrl) return;
-      const decoded = decodeURIComponent(queryUrl);
-      const epNum = queryEp ? parseInt(queryEp, 10) : 1;
-      const loadKey = `${decoded}-${epNum}-${querySource}`;
-
-      // Si ya está exactamente cargado, evitar duplicar
-      if (currentLoadedKey.current === loadKey && resolvedMedia) {
-        return;
-      }
-
+      // URLSearchParams already decodes the outer query parameter. Decoding
+      // again corrupts escaped media URLs and local filenames containing '%'.
+      const decoded = queryUrl;
+      const parsedEp = Number(queryEp ?? 1);
+      const epNum = Number.isInteger(parsedEp) && parsedEp > 0 ? parsedEp : 1;
+      const loadKey = JSON.stringify([decoded, epNum, querySource, queryAnimeUrl]);
+      if (currentLoadedKey.current === loadKey) return;
       currentLoadedKey.current = loadKey;
       const requestId = ++serverRequestRef.current;
       pendingSwitchRef.current = null;
+      readyToSaveRef.current = false;
+      hasResumedProgressRef.current = false;
+      pendingProgressPromiseRef.current = null;
+      playbackTimeRef.current = 0;
+      durationRef.current = 0;
+      clearTimeout(progressReadyTimerRef.current);
+      failedServersRef.current.clear();
       resetPlayback();
       setIsLoadingInitial(true);
       setLoadError(null);
 
-      const queryAnimeUrl = searchParams.get('animeUrl');
       const targetAnimeUrl = (queryAnimeUrl && (queryAnimeUrl.startsWith('http://') || queryAnimeUrl.startsWith('https://')))
-        ? decodeURIComponent(queryAnimeUrl)
+        ? queryAnimeUrl
         : decoded;
 
       try {
@@ -584,7 +589,9 @@ export function PlayerPage() {
               qualities: [],
             });
           } catch (err) {
+            if (requestId !== serverRequestRef.current) return;
             console.error('Failed to load local episode on init:', err);
+            setLoadError('No se pudo abrir el video descargado');
           }
         } else {
           const srvs = await getServers(targetEp.url, querySource);
@@ -607,6 +614,7 @@ export function PlayerPage() {
         setLoadError(err?.message || 'No se pudo cargar el anime');
       } finally {
         if (requestId === serverRequestRef.current) {
+          setIsResolving(false);
           setIsLoadingInitial(false);
         }
       }
@@ -616,13 +624,14 @@ export function PlayerPage() {
 
     return () => {
       // Limpiar al desmontar la vista del reproductor
+      currentLoadedKey.current = '';
       ++serverRequestRef.current;
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
       }
     };
-  }, [queryUrl, queryEp, querySource, isVip]);
+  }, [queryUrl, queryEp, querySource, queryAnimeUrl]);
 
   // Sincronizar volumen y velocidad en el elemento <video>
   useEffect(() => {
@@ -687,7 +696,14 @@ export function PlayerPage() {
     let isHls = resolvedMedia.mediaType === 'hls' || sourceUrl.includes('.m3u8');
     let blobUrlToRevoke: string | null = null;
 
-    if (/\.ts(?:$|[?#])/i.test(sourceUrl) && !sourceUrl.includes('.m3u8')) {
+    let mediaPath = sourceUrl;
+    try {
+      const url = new URL(sourceUrl);
+      mediaPath = url.pathname === '/video'
+        ? url.searchParams.get('path') ?? url.pathname
+        : url.pathname;
+    } catch { /* Keep the original URL if it cannot be parsed. */ }
+    if (/\.ts$/i.test(mediaPath)) {
       isHls = true;
       const m3u8Content = `#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:7200\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:7200.0,\n${sourceUrl}\n#EXT-X-ENDLIST`;
       sourceUrl = URL.createObjectURL(new Blob([m3u8Content], { type: 'application/vnd.apple.mpegurl' }));
@@ -972,69 +988,24 @@ export function PlayerPage() {
     }
   };
 
-  const handleLoadEpisode = async (epNum: number) => {
+  const handleLoadEpisode = (epNum: number) => {
     if (!currentAnime) return;
+    if (currentEpisode?.number === epNum) return;
     const ep = currentAnime.episodes.find(e => e.number === epNum);
     if (!ep) return;
 
     saveProgress();
     ++serverRequestRef.current;
     pendingSwitchRef.current = null;
+    readyToSaveRef.current = false;
     resetPlayback();
-
-    if (hlsRef.current) {
-      hlsRef.current.destroy();
-      hlsRef.current = null;
-    }
-    if (videoRef.current) {
-      videoRef.current.pause();
-      videoRef.current.removeAttribute('src');
-      videoRef.current.load();
-    }
-
-    setCurrentEpisode(ep);
-    const activeProfileId = useProfileStore.getState().activeProfile?.id;
-    pendingProgressPromiseRef.current = getEpisodeProgress(ep.url, activeProfileId);
-    setResolvedMedia(null);
-    setPlaybackTime(0);
-    setDuration(0);
-    setIsResolving(true);
-
-    // Si es un anime descargado localmente, resolver a través del servidor local de streaming
-    if (currentAnime.source === 'local' || (!ep.url.startsWith('http://') && !ep.url.startsWith('https://'))) {
-      try {
-        const streamUrl = await getLocalMediaUrl(ep.url);
-        const isTs = ep.url.toLowerCase().endsWith('.ts');
-        setResolvedMedia({
-          directUrl: streamUrl,
-          mediaType: isTs ? 'hls' : 'mp4',
-          qualities: [],
-        });
-      } catch (err) {
-        console.error('Failed to load local episode:', err);
-      } finally {
-        setIsResolving(false);
-      }
-      return;
-    }
-
-    try {
-      failedServersRef.current.clear();
-      const srvs = await getServers(ep.url, querySource);
-      setServers(srvs);
-
-      const ok = await autoResolveWorkingServer(srvs, querySource);
-      if (!ok) {
-        showToast({
-          icon: 'server',
-          text: 'No hay servidores funcionales disponibles para este episodio',
-        });
-      }
-    } catch (e) {
-      console.error('Failed to change episode:', e);
-    } finally {
-      setIsResolving(false);
-    }
+    // All episode changes use the same request guards as initial playback.
+    // Replacing the player URL also keeps Back pointing to the originating page.
+    const params = new URLSearchParams(searchParams);
+    params.set('url', currentAnime.url);
+    params.set('animeUrl', currentAnime.url);
+    params.set('ep', String(ep.number));
+    navigate(`/player?${params.toString()}`, { replace: true });
   };
 
   const seekRelative = (seconds: number, showHud: boolean | React.SyntheticEvent = true) => {

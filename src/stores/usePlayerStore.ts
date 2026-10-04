@@ -52,7 +52,7 @@ export const usePlayerStore = create<PlayerStore>((set) => ({
   setSelectedServer: (server) => set({ selectedServer: server }),
   setIsLoadingServers: (v) => set({ isLoadingServers: v }),
   setIsResolving: (v) => set({ isResolving: v }),
-  resetPlayback: () => set({ resolvedMedia: null, selectedServer: null, playbackTime: 0, duration: 0, isResolving: false, isLoadingServers: false }),
+  resetPlayback: () => set({ servers: [], resolvedMedia: null, selectedServer: null, playbackTime: 0, duration: 0, isResolving: false, isLoadingServers: false }),
   openPlayer: () => set({ isPlayerOpen: true }),
   closePlayer: () => set({ isPlayerOpen: false, resolvedMedia: null, selectedServer: null }),
   setVolume: (v) => set({ volume: v }),

@@ -25,6 +25,7 @@ const BITMAP_REFS = new Map<string, HTMLImageElement>();
 // SingleFlight en frontend: evita múltiples llamadas IPC concurrentes para la misma URL.
 // ─────────────────────────────────────────────────────────────────────────────
 const IN_FLIGHT = new Map<string, Promise<string>>();
+let cacheGeneration = 0;
 
 /** Normaliza la URL: si es una ruta local en disco, la pasa por convertFileSrc */
 function normalizeSrc(rawSrc: string): string {
@@ -41,6 +42,7 @@ function normalizeSrc(rawSrc: string): string {
 
 /** Limpia completamente la caché de imágenes en memoria RAM */
 export function clearMemoryCache(): void {
+  ++cacheGeneration;
   MEMORY_CACHE.clear();
   BITMAP_REFS.clear();
   IN_FLIGHT.clear();
@@ -48,6 +50,7 @@ export function clearMemoryCache(): void {
 
 /** Guarda en MEMORY_CACHE con límite LRU estricto para no sobre-saturar la RAM */
 function setMemoryCache(url: string, dataUri: string): void {
+  MEMORY_CACHE.delete(url);
   if (MEMORY_CACHE.size >= MAX_RAM_IMAGES) {
     const oldestKey = MEMORY_CACHE.keys().next().value;
     if (oldestKey) MEMORY_CACHE.delete(oldestKey);
@@ -120,13 +123,16 @@ export function resolveImageUrl(url: string): Promise<string> {
   if (inflight) return inflight;
 
   // Nueva resolución: invocar Rust para obtener el Data URI
+  const generation = cacheGeneration;
   const promise = cacheImage(url)
     .then((dataUri) => {
       let resolved: string;
       if (dataUri && dataUri.startsWith('data:')) {
         resolved = dataUri;
-        MEMORY_CACHE.set(url, resolved);
-        keepInRam(resolved);
+        if (generation === cacheGeneration) {
+          setMemoryCache(url, resolved);
+          keepInRam(resolved);
+        }
       } else {
         resolved = normalizeSrc(url);
       }
@@ -136,7 +142,7 @@ export function resolveImageUrl(url: string): Promise<string> {
       return normalizeSrc(url);
     })
     .finally(() => {
-      IN_FLIGHT.delete(url);
+      if (IN_FLIGHT.get(url) === promise) IN_FLIGHT.delete(url);
     });
 
   IN_FLIGHT.set(url, promise);

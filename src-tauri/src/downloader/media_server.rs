@@ -30,9 +30,13 @@ struct DlnaFile {
 pub struct AuthCallbackData {
     pub uid: String,
     pub email: Option<String>,
+    #[serde(alias = "displayName")]
     pub display_name: Option<String>,
+    #[serde(alias = "photoURL")]
     pub photo_url: Option<String>,
+    #[serde(alias = "idToken")]
     pub id_token: Option<String>,
+    #[serde(alias = "accessToken")]
     pub access_token: Option<String>,
 }
 
@@ -174,10 +178,68 @@ pub fn clear_dlna_file(token: &str) {
     }
 }
 
+// TCP reads can end anywhere, including in the request line or a JSON token.
+// Read complete headers (and the declared callback body) before parsing them.
+async fn read_http_request(stream: &mut TcpStream, include_body: bool) -> std::io::Result<Vec<u8>> {
+    const MAX_HEADERS: usize = 32 * 1024;
+    const MAX_BODY: usize = 64 * 1024;
+    let read_request = async {
+        let mut buffer = Vec::new();
+        let mut chunk = [0u8; 4096];
+        let header_end = loop {
+            if let Some(position) = buffer.windows(4).position(|bytes| bytes == b"\r\n\r\n") {
+                if position + 4 > MAX_HEADERS {
+                    return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "HTTP headers too large"));
+                }
+                break position + 4;
+            }
+            if buffer.len() >= MAX_HEADERS {
+                return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "HTTP headers too large"));
+            }
+            let count = stream.read(&mut chunk).await?;
+            if count == 0 {
+                return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "Incomplete HTTP headers"));
+            }
+            buffer.extend_from_slice(&chunk[..count]);
+        };
+        let mut content_length = None;
+        if include_body {
+            let headers = String::from_utf8_lossy(&buffer[..header_end]);
+            for line in headers.lines().skip(1) {
+                let Some((name, value)) = line.split_once(':') else { continue; };
+                if name.eq_ignore_ascii_case("content-length") {
+                    let length = value.trim().parse::<usize>().map_err(|_| {
+                        std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid Content-Length")
+                    })?;
+                    if length > MAX_BODY || content_length.is_some() {
+                        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid HTTP body length"));
+                    }
+                    content_length = Some(length);
+                }
+            }
+        }
+        let request_length = header_end + content_length.unwrap_or(0);
+        while buffer.len() < request_length {
+            let count = stream.read(&mut chunk).await?;
+            if count == 0 {
+                return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "Incomplete HTTP body"));
+            }
+            buffer.extend_from_slice(&chunk[..count]);
+        }
+        buffer.truncate(request_length);
+        Ok(buffer)
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(10), read_request)
+        .await
+        .map_err(|_| std::io::Error::new(std::io::ErrorKind::TimedOut, "HTTP request timed out"))?
+}
+
 async fn handle_dlna_connection(mut stream: TcpStream) {
-    let mut buffer = [0u8; 4096];
-    let length = match stream.read(&mut buffer).await { Ok(length) if length > 0 => length, _ => return };
-    let request = String::from_utf8_lossy(&buffer[..length]);
+    let buffer = match read_http_request(&mut stream, false).await {
+        Ok(buffer) => buffer,
+        Err(_) => return,
+    };
+    let request = String::from_utf8_lossy(&buffer);
     let mut lines = request.lines();
     let Some(request_line) = lines.next() else { return; };
     let parts: Vec<&str> = request_line.split_whitespace().collect();
@@ -242,13 +304,15 @@ async fn serve_dlna_file(stream: &mut TcpStream, method: &str, path: &PathBuf, r
 }
 
 async fn handle_connection(mut stream: TcpStream, _addr: SocketAddr) {
-    let mut buffer = [0u8; 4096];
-    let n = match stream.read(&mut buffer).await {
-        Ok(n) if n > 0 => n,
-        _ => return,
+    let buffer = match read_http_request(&mut stream, true).await {
+        Ok(buffer) => buffer,
+        Err(_) => {
+            let _ = stream.write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await;
+            return;
+        }
     };
 
-    let request = String::from_utf8_lossy(&buffer[..n]);
+    let request = String::from_utf8_lossy(&buffer);
     let mut lines = request.lines();
     let request_line = match lines.next() {
         Some(l) => l,
@@ -297,7 +361,7 @@ Access-Control-Max-Age: 86400\r\n\
 
     // Interceptar rutas de autenticación segura vía navegador externo
     if uri.starts_with("/auth") {
-        handle_auth_request(&mut stream, method, uri, &buffer[..n], &origin).await;
+        handle_auth_request(&mut stream, method, uri, &buffer, &origin).await;
         return;
     }
 
@@ -396,6 +460,11 @@ Content-Type: {}\r\n\
             }
             return;
         }
+        let response = format!(
+            "HTTP/1.1 416 Range Not Satisfiable\r\nAccess-Control-Allow-Origin: {origin}\r\nContent-Range: bytes */{total_size}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        );
+        let _ = stream.write_all(response.as_bytes()).await;
+        return;
     }
 
     // Respuesta completa 200 OK
@@ -447,6 +516,7 @@ pub fn extract_query_param(uri: &str, key: &str) -> Option<String> {
 }
 
 pub fn parse_range(range_str: &str, total_size: u64) -> Option<(u64, u64)> {
+    if total_size == 0 { return None; }
     let trimmed = range_str.trim();
     let s = if trimmed.to_ascii_lowercase().starts_with("bytes=") {
         &trimmed[6..].trim()
@@ -463,6 +533,7 @@ pub fn parse_range(range_str: &str, total_size: u64) -> Option<(u64, u64)> {
 
     if start_str.is_empty() && !end_str.is_empty() {
         let suffix_len: u64 = end_str.parse().ok()?;
+        if suffix_len == 0 { return None; }
         let start = total_size.saturating_sub(suffix_len);
         let end = total_size.saturating_sub(1);
         return Some((start, end));
@@ -573,9 +644,11 @@ Access-Control-Max-Age: 86400\r\n\r\n";
         provider.setCustomParameters({ prompt: 'select_account' });
         const res = await firebase.auth().signInWithPopup(provider);
         const user = res.user;
-        const idToken = await user.getIdToken();
+        // GoogleAuthProvider.credential expects a Google ID token, not a
+        // Firebase session ID token returned by user.getIdToken().
+        const idToken = (res.credential && res.credential.idToken) ? res.credential.idToken : null;
         const accessToken = (res.credential && res.credential.accessToken) ? res.credential.accessToken : null;
-        await fetch('/auth/callback', {
+        const callbackResponse = await fetch('/auth/callback', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -587,6 +660,9 @@ Access-Control-Max-Age: 86400\r\n\r\n";
             accessToken: accessToken
           })
         });
+        if (!callbackResponse.ok) {
+          throw new Error('AniCS no pudo recibir la autenticación. Reintenta el inicio de sesión.');
+        }
         card.innerHTML = `
           <div style="padding: 10px 0;">
             <div style="font-size: 48px; color: #10b981; margin-bottom: 12px;">✓</div>

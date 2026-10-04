@@ -169,19 +169,13 @@ export const useDownloadStore = create<DownloadStore>((set, get) => ({
       set((state) => {
         const next = new Map(state.tasks);
         for (const t of saved) {
+          // A snapshot fetched before a local deletion must not resurrect it.
+          if (initialTasks.has(t.id) && !next.has(t.id)) continue;
           const existing = next.get(t.id);
           if (existing) {
             next.set(t.id, {
-              ...existing,
-              status: existing === initialTasks.get(t.id) ? t.status : existing.status,
-              progress: Math.max(existing.progress || 0, t.progress || 0),
-              downloadedBytes: Math.max(existing.downloadedBytes || 0, t.downloadedBytes || 0),
-              totalBytes: t.totalBytes ?? existing.totalBytes,
-              error: existing === initialTasks.get(t.id) ? t.error : existing.error,
+              ...(existing === initialTasks.get(t.id) ? { ...existing, ...t } : { ...t, ...existing }),
               outputPath: t.outputPath || existing.outputPath,
-              streamUrl: t.streamUrl,
-              referer: t.referer,
-              queueOrder: t.queueOrder,
             });
           } else {
             const pending = pendingProgress.get(t.id);
@@ -200,149 +194,165 @@ export const useDownloadStore = create<DownloadStore>((set, get) => ({
   init: async () => {
     if (get().initialized) return;
     const generation = ++listenerGeneration;
+    const initialTasks = get().tasks;
     set({ initialized: true });
 
-    // Subscribe before hydrating: new backend tasks must enter the store before
-    // their progress arrives, including while a batch is being registered.
-    const stopCreated = await onDownloadCreated(task => {
-      if (generation !== listenerGeneration) return;
-      set(state => {
-        const next = new Map(state.tasks);
-        const pending = pendingProgress.get(task.id);
-        const existing = next.get(task.id);
-        next.set(task.id, { ...existing, ...task, ...(pending ?? {}) });
-        pendingProgress.delete(task.id);
-        return { tasks: orderDownloadTasks(next) };
-      });
-      triggerNotificationSync();
-    });
-
-    if (generation !== listenerGeneration) { stopCreated(); return; }
-    unlistenCreated = stopCreated;
-
-    // 2. Escuchar progreso en tiempo real
-    const stopProgress = await onDownloadProgress((p) => {
-      if (generation !== listenerGeneration) return;
-      if (!get().tasks.has(p.id)) {
-        pendingProgress.set(p.id, p);
-        void get().syncWithDb();
-        return;
-      }
-      set((state) => {
-        const next = new Map(state.tasks);
-        const existing = next.get(p.id);
-        if (existing) {
-          next.set(p.id, {
-            ...existing,
-            progress: p.progress,
-            speedKbps: p.speedKbps,
-            downloadedBytes: p.downloadedBytes,
-            totalBytes: p.totalBytes ?? existing.totalBytes,
-            status: p.status,
-            error: p.error,
-          });
-        }
-        return { tasks: next };
-      });
-
-      // Sincronización inteligente de la notificación en Android
-      triggerNotificationSync();
-    });
-
-    if (generation !== listenerGeneration) { stopProgress(); return; }
-    unlistenProgress = stopProgress;
-
-    // 3. Escuchar completados
-    const stopCompleted = await onDownloadCompleted((res) => {
-      if (generation !== listenerGeneration) return;
-      let completedTask: DownloadTask | undefined;
-      set((state) => {
-        const next = new Map(state.tasks);
-        const existing = next.get(res.id);
-        if (existing) {
-          completedTask = {
-            ...existing,
-            status: 'completed',
-            progress: 100,
-            speedKbps: 0,
-            outputPath: res.path || existing.outputPath,
-            error: undefined,
-          };
-          next.set(res.id, completedTask);
-        }
-        return { tasks: next };
-      });
-
-      if (completedTask) {
-        notifyDownloadComplete(
-          (completedTask as DownloadTask).animeTitle,
-          `Episodio ${(completedTask as DownloadTask).episodeNumber}`
-        );
-
-        (async () => {
-          try {
-            const { isPermissionGranted, sendNotification } = await import('@tauri-apps/plugin-notification');
-            if (await isPermissionGranted()) {
-              sendNotification({
-                title: 'Descarga completada',
-                body: `${(completedTask as DownloadTask).animeTitle} - Ep. ${(completedTask as DownloadTask).episodeNumber}`,
-              });
-            }
-          } catch {}
-        })();
-      }
-
-      triggerNotificationSync();
-    });
-
-    if (generation !== listenerGeneration) { stopCompleted(); return; }
-    unlistenCompleted = stopCompleted;
-
-    // 4. Escuchar pausados
-    const stopPaused = await onDownloadPaused((res) => {
-      if (generation !== listenerGeneration) return;
-      set((state) => {
-        const next = new Map(state.tasks);
-        const existing = next.get(res.id);
-        if (existing) {
-          next.set(res.id, {
-            ...existing,
-            status: 'paused',
-            speedKbps: 0,
-          });
-        }
-        return { tasks: next };
-      });
-
-      triggerNotificationSync();
-    });
-
-    if (generation !== listenerGeneration) { stopPaused(); return; }
-    unlistenPaused = stopPaused;
-
-    // Hydrate after registering all listeners. Live events take precedence over
-    // a snapshot fetched while a worker was changing state.
     try {
-      const saved = await getAllDownloads();
-      if (generation !== listenerGeneration) return;
-      set(state => {
-        const taskMap = new Map(saved.map(task => [task.id, task]));
-        for (const [id, task] of state.tasks) taskMap.set(id, task);
-        return { tasks: orderDownloadTasks(taskMap) };
+      // Subscribe before hydrating: new backend tasks must enter the store before
+      // their progress arrives, including while a batch is being registered.
+      const stopCreated = await onDownloadCreated(task => {
+        if (generation !== listenerGeneration) return;
+        set(state => {
+          const next = new Map(state.tasks);
+          const pending = pendingProgress.get(task.id);
+          const existing = next.get(task.id);
+          next.set(task.id, { ...existing, ...task, ...(pending ?? {}) });
+          pendingProgress.delete(task.id);
+          return { tasks: orderDownloadTasks(next) };
+        });
+        triggerNotificationSync();
       });
-    } catch (e) {
-      console.error('Error hydrating downloads from SQLite:', e);
-    }
 
-    if (generation !== listenerGeneration) return;
-    if (typeof window !== 'undefined') {
-      handleVisibilityOrFocus = () => {
-        if (document.visibilityState === 'visible') {
-          get().syncWithDb();
+      if (generation !== listenerGeneration) { stopCreated(); return; }
+      unlistenCreated = stopCreated;
+
+      // 2. Escuchar progreso en tiempo real
+      const stopProgress = await onDownloadProgress((p) => {
+        if (generation !== listenerGeneration) return;
+        if (!get().tasks.has(p.id)) {
+          pendingProgress.set(p.id, p);
+          void get().syncWithDb();
+          return;
         }
-      };
-      window.addEventListener('focus', handleVisibilityOrFocus);
-      document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+        set((state) => {
+          const next = new Map(state.tasks);
+          const existing = next.get(p.id);
+          if (existing) {
+            next.set(p.id, {
+              ...existing,
+              progress: p.progress,
+              speedKbps: p.speedKbps,
+              downloadedBytes: p.downloadedBytes,
+              totalBytes: p.totalBytes ?? existing.totalBytes,
+              status: p.status,
+              error: p.error,
+            });
+          }
+          return { tasks: next };
+        });
+
+        // Sincronización inteligente de la notificación en Android
+        triggerNotificationSync();
+      });
+
+      if (generation !== listenerGeneration) { stopProgress(); return; }
+      unlistenProgress = stopProgress;
+
+      // 3. Escuchar completados
+      const stopCompleted = await onDownloadCompleted((res) => {
+        if (generation !== listenerGeneration) return;
+        let completedTask: DownloadTask | undefined;
+        set((state) => {
+          const next = new Map(state.tasks);
+          const existing = next.get(res.id);
+          if (existing) {
+            completedTask = {
+              ...existing,
+              status: 'completed',
+              progress: 100,
+              speedKbps: 0,
+              outputPath: res.path || existing.outputPath,
+              error: undefined,
+            };
+            next.set(res.id, completedTask);
+          }
+          return { tasks: next };
+        });
+
+        if (completedTask) {
+          notifyDownloadComplete(
+            (completedTask as DownloadTask).animeTitle,
+            `Episodio ${(completedTask as DownloadTask).episodeNumber}`
+          );
+
+          (async () => {
+            try {
+              const { isPermissionGranted, sendNotification } = await import('@tauri-apps/plugin-notification');
+              if (await isPermissionGranted()) {
+                sendNotification({
+                  title: 'Descarga completada',
+                  body: `${(completedTask as DownloadTask).animeTitle} - Ep. ${(completedTask as DownloadTask).episodeNumber}`,
+                });
+              }
+            } catch {}
+          })();
+        }
+
+        triggerNotificationSync();
+      });
+
+      if (generation !== listenerGeneration) { stopCompleted(); return; }
+      unlistenCompleted = stopCompleted;
+
+      // 4. Escuchar pausados
+      const stopPaused = await onDownloadPaused((res) => {
+        if (generation !== listenerGeneration) return;
+        set((state) => {
+          const next = new Map(state.tasks);
+          const existing = next.get(res.id);
+          if (existing) {
+            next.set(res.id, {
+              ...existing,
+              status: 'paused',
+              speedKbps: 0,
+            });
+          }
+          return { tasks: next };
+        });
+
+        triggerNotificationSync();
+      });
+
+      if (generation !== listenerGeneration) { stopPaused(); return; }
+      unlistenPaused = stopPaused;
+
+      // Hydrate after registering all listeners. Live events take precedence over
+      // a snapshot fetched while a worker was changing state.
+      try {
+        const saved = await getAllDownloads();
+        if (generation !== listenerGeneration) return;
+        set(state => {
+          const taskMap = new Map(saved.map(task => [task.id, task]));
+          for (const [id, task] of state.tasks) {
+            if (task !== initialTasks.get(id)) taskMap.set(id, task);
+          }
+          for (const id of initialTasks.keys()) {
+            if (!state.tasks.has(id)) taskMap.delete(id);
+          }
+          return { tasks: orderDownloadTasks(taskMap) };
+        });
+      } catch (e) {
+        console.error('Error hydrating downloads from SQLite:', e);
+      }
+
+      if (generation !== listenerGeneration) return;
+      if (typeof window !== 'undefined') {
+        handleVisibilityOrFocus = () => {
+          if (document.visibilityState === 'visible') {
+            get().syncWithDb();
+          }
+        };
+        window.addEventListener('focus', handleVisibilityOrFocus);
+        document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+      }
+      if (get().activeCount() > 0) {
+        triggerNotificationSync();
+      }
+    } catch (e) {
+      if (generation !== listenerGeneration) return;
+      // Release partially registered listeners and allow a later init retry.
+      get().cleanup();
+      console.error('Error initializing download listeners:', e);
     }
   },
 

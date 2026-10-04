@@ -339,16 +339,9 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
     LaunchedEffect(focusUpdates) {
         if (focusUpdates) {
             snapshotFlow { listState.layoutInfo.totalItemsCount }.first { it > 0 }
-            kotlinx.coroutines.delay(100)
-            val total = listState.layoutInfo.totalItemsCount
-            if (total > 0) {
-                listState.animateScrollToItem(maxOf(0, total - 1))
-                kotlinx.coroutines.delay(200)
-                val updatedTotal = listState.layoutInfo.totalItemsCount
-                if (updatedTotal > 0) {
-                    listState.scrollToItem(maxOf(0, updatedTotal - 1))
-                }
-            }
+            val hasBanner = state.update != null && UpdateVersions.isNewer(state.update.version, state.appVersion)
+            val updateIndex = 8 + (if (hasBanner) 1 else 0) + (if (state.isExporting) 1 else 0) + (if (state.message != null) 1 else 0)
+            listState.scrollToItem(updateIndex)
             onUpdateFocused()
         }
     }
@@ -359,10 +352,8 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
                 Surface(
                     onClick = {
                         coroutineScope.launch {
-                            val total = listState.layoutInfo.totalItemsCount
-                            if (total > 0) {
-                                listState.animateScrollToItem(maxOf(0, total - 1))
-                            }
+                            val updateIndex = 8 + 1 + (if (state.isExporting) 1 else 0) + (if (state.message != null) 1 else 0)
+                            listState.animateScrollToItem(updateIndex)
                         }
                     },
                     shape = RoundedCornerShape(12.dp),

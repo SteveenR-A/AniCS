@@ -97,6 +97,7 @@ function isItemSourceValid(item: AnimeResult, src: string): boolean {
 }
 
 const RECENT_SEARCHES_KEY = 'anics_recent_searches';
+let genreRequestId = 0;
 
 function loadInitialRecentSearches(): string[] {
   try {
@@ -133,13 +134,8 @@ export const useAnimeStore = create<AnimeStore>((set, get) => ({
   detailsCache: {},
 
   setActiveSource: (id) => {
-    set({ activeSource: id });
-    const cachedGenres = get().genresBySource[id];
-    if (cachedGenres && cachedGenres.length > 0) {
-      set({ genres: cachedGenres });
-    } else {
-      get().loadGenres(id);
-    }
+    set({ activeSource: id, genres: get().genresBySource[id] ?? [] });
+    void get().loadGenres(id);
   },
 
   setSources: (sources) => set({ sources }),
@@ -375,23 +371,26 @@ export const useAnimeStore = create<AnimeStore>((set, get) => ({
 
   loadGenres: async (source?: string) => {
     const src = source || get().activeSource;
+    const requestId = ++genreRequestId;
     const cached = get().genresBySource[src];
-    if (cached && cached.length > 0) {
-      set({ genres: cached });
+    if (cached) {
+      if (get().activeSource === src) set({ genres: cached, isLoadingGenres: false });
       return;
     }
 
-    set({ isLoadingGenres: true });
+    if (get().activeSource === src) set({ genres: [], isLoadingGenres: true });
     try {
       const genres = await getGenres(src);
       set((state) => ({
-        genres,
+        ...(state.activeSource === src && requestId === genreRequestId ? { genres } : {}),
         genresBySource: { ...state.genresBySource, [src]: genres },
       }));
     } catch (e) {
       console.error('Failed to load genres for source:', src, e);
     } finally {
-      set({ isLoadingGenres: false });
+      if (get().activeSource === src && requestId === genreRequestId) {
+        set({ isLoadingGenres: false });
+      }
     }
   },
 }));

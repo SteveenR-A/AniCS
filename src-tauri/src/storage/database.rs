@@ -559,6 +559,9 @@ pub fn get_episode_progress(episode_url: &str, profile_id: Option<&str>) -> AppR
             None => get_active_profile_id_inner(conn),
         };
 
+        // Playback saves canonical URLs without a trailing slash, while
+        // scrapers and older history rows may still include it.
+        let episode_url = episode_url.trim_end_matches(&['/', '\\'][..]);
         let fwd = episode_url.replace('\\', "/");
         let bwd = episode_url.replace('/', "\\");
         let fwd_lower = fwd.to_lowercase();
@@ -567,12 +570,12 @@ pub fn get_episode_progress(episode_url: &str, profile_id: Option<&str>) -> AppR
 
         let mut stmt = conn.prepare(
             "SELECT watch_progress FROM watch_history
-             WHERE (episode_url = ?1
-                 OR episode_url = ?2
-                 OR episode_url = ?3
-                 OR episode_url = ?4
-                 OR episode_url = ?5
-                 OR episode_url = ?6)
+             WHERE (RTRIM(episode_url, '/\\') = ?1
+                 OR RTRIM(episode_url, '/\\') = ?2
+                 OR RTRIM(episode_url, '/\\') = ?3
+                 OR RTRIM(episode_url, '/\\') = ?4
+                 OR RTRIM(episode_url, '/\\') = ?5
+                 OR RTRIM(episode_url, '/\\') = ?6)
                AND profile_id = ?7
              ORDER BY watched_at DESC
              LIMIT 1"
