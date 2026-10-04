@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.3.7",
+    "date": "2026-10-04",
+    "title": "Corrección de CI Android Native, estabilidad de descargas y reproductor",
+    "type": "patch",
+    "highlights": [
+      "Corrección de pruebas unitarias en Android Native",
+      "Gestión robusta y limpieza de descargas corruptas",
+      "Optimización de sincronización y controles en el reproductor"
+    ]
+  },
+  {
     "version": "0.3.6",
     "date": "2026-10-03",
     "title": "Actualización v0.3.6",

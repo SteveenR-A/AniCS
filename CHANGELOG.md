@@ -5,6 +5,15 @@ El formato está basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1
 
 ---
 
+## [0.3.7] - 2026-10-04
+
+### Corrección de CI Android Native, estabilidad de descargas y reproductor
+- Corrección de pruebas unitarias en Android Native
+- Gestión robusta y limpieza de descargas corruptas
+- Optimización de sincronización y controles en el reproductor
+
+---
+
 ## [0.3.6] - 2026-10-03
 
 ### Actualización v0.3.6
