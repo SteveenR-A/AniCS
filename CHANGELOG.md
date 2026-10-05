@@ -5,6 +5,17 @@ El formato está basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1
 
 ---
 
+## [0.3.8] - 2026-10-05
+
+### Mejoras de descargas HLS, perfiles y navegación
+- Soporte nativo de descargas HLS con desencriptación AES-128
+- Personalización y avatares de perfil con exportación PNG
+- Validación de integridad en descargas y almacenamiento SAF
+- Panel de episodios responsive en horizontal
+- Desplazamiento directo al apartado de actualización desde notificaciones
+
+---
+
 ## [0.3.7] - 2026-10-04
 
 ### Corrección de CI Android Native, estabilidad de descargas y reproductor
