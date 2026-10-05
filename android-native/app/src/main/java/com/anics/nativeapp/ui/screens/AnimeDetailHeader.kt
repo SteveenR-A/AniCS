@@ -1,11 +1,13 @@
 package com.anics.nativeapp.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -16,6 +18,8 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
@@ -33,19 +37,25 @@ import com.anics.nativeapp.ui.components.AniIcons
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun AnimeDetailHeader(title: String, imageUrl: String, metadata: String, isFavorite: Boolean,
-    onBack: () -> Unit, onFavorite: () -> Unit, genres: List<String> = emptyList()) {
+fun AnimeDetailHeader(title: String, imageUrl: String, metadata: String, onBack: () -> Unit,
+    genres: List<String> = emptyList(), animeType: String? = null, status: String? = null) {
     var showCover by remember(imageUrl) { mutableStateOf(false) }
-    Column(Modifier.fillMaxWidth()) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-            IconButton(onBack) { Icon(AniIcons.ArrowLeft, "Volver") }
-            IconButton(onFavorite) {
-                Icon(AniIcons.Heart, if (isFavorite) "Quitar favorito" else "Guardar favorito",
-                    tint = if (isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+    val colors = MaterialTheme.colorScheme
+    val visibleGenres = remember(genres) {
+        genres.map { it.trim() }.filter { it.isNotEmpty() }.distinctBy { it.lowercase(java.util.Locale.ROOT) }
+    }
+    Column(Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(
+        colors.primary.copy(alpha = .12f), colors.secondary.copy(alpha = .06f), colors.background
+    ))).padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        OutlinedButton(onClick = onBack, shape = RoundedCornerShape(50),
+            colors = ButtonDefaults.outlinedButtonColors(containerColor = colors.background.copy(alpha = .7f)),
+            border = BorderStroke(1.dp, colors.outlineVariant)) {
+            Icon(AniIcons.ArrowLeft, null, Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("Volver")
         }
-        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            Box(Modifier.width(88.dp).aspectRatio(2f / 3f).clip(RoundedCornerShape(12.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.width(88.dp).aspectRatio(2f / 3f).clip(RoundedCornerShape(14.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant)
                 .clickable(role = Role.Button, onClickLabel = "Ver portada en grande") { showCover = true }
                 .testTag("anime-cover")) {
@@ -54,16 +64,40 @@ fun AnimeDetailHeader(title: String, imageUrl: String, metadata: String, isFavor
                     Icon(AniIcons.Maximize, null, Modifier.padding(5.dp).size(16.dp), tint = Color.White)
                 }
             }
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    animeType?.trim()?.takeIf { it.isNotEmpty() }?.let { type ->
+                        Surface(color = colors.primaryContainer, contentColor = colors.onPrimaryContainer, shape = RoundedCornerShape(50)) {
+                            Text(type, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp))
+                        }
+                    }
+                    status?.trim()?.takeIf { it.isNotEmpty() }?.let { value ->
+                        val airing = value.lowercase(java.util.Locale.ROOT) in listOf("en emisión", "en emision", "emision", "emisión")
+                        val tint = if (airing) {
+                            if (colors.background.luminance() < .5f) Color(0xFF34D399) else Color(0xFF047857)
+                        } else colors.onSurfaceVariant
+                        Surface(color = tint.copy(alpha = .12f), contentColor = tint, shape = RoundedCornerShape(50), border = BorderStroke(1.dp, tint.copy(alpha = .35f))) {
+                            Row(Modifier.padding(horizontal = 10.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                if (airing) Box(Modifier.size(6.dp).background(tint, CircleShape))
+                                Text(value, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
+                }
                 SelectionContainer {
                     Text(title, Modifier.testTag("anime-title"), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 }
-                Text(metadata, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    genres.forEach { genre -> Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(50)) {
-                        Text(genre, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
-                    } }
-                }
+                if (metadata.isNotBlank()) Text(metadata, color = colors.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.testTag("anime-genres")) {
+            Text("Géneros", style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant)
+            if (visibleGenres.isEmpty()) Text("Géneros no disponibles en esta fuente", style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+            else FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                visibleGenres.forEach { genre -> Surface(color = colors.surfaceVariant, shape = RoundedCornerShape(50), border = BorderStroke(1.dp, colors.outlineVariant)) {
+                    Text(genre, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
+                } }
             }
         }
     }

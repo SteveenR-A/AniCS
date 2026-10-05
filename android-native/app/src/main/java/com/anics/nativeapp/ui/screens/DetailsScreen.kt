@@ -25,9 +25,8 @@ fun DetailsScreen(url: String, source: String, viewModel: DetailsViewModel, onBa
     onDownloadEpisodes: (List<NativeEpisode>) -> Unit = {}, modifier: Modifier = Modifier,
     downloads: List<com.anics.nativeapp.data.local.DownloadEntity> = emptyList(), onResumeDownload: (String) -> Unit = {}) {
     val state by viewModel.uiState.collectAsState()
-    var expanded by remember { mutableStateOf(false) }
-    var servers by remember { mutableStateOf(false) }
-    var batch by remember { mutableStateOf(false) }
+    var servers by remember(url, source) { mutableStateOf(false) }
+    var batch by remember(url, source) { mutableStateOf(false) }
     var unsupported by remember { mutableStateOf(false) }
     var viewMode by remember { mutableStateOf("list") }
     LaunchedEffect(url, source) { viewModel.loadAnimeDetails(url, source) }
@@ -43,18 +42,20 @@ fun DetailsScreen(url: String, source: String, viewModel: DetailsViewModel, onBa
             LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 item {
                     AnimeDetailHeader(details.title, details.thumbnailUrl,
-                        listOfNotNull(details.status, details.year, sourceLabel(details.source)).joinToString(" · "),
-                        state.isFavorite, onBack, viewModel::toggleFavorite, details.genres)
+                        listOfNotNull(details.year, sourceLabel(details.source)).joinToString(" · "),
+                        onBack = onBack, genres = details.genres, animeType = details.animeType, status = details.status)
                 }
                 item {
-                    Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text(details.synopsis, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = if (expanded) Int.MAX_VALUE else 3, overflow = TextOverflow.Ellipsis)
-                        if (details.synopsis.length > 150) TextButton(onClick = { expanded = !expanded }, contentPadding = PaddingValues(0.dp), modifier = Modifier.heightIn(min = 32.dp)) { Text(if (expanded) "Ver menos" else "Leer sinopsis completa") }
+                    Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         val resume = state.resumeEpisode ?: details.episodes.minByOrNull { it.number }
-                        resume?.let { episode -> Button(onClick = { viewModel.selectEpisode(episode); servers = true }, modifier = Modifier.fillMaxWidth()) {
-                            Icon(AniIcons.Play, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp))
-                            Text(if ((episode.watchProgress ?: 0.0) in .01.. .89) "Reanudar episodio ${episode.number}" else "Ver episodio ${episode.number}")
-                        } }
+                        AnimeDetailActions(
+                            playLabel = resume?.let { if ((it.watchProgress ?: 0.0) in .01.. .89) "Reanudar ep. ${it.number}" else "Ver ep. ${it.number}" } ?: "Sin episodios",
+                            isFavorite = state.isFavorite,
+                            onPlay = resume?.let { episode -> { viewModel.selectEpisode(episode); servers = true } },
+                            onFavorite = viewModel::toggleFavorite,
+                            onBatch = if (details.episodes.isNotEmpty()) ({ batch = true }) else null
+                        )
+                        AnimeSynopsis(details.synopsis)
                         Row(
                             modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -96,11 +97,11 @@ fun DetailsScreen(url: String, source: String, viewModel: DetailsViewModel, onBa
                                 }
                             }
                         }
-                        if (details.episodes.size > 1) OutlinedButton(onClick = { batch = true }, modifier = Modifier.fillMaxWidth()) {
-                            Icon(AniIcons.Download, null, Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text("Descargar lote / temporada")
-                        }
                         Spacer(Modifier.height(2.dp))
                     }
+                }
+                if (details.episodes.isEmpty()) item {
+                    AniEmptyState("Sin episodios disponibles", "Esta fuente todavía no tiene episodios para este título.", AniIcons.Film)
                 }
                 if (state.error != null && !servers) item { Text(state.error!!, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 16.dp)) }
                 if (viewMode == "grid") {
