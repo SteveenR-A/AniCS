@@ -119,7 +119,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, modifier: Modifier = Modifier, 
         installUpdate = { state.updateApk?.let(install) },
         cancelDownload = { viewModel.cancelOrPauseDownload(updater) },
         restartDownload = { viewModel.restartDownload(updater) }
-    ), modifier, focusUpdates, onUpdateFocused) { OptionalCloudSettings(viewModel) }
+    ), modifier, focusUpdates && (initialUpdate == null || state.update != null), onUpdateFocused) { OptionalCloudSettings(viewModel) }
 }
 
 @Composable
@@ -344,7 +344,7 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
 
     LaunchedEffect(focusUpdates) {
         if (focusUpdates) {
-            snapshotFlow { listState.layoutInfo.totalItemsCount }.first { it > 0 }
+            snapshotFlow { listState.layoutInfo.totalItemsCount }.first { it > 8 }
             val hasBanner = state.update != null && UpdateVersions.isNewer(state.update.version, state.appVersion)
             val updateIndex = 8 + (if (hasBanner) 1 else 0) + (if (state.isExporting) 1 else 0) + (if (state.message != null) 1 else 0)
             listState.scrollToItem(updateIndex)

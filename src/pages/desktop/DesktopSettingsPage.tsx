@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Globe, Download, Tv, RefreshCw, Check, Undo2,
@@ -85,6 +86,8 @@ export function DesktopSettingsPage() {
   const [isResettingDb, setIsResettingDb] = useState(false);
   const [windowDecorations, setWindowDecorations] = useState<boolean>(true);
 
+  const location = useLocation();
+
   useEffect(() => {
     const unlisten = listen('update-download-progress', (event: any) => {
       const payload = event.payload;
@@ -100,6 +103,24 @@ export function DesktopSettingsPage() {
       unlisten.then(f => f());
     };
   }, []);
+
+  useEffect(() => {
+    const urlParams = new URLSearchParams(location.search);
+    if (urlParams.get('section') === 'updates' || location.hash === '#updates') {
+      const scrollToUpdates = () => {
+        const el = document.getElementById('updates-section');
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      };
+      const timer1 = setTimeout(scrollToUpdates, 200);
+      const timer2 = setTimeout(scrollToUpdates, 500);
+      return () => {
+        clearTimeout(timer1);
+        clearTimeout(timer2);
+      };
+    }
+  }, [location.search, location.hash]);
 
 
   const loadCache = async () => {
@@ -1828,10 +1849,13 @@ export function DesktopSettingsPage() {
 
 
         {/* Actualizaciones GitHub */}
-        <div style={{
-          background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)',
-          border: '1px solid var(--border-subtle)', padding: 22,
-        }}>
+        <div
+          id="updates-section"
+          style={{
+            background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)',
+            border: '1px solid var(--border-subtle)', padding: 22,
+          }}
+        >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <div style={{ padding: 8, borderRadius: 'var(--radius-md)', background: 'var(--accent-primary-glow)' }}>

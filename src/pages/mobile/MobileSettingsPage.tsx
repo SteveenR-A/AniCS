@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Globe, Download, RefreshCw, Check, Undo2,
@@ -118,18 +119,25 @@ export function MobileSettingsPage() {
     };
   }, []);
 
+  const location = useLocation();
+
   useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get('section') === 'updates' || window.location.hash === '#updates') {
-      const timer = setTimeout(() => {
+    const urlParams = new URLSearchParams(location.search);
+    if (urlParams.get('section') === 'updates' || location.hash === '#updates') {
+      const scrollToUpdates = () => {
         const el = document.getElementById('updates-section');
         if (el) {
-          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          el.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
-      }, 350);
-      return () => clearTimeout(timer);
+      };
+      const timer1 = setTimeout(scrollToUpdates, 200);
+      const timer2 = setTimeout(scrollToUpdates, 500);
+      return () => {
+        clearTimeout(timer1);
+        clearTimeout(timer2);
+      };
     }
-  }, []);
+  }, [location.search, location.hash]);
 
   useEffect(() => {
     const loadSettings = async () => {
