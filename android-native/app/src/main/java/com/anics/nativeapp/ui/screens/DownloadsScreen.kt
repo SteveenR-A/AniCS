@@ -134,7 +134,7 @@ fun ActiveDownloadItem(download: DownloadEntity, onPause: () -> Unit, onResume: 
         }
         download.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
         val bar = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(50))
-        if (download.status == "downloading" && download.totalBytes == null) LinearProgressIndicator(modifier = bar, drawStopIndicator = {})
+        if (download.status == "downloading" && download.totalBytes == null) LinearProgressIndicator(modifier = bar)
         else LinearProgressIndicator(progress = { download.progress.coerceIn(0f,1f) }, modifier = bar, drawStopIndicator = {})
         Text((if (download.totalBytes != null) "${(download.progress * 100).toInt()}% · " else "") + formatBytes(download.downloadedBytes) + (download.totalBytes?.let { " / ${formatBytes(it)}" } ?: "") +
             (if (download.status == "downloading") " · ${formatBytes(download.speedBytesPerSecond)}/s" else ""), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
