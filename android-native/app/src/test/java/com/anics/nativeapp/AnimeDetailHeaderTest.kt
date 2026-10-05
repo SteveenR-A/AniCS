@@ -45,7 +45,7 @@ class AnimeDetailHeaderTest {
         compose.setContent {
             clipboard = LocalClipboardManager.current
             CompositionLocalProvider(LocalTextToolbar provides toolbar) {
-                AniCSTheme { Surface { AnimeDetailHeader("Naruto", "", "En emisión · JKAnime", false, {}, {}) } }
+                AniCSTheme { Surface { AnimeDetailHeader("Naruto", "", "JKAnime", {}, status = "En emisión") } }
             }
         }
         compose.onNodeWithTag("anime-title").performTouchInput { longClick(center) }
@@ -53,7 +53,7 @@ class AnimeDetailHeaderTest {
     }
 
     @Test fun posterOpensZoomableViewerAndClosingKeepsTheDetails() {
-        compose.setContent { AniCSTheme { Surface { AnimeDetailHeader("Black Lagoon", "", "JKAnime", false, {}, {}) } } }
+        compose.setContent { AniCSTheme { Surface { AnimeDetailHeader("Black Lagoon", "", "JKAnime", {}) } } }
         compose.onNodeWithTag("anime-cover").assertIsDisplayed().performClick()
         compose.onNodeWithTag("anime-cover-viewer").assertIsDisplayed()
         compose.onNodeWithContentDescription("Acercar portada").performClick()
@@ -67,7 +67,7 @@ class AnimeDetailHeaderTest {
     }
 
     @Test @Config(qualifiers = "w640dp-h320dp-land") fun viewerControlsFitInLandscapeAndZoomIsLimited() {
-        compose.setContent { AniCSTheme { Surface { AnimeDetailHeader("A long anime title with a second season", "", "JKAnime", false, {}, {}) } } }
+        compose.setContent { AniCSTheme { Surface { AnimeDetailHeader("A long anime title with a second season", "", "JKAnime", {}) } } }
         compose.onNodeWithTag("anime-cover").performClick()
         repeat(6) { compose.onNodeWithContentDescription("Acercar portada").performClick() }
         compose.onNodeWithText("400%").assertIsDisplayed()
@@ -79,6 +79,33 @@ class AnimeDetailHeaderTest {
         assertEquals(Offset.Zero, coverPanBounds(Size(200f, 300f), Size(600f, 300f), 1f))
         assertEquals(Offset(100f, 450f), coverPanBounds(Size(200f, 300f), Size(600f, 300f), 4f))
         assertEquals(Offset.Zero, coverPanBounds(Size.Unspecified, Size(600f, 300f), 2f))
+    }
+
+    @Test fun allGenresWrapBelowThePosterWithTypeAndStatusVisible() {
+        compose.setContent { AniCSTheme("rosepine") { Surface {
+            AnimeDetailHeader("Aoki Denshou Welsh & Shedar", "", "2026 · JKAnime", {},
+                genres = listOf(" Fantasía ", "Acción", "Aventura", "Comedia", "Drama", "fantasía", ""),
+                animeType = "Serie", status = "En emisión")
+        } } }
+        listOf("Serie", "En emisión", "Géneros", "Fantasía", "Acción", "Aventura", "Comedia", "Drama").forEach {
+            compose.onNodeWithText(it).assertIsDisplayed()
+        }
+        compose.onAllNodesWithText("Fantasía").assertCountEquals(1)
+        val poster = compose.onNodeWithTag("anime-cover").fetchSemanticsNode().boundsInRoot
+        val genres = compose.onNodeWithTag("anime-genres").fetchSemanticsNode().boundsInRoot
+        assertTrue("Géneros must use the full width below the cover", genres.top >= poster.bottom)
+        assertTrue(genres.width > poster.width)
+    }
+
+    @Test fun movieAndFinishedStatusAreNotHiddenWhenGenresAreUnavailable() {
+        var returned = false
+        compose.setContent { AniCSTheme { Surface {
+            AnimeDetailHeader("Película", "", "JKAnime", { returned = true }, animeType = "Película", status = "Finalizado")
+        } } }
+        compose.onNodeWithText("Finalizado").assertIsDisplayed()
+        compose.onNodeWithText("Géneros no disponibles en esta fuente").assertIsDisplayed()
+        compose.onNodeWithText("Volver").performClick()
+        compose.runOnIdle { assertTrue(returned) }
     }
 }
 
