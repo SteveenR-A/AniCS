@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
 import androidx.navigation.compose.*
@@ -66,8 +67,7 @@ class MainActivity : ComponentActivity() {
                 val engine = PlayerController(applicationContext)
                 val server = com.anics.nativeapp.downloads.LocalMediaServer(applicationContext)
                 return PlaybackSessionViewModel(catalog, history, engine, { path ->
-                    val length = if (path.startsWith("content://")) androidx.documentfile.provider.DocumentFile.fromSingleUri(applicationContext, Uri.parse(path))?.length() ?: 0
-                        else java.io.File(path).length()
+                    val length = com.anics.nativeapp.downloads.StorageManager(applicationContext).requireReadableVideo(path)
                     server.videoUrl(path, length)
                 }, { engine.release(); server.close() }) as T
             }
@@ -127,8 +127,11 @@ class MainActivity : ComponentActivity() {
                             val profile = profiles.getActiveProfile()
                             val key = com.anics.nativeapp.sync.SyncContract.titleKey(title)
                             val rows = database.downloadDao().getAllDownloads().first().filter { it.status == "completed" && com.anics.nativeapp.sync.SyncContract.titleKey(it.animeTitle) == key }
-                            val episodes = rows.distinctBy { it.episodeNumber }.sortedBy { it.episodeNumber }.map { NativeEpisode(it.episodeNumber.toUInt(), null, it.outputPath, null, false, null) }
-                            playback.open(HistoryEntity(profileId = profile.id, animeTitle = title, animeUrl = "local://$title", episodeNumber = episode, episodeUrl = path, source = "local"),
+                            val watched = history.getHistoryForProfile(profile.id).first().filter { com.anics.nativeapp.sync.SyncContract.titleKey(it.animeTitle) == key }
+                                .groupBy { it.episodeNumber }.mapValues { (_, entries) -> com.anics.nativeapp.downloads.EpisodeWatchProgress.from(entries.maxByOrNull { it.lastWatchedAt }).state == com.anics.nativeapp.downloads.EpisodeWatchState.WATCHED }
+                            val episodes = rows.distinctBy { it.episodeNumber }.sortedBy { it.episodeNumber }.map { NativeEpisode(it.episodeNumber.toUInt(), null, it.outputPath, null, watched[it.episodeNumber] == true, null) }
+                            val selected = rows.firstOrNull { it.outputPath == path }
+                            playback.open(HistoryEntity(profileId = profile.id, animeTitle = title, animeUrl = "local://$title", episodeNumber = episode, episodeUrl = path, source = "local", thumbnailUrl = selected?.thumbnailUrl.orEmpty()),
                                 if (episodes.isEmpty()) listOf(NativeEpisode(episode.toUInt(), null, path, null, false, null)) else episodes)
                             playRoute()
                         } catch (e: kotlinx.coroutines.CancellationException) { throw e }
@@ -171,7 +174,7 @@ class MainActivity : ComponentActivity() {
                         composable("favorites") { val vm = viewModel { FavoritesViewModel(favorites, profiles) }; FavoritesScreen(vm, anime) }
                         composable("settings") { val vm = viewModel { SettingsViewModel(preferences, profiles, catalog, com.anics.nativeapp.sync.BackupManager(database, preferences), database, applicationContext) }; SettingsScreen(vm, initialUpdate = selectedUpdate, focusUpdates = focusUpdates, onUpdateFocused = { focusUpdates = false; selectedUpdate = null }) }
                         composable("downloads") {
-                            val vm = viewModel { DownloadsViewModel(database.downloadDao(), com.anics.nativeapp.downloads.LocalLibrary(applicationContext, database.downloadDao()), preferences, applicationContext, catalog) }
+                            val vm = viewModel { DownloadsViewModel(database.downloadDao(), com.anics.nativeapp.downloads.LocalLibrary(applicationContext, database.downloadDao()), preferences, applicationContext, catalog, createSavedStateHandle()) }
                             DownloadsScreen(vm, offline, onAnime = anime, onSearch = { nav.navigate("search?query=${Uri.encode(it)}") })
                         }
                         composable("details?url={url}&source={source}", arguments = listOf(navArgument("url") { type = NavType.StringType }, navArgument("source") { type = NavType.StringType })) { entry ->

@@ -14,6 +14,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -25,6 +26,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -358,48 +360,59 @@ fun VideoProgressBar(
 
 @kotlin.OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-private fun PlayerPanel(panel: String, session: PlaybackSessionState, playback: PlaybackState, onDismiss: () -> Unit,
+internal fun PlayerPanel(panel: String, session: PlaybackSessionState, playback: PlaybackState, onDismiss: () -> Unit,
     onServer: (com.anics.nativeapp.ffi.NativeVideoServer) -> Unit, onEpisode: (com.anics.nativeapp.ffi.NativeEpisode) -> Unit,
     onQuality: (String) -> Unit, onSpeed: (Float) -> Unit, onAutoNext: (Boolean) -> Unit, fit: Int, onFit: (Int) -> Unit) {
     var unsupported by remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
+    LaunchedEffect(panel, session.entry?.episodeNumber) {
+        if (panel == "episodes") {
+            val index = session.episodes.indexOfFirst { it.number.toInt() == session.entry?.episodeNumber }
+            if (index >= 0) listState.scrollToItem(index)
+        }
+    }
     ModalBottomSheet(onDismissRequest = onDismiss, sheetMaxWidth = 520.dp, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        Text(when(panel) { "servers" -> "Cambiar servidor"; "episodes" -> "Episodios"; else -> "Reproducción" }, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 14.dp))
-        LazyColumn(Modifier.fillMaxWidth().heightIn(max = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * .65f).dp).navigationBarsPadding(), contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            when(panel) {
-                "servers" -> {
-                    if (session.servers.isEmpty()) item { Text("No hay servidores disponibles. Vuelve a cargar el episodio.") }
-                    item { Row(verticalAlignment = Alignment.CenterVertically) { Text("Mostrar no compatibles", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall); Switch(unsupported, { unsupported = it }) } }
-                    items(com.anics.nativeapp.downloads.ServerSupport.ordered(session.servers).filter { unsupported || com.anics.nativeapp.downloads.ServerSupport.playable(it) }, key = { it.name + it.url }) { server ->
-                        val supported = com.anics.nativeapp.downloads.ServerSupport.playable(server)
-                        Surface(onClick = { onServer(server) }, enabled = supported, color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(12.dp)) {
-                            Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Column(Modifier.weight(1f)) { Text(server.name, color = if (supported) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant); Text(if (supported) "Compatible" else "No compatible en esta versión", style = MaterialTheme.typography.labelSmall) }
-                                if (server == session.selectedServer) Icon(AniIcons.Check, "Servidor activo", Modifier.size(18.dp))
+        // Bound the whole sheet content, including its heading and bottom inset.
+        // Bounding only the list allows its last rows to extend below a landscape window.
+        Column(Modifier.fillMaxWidth().heightIn(max = (LocalConfiguration.current.screenHeightDp * .8f).dp).navigationBarsPadding()) {
+            Text(when(panel) { "servers" -> "Cambiar servidor"; "episodes" -> "Episodios"; else -> "Reproducción" }, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 14.dp))
+            LazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false).testTag("player-panel-list"), state = listState, contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                when(panel) {
+                    "servers" -> {
+                        if (session.servers.isEmpty()) item { Text("No hay servidores disponibles. Vuelve a cargar el episodio.") }
+                        item { Row(verticalAlignment = Alignment.CenterVertically) { Text("Mostrar no compatibles", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall); Switch(unsupported, { unsupported = it }) } }
+                        items(com.anics.nativeapp.downloads.ServerSupport.ordered(session.servers).filter { unsupported || com.anics.nativeapp.downloads.ServerSupport.playable(it) }, key = { it.name + it.url }) { server ->
+                            val supported = com.anics.nativeapp.downloads.ServerSupport.playable(server)
+                            Surface(onClick = { onServer(server) }, enabled = supported, color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(12.dp)) {
+                                Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) { Text(server.name, color = if (supported) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant); Text(if (supported) "Compatible" else "No compatible en esta versión", style = MaterialTheme.typography.labelSmall) }
+                                    if (server == session.selectedServer) Icon(AniIcons.Check, "Servidor activo", Modifier.size(18.dp))
+                                }
                             }
                         }
                     }
-                }
-                "episodes" -> {
-                    items(session.episodes, key = { it.url }) { episode ->
-                        AniPill("Episodio ${episode.number}" + (episode.title?.let { " · $it" } ?: ""), episode.number.toInt() == session.entry?.episodeNumber, { onEpisode(episode) }, Modifier.fillMaxWidth(), if (episode.watched) AniIcons.CheckCheck else AniIcons.Play)
-                    }
-                }
-                else -> {
-                    item { Text("Velocidad", fontWeight = FontWeight.SemiBold); FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) { listOf(.5f,.75f,1f,1.25f,1.5f,2f).forEach { speed -> AniPill("${speed}x", playback.speed == speed, { onSpeed(speed) }) } } }
-                    if (session.media?.qualities?.isNotEmpty() == true || playback.availableQualities.size > 1) item {
-                        Text("Calidad", fontWeight = FontWeight.SemiBold)
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            AniPill("Automática", session.quality == "auto", { onQuality("auto") })
-                            (session.media?.qualities.orEmpty().map { it.label } + playback.availableQualities).distinct().forEach { quality -> AniPill(quality, session.quality == quality, { onQuality(quality) }) }
+                    "episodes" -> {
+                        items(session.episodes, key = { it.url }) { episode ->
+                            AniPill("Episodio ${episode.number}" + (episode.title?.let { " · $it" } ?: ""), episode.number.toInt() == session.entry?.episodeNumber, { onEpisode(episode) }, Modifier.fillMaxWidth(), if (episode.watched) AniIcons.CheckCheck else AniIcons.Play)
                         }
                     }
-                    item { Text("Ajuste de imagen", fontWeight = FontWeight.SemiBold); FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        AniPill("Original", fit == AspectRatioFrameLayout.RESIZE_MODE_FIT, { onFit(AspectRatioFrameLayout.RESIZE_MODE_FIT) })
-                        AniPill("Llenar", fit == AspectRatioFrameLayout.RESIZE_MODE_ZOOM, { onFit(AspectRatioFrameLayout.RESIZE_MODE_ZOOM) })
-                        AniPill("Estirar", fit == AspectRatioFrameLayout.RESIZE_MODE_FILL, { onFit(AspectRatioFrameLayout.RESIZE_MODE_FILL) })
-                    } }
-                    item { com.anics.nativeapp.ui.screens.SettingSwitch("Siguiente episodio automático", "Al terminar el capítulo actual", session.autoNext, onAutoNext) }
-                    item { Text("Un toque muestra los controles. Doble toque al centro pausa; a los lados salta 10 segundos.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    else -> {
+                        item { Text("Velocidad", fontWeight = FontWeight.SemiBold); FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) { listOf(.5f,.75f,1f,1.25f,1.5f,2f).forEach { speed -> AniPill("${speed}x", playback.speed == speed, { onSpeed(speed) }) } } }
+                        if (session.media?.qualities?.isNotEmpty() == true || playback.availableQualities.size > 1) item {
+                            Text("Calidad", fontWeight = FontWeight.SemiBold)
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                AniPill("Automática", session.quality == "auto", { onQuality("auto") })
+                                (session.media?.qualities.orEmpty().map { it.label } + playback.availableQualities).distinct().forEach { quality -> AniPill(quality, session.quality == quality, { onQuality(quality) }) }
+                            }
+                        }
+                        item { Text("Ajuste de imagen", fontWeight = FontWeight.SemiBold); FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            AniPill("Original", fit == AspectRatioFrameLayout.RESIZE_MODE_FIT, { onFit(AspectRatioFrameLayout.RESIZE_MODE_FIT) })
+                            AniPill("Llenar", fit == AspectRatioFrameLayout.RESIZE_MODE_ZOOM, { onFit(AspectRatioFrameLayout.RESIZE_MODE_ZOOM) })
+                            AniPill("Estirar", fit == AspectRatioFrameLayout.RESIZE_MODE_FILL, { onFit(AspectRatioFrameLayout.RESIZE_MODE_FILL) })
+                        } }
+                        item { com.anics.nativeapp.ui.screens.SettingSwitch("Siguiente episodio automático", "Al terminar el capítulo actual", session.autoNext, onAutoNext) }
+                        item { Text("Un toque muestra los controles. Doble toque al centro pausa; a los lados salta 10 segundos.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    }
                 }
             }
         }

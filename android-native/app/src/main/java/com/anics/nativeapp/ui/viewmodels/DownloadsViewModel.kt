@@ -1,9 +1,12 @@
 package com.anics.nativeapp.ui.viewmodels
 
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import com.anics.nativeapp.data.local.DownloadDao
 import com.anics.nativeapp.data.local.DownloadEntity
+import com.anics.nativeapp.downloads.EpisodeKey
+import com.anics.nativeapp.downloads.EpisodeWatchProgress
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
@@ -13,24 +16,55 @@ data class DownloadsUiState(
     val isLoading: Boolean = true,
     val isScanning: Boolean = false,
     val message: String? = null,
+    val expandedAnimeKeys: Set<String> = emptySet(),
+    val watchProgress: Map<EpisodeKey, EpisodeWatchProgress> = emptyMap(),
     val folderUri: String = "", val covers: Map<String, String> = emptyMap(), val totalSpace: Long = 0, val freeSpace: Long = 0
 )
 
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class DownloadsViewModel(
     private val downloadDao: DownloadDao,
     private val library: com.anics.nativeapp.downloads.LocalLibrary,
     private val settingsRepository: com.anics.nativeapp.data.repository.SettingsRepository,
     private val context: android.content.Context,
-    private val catalogRepository: com.anics.nativeapp.data.repository.CatalogRepository? = null
+    private val catalogRepository: com.anics.nativeapp.data.repository.CatalogRepository? = null,
+    private val savedStateHandle: SavedStateHandle = SavedStateHandle()
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(DownloadsUiState())
     val uiState: StateFlow<DownloadsUiState> = _uiState.asStateFlow()
     private var resolveJob: kotlinx.coroutines.Job? = null
+    private var coverRequestKey: List<String> = emptyList()
+    val queueVisible = savedStateHandle.getStateFlow("downloads-queue", false)
+
+    fun showQueue(visible: Boolean) { savedStateHandle["downloads-queue"] = visible }
+    fun toggleAnime(title: String) {
+        val key = com.anics.nativeapp.sync.SyncContract.titleKey(title)
+        val expanded = savedStateHandle.get<List<String>>("expanded-animes").orEmpty().toMutableSet()
+        if (!expanded.add(key)) expanded.remove(key)
+        savedStateHandle["expanded-animes"] = expanded.toList()
+    }
+
+    fun onScreenVisible() { refreshStorage(); viewModelScope.launch { library.validateCompletedDownloads() } }
 
     init {
         observeDownloads()
         refreshStorage()
+        viewModelScope.launch {
+            savedStateHandle.getStateFlow("expanded-animes", emptyList<String>()).collect { keys ->
+                _uiState.update { it.copy(expandedAnimeKeys = keys.toSet()) }
+            }
+        }
+        val database = com.anics.nativeapp.data.local.AppDatabase.getInstance(context)
+        viewModelScope.launch {
+            database.profileDao().getActiveProfileFlow().flatMapLatest { profile ->
+                database.historyDao().getHistoryForProfile(profile?.id ?: "default").onStart { emit(emptyList()) }
+            }.collect { history ->
+                val progress = history.groupBy { EpisodeKey.of(it.animeTitle, it.episodeNumber) }
+                    .mapValues { (_, entries) -> EpisodeWatchProgress.from(entries.maxByOrNull { it.lastWatchedAt }) }
+                _uiState.update { it.copy(watchProgress = progress) }
+            }
+        }
         viewModelScope.launch { settingsRepository.settings.map { it.downloadFolderUri }.distinctUntilChanged().collect { uri ->
             _uiState.update { it.copy(folderUri = uri) }
             if (uri.isNotBlank()) scan(uri)
@@ -60,11 +94,13 @@ class DownloadsViewModel(
 
     private fun resolveMissingCovers(list: List<DownloadEntity>) {
         val catalog = catalogRepository ?: return
+        val missing = list.filter { it.status == "completed" && (it.thumbnailUrl.isBlank() || it.animeUrl.isBlank()) }
+        val key = missing.map { it.id + "|" + it.animeUrl + "|" + it.thumbnailUrl }
+        if (key == coverRequestKey) return
+        coverRequestKey = key
         resolveJob?.cancel()
         resolveJob = viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            val missing = list.filter { it.status == "completed" && (it.thumbnailUrl.isBlank() || it.animeUrl.isBlank()) }
-                .groupBy { com.anics.nativeapp.sync.SyncContract.titleKey(it.animeTitle) }
-            for ((_, group) in missing) {
+            for ((_, group) in missing.groupBy { com.anics.nativeapp.sync.SyncContract.titleKey(it.animeTitle) }) {
                 val title = group.first().animeTitle
                 try {
                     val results = catalog.search(title, null)
@@ -80,7 +116,7 @@ class DownloadsViewModel(
                                 source = if (it.animeUrl.isBlank()) match.source else it.source
                             )
                         }
-                        downloadDao.insertBatch(updated)
+                        updated.forEach { downloadDao.updateLibraryMetadata(it.id, it.animeUrl, it.thumbnailUrl, it.source) }
                     }
                 } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) {}
             }
@@ -152,16 +188,7 @@ class DownloadsViewModel(
     }
     fun pauseDownload(id: String) = action(id, com.anics.nativeapp.downloads.DownloadService.ACTION_PAUSE)
     fun resumeDownload(id: String) {
-        viewModelScope.launch {
-            val row = downloadDao.getDownloadById(id) ?: return@launch
-            if (row.outputPath.isNotBlank()) action(id, com.anics.nativeapp.downloads.DownloadService.ACTION_RESUME)
-            else try {
-                val service = com.anics.nativeapp.downloads.DownloadService
-                androidx.core.content.ContextCompat.startForegroundService(context, android.content.Intent(context, com.anics.nativeapp.downloads.DownloadService::class.java)
-                    .setAction(service.ACTION_START).putExtra(service.EXTRA_ID, row.id).putExtra(service.EXTRA_TITLE, row.animeTitle)
-                    .putExtra(service.EXTRA_EPISODE, row.episodeNumber).putExtra(service.EXTRA_URL, row.streamUrl).putExtra(service.EXTRA_REFERER, row.referer))
-            } catch (e: Exception) { showMessage(e.localizedMessage ?: "No se pudo reintentar") }
-        }
+        action(id, com.anics.nativeapp.downloads.DownloadService.ACTION_RESUME)
     }
     fun cancelDownload(id: String) {
         viewModelScope.launch {

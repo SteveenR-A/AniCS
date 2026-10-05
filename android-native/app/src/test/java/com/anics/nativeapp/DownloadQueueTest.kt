@@ -21,6 +21,32 @@ import java.util.concurrent.atomic.AtomicInteger
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class DownloadQueueTest {
+    @Test fun truncatedHttpBodyIsFailedInsteadOfCompleted() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).build()
+        val server = ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1"))
+        val executor = Executors.newSingleThreadExecutor()
+        executor.submit {
+            server.accept().use { socket ->
+                val input = socket.getInputStream().bufferedReader()
+                while (!input.readLine().isNullOrEmpty()) { }
+                socket.getOutputStream().use { out ->
+                    out.write("HTTP/1.1 200 OK\r\nContent-Type: video/mp4\r\nContent-Length: 1000\r\nConnection: close\r\n\r\n".toByteArray())
+                    out.write(ByteArray(500)); out.flush()
+                }
+            }
+        }
+        val manager = DownloadManager(context, db.downloadDao())
+        var path: String? = null
+        try {
+            manager.enqueueRequests(listOf(DownloadRequest("truncated", "Truncated-${java.util.UUID.randomUUID()}", 1, "http://127.0.0.1:${server.localPort}/video.mp4")))
+            await { db.downloadDao().getDownloadById("truncated")?.status == "failed" }
+            val row = db.downloadDao().getDownloadById("truncated")!!; path = row.outputPath
+            assertFalse(row.error.isNullOrBlank())
+            assertEquals(500L, StorageManager(context).getFileLength(row.outputPath))
+            assertTrue(row.progress < 1f)
+        } finally { manager.close(); server.close(); executor.shutdownNow(); path?.let { java.io.File(it).parentFile?.deleteRecursively() }; db.close() }
+    }
     private suspend fun await(check: suspend () -> Boolean) {
         withTimeout(15000) { while (!check()) { org.robolectric.shadows.ShadowSystemClock.advanceBy(java.time.Duration.ofMillis(50)); delay(20) } }
     }

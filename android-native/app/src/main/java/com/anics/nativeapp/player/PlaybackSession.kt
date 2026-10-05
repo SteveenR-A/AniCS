@@ -180,6 +180,11 @@ class PlaybackSessionViewModel(
         historyMutex.withLock {
             history.recordProgress(entry.profileId, entry.animeTitle, entry.animeUrl, entry.episodeNumber, entry.episodeUrl,
                 entry.thumbnailUrl, entry.source, position.coerceAtMost(duration) / 1000, duration / 1000)
+            if (position >= duration * .9) _state.update { state ->
+                if (state.entry?.profileId == entry.profileId && state.entry?.animeTitle == entry.animeTitle)
+                    state.copy(episodes = state.episodes.map { if (it.number.toInt() == entry.episodeNumber) it.copy(watched = true) else it })
+                else state
+            }
         }
     }
     private fun launchOperation(block: suspend () -> Unit) {

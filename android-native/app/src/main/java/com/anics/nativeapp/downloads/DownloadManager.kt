@@ -52,13 +52,23 @@ class DownloadManager(private val context: Context, private val downloadDao: Dow
         val rows = mutableListOf<DownloadEntity>()
         for (request in requests) {
             val equivalent = known.values.firstOrNull { it.episodeNumber == request.episodeNumber && com.anics.nativeapp.sync.SyncContract.titleKey(it.animeTitle) == com.anics.nativeapp.sync.SyncContract.titleKey(request.animeTitle) &&
-                (it.status in listOf("queued", "downloading", "paused") || it.status == "completed" && storageManager.getFileLength(it.outputPath) > 0) }
+                (it.status in listOf("queued", "downloading", "paused") || it.status == "completed" && runCatching { storageManager.requireReadableVideo(it.outputPath, it.totalBytes) }.isSuccess) }
             if (equivalent != null) continue
-            val path = storageManager.createDownloadTarget(folder, request.animeTitle, request.episodeNumber)
+            val extension = if (request.streamUrl.contains(".m3u8", true)) "ts" else "mp4"
+            val target = runCatching { storageManager.createDownloadTarget(folder, request.animeTitle, request.episodeNumber, extension) }
+            if (target.isFailure) {
+                rows.add(DownloadEntity(id = request.id, queueOrder = order.incrementAndGet(), animeTitle = request.animeTitle,
+                    episodeNumber = request.episodeNumber, streamUrl = request.streamUrl, referer = request.referer,
+                    outputPath = "", status = "failed", error = target.exceptionOrNull()?.localizedMessage ?: "No se pudo preparar el destino",
+                    createdAt = java.time.Instant.now().toString(), animeUrl = request.animeUrl, episodeUrl = request.episodeUrl,
+                    thumbnailUrl = request.thumbnailUrl, source = request.source))
+                continue
+            }
+            val path = target.getOrThrow()
             val previous = known[path]
             val length = storageManager.getFileLength(path)
-            if (previous != null && (previous.status in listOf("queued", "downloading", "paused") || previous.status == "completed" && length > 0)) continue
-            val local = previous == null && length > 0
+            if (previous != null && (previous.status in listOf("queued", "downloading", "paused") || previous.status == "completed" && runCatching { storageManager.requireReadableVideo(path, previous.totalBytes) }.isSuccess)) continue
+            val local = previous == null && length > 0 && runCatching { storageManager.requireReadableVideo(path) }.isSuccess
             val row = DownloadEntity(id = previous?.id ?: request.id, queueOrder = order.updateAndGet { maxOf(it + 1, System.currentTimeMillis()) },
                 animeTitle = request.animeTitle, episodeNumber = request.episodeNumber, streamUrl = request.streamUrl, referer = request.referer,
                 outputPath = path, status = if (local) "completed" else "queued", progress = if (local) 1f else 0f,
@@ -152,13 +162,15 @@ class DownloadManager(private val context: Context, private val downloadDao: Dow
             out.flush()
         }
         currentCoroutineContext().ensureActive()
-        downloadDao.updateTransfer(row.id, "completed", 1f, storageManager.getFileLength(row.outputPath), storageManager.getFileLength(row.outputPath))
+        val savedBytes = storageManager.requireReadableVideo(row.outputPath)
+        downloadDao.updateTransfer(row.id, "completed", 1f, savedBytes, savedBytes)
     }
     private suspend fun transfer(original: DownloadEntity) {
         var row = original
-        var downloaded = storageManager.getFileLength(row.outputPath)
+        var downloaded = 0L
         var total: Long? = row.totalBytes
         try {
+            downloaded = storageManager.getFileLength(row.outputPath)
             downloadDao.updateTransfer(row.id, "downloading", row.progress, downloaded, total)
             row = resolve(row)
             currentCoroutineContext().ensureActive()
@@ -176,7 +188,9 @@ class DownloadManager(private val context: Context, private val downloadDao: Dow
             if (code == 416) {
                 total = connection.getHeaderField("Content-Range")?.substringAfter("bytes */", "")?.toLongOrNull()
                 require(total != null && total == downloaded && downloaded > 0) { "No se pudo confirmar el archivo completo" }
-                downloadDao.updateTransfer(row.id, "completed", 1f, downloaded, total); return
+                val savedBytes = storageManager.requireReadableVideo(row.outputPath, total)
+                currentCoroutineContext().ensureActive()
+                downloadDao.updateTransfer(row.id, "completed", 1f, savedBytes, total); return
             }
             require(code == 200 || code == 206) { "Error HTTP $code" }
             if (row.streamUrl.contains(".m3u8", true) || connection.contentType.orEmpty().contains("mpegurl", true)) {
@@ -218,8 +232,9 @@ class DownloadManager(private val context: Context, private val downloadDao: Dow
                 out.flush()
             } }
             require(downloaded > 0 && (total == null || downloaded == total)) { "La descarga está incompleta" }
+            val savedBytes = storageManager.requireReadableVideo(row.outputPath, downloaded)
             currentCoroutineContext().ensureActive()
-            downloadDao.updateTransfer(row.id, "completed", 1f, downloaded, total ?: downloaded)
+            downloadDao.updateTransfer(row.id, "completed", 1f, savedBytes, total ?: savedBytes)
         } catch (e: Exception) {
             withContext(NonCancellable) {
                 if (row.id !in cancelledTasks && downloadDao.getDownloadById(row.id) != null) {
@@ -240,7 +255,18 @@ class DownloadManager(private val context: Context, private val downloadDao: Dow
     }
     suspend fun resumeDownload(id: String) = controls.withLock {
         activeJobs[id]?.join(); pausedTasks.remove(id)
-        downloadDao.getDownloadById(id)?.takeIf { it.status != "completed" }?.let { downloadDao.updateTransfer(id, "queued", it.progress, it.downloadedBytes, it.totalBytes) }
+        downloadDao.getDownloadById(id)?.takeIf { it.status != "completed" }?.let { row ->
+            try {
+                if (row.outputPath.isBlank() || !storageManager.targetExists(row.outputPath)) {
+                    val folder = settings.settings.first().downloadFolderUri
+                    require(!row.outputPath.startsWith("content://") || folder.isNotBlank()) { "Selecciona de nuevo la carpeta del video en Descargas" }
+                    val extension = if (row.streamUrl.contains(".m3u8", true)) "ts" else "mp4"
+                    val path = storageManager.createDownloadTarget(folder, row.animeTitle, row.episodeNumber, extension)
+                    downloadDao.updateDownload(row.copy(outputPath = path, status = "queued", progress = 0f, downloadedBytes = 0, totalBytes = null, error = null))
+                } else downloadDao.updateTransfer(id, "queued", row.progress, row.downloadedBytes, row.totalBytes)
+            } catch (e: CancellationException) { throw e }
+              catch (e: Exception) { downloadDao.updateTransfer(id, "failed", row.progress, row.downloadedBytes, row.totalBytes, error = e.localizedMessage ?: "No se pudo preparar el destino") }
+        }
     }
     fun startDownload(id: String) { scope.launch { resumeDownload(id) } }
     fun close() { scope.cancel(); connections.values.forEach { it.disconnect() } }

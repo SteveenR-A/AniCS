@@ -70,11 +70,12 @@ class NativeUiRegressionTest {
         screenshot("update-progress")
     }
     private fun scroll(text: String) { compose.onNodeWithTag("settings-list").performScrollToNode(hasText(text)) }
-    private fun screenshot(name: String) {
+    private fun screenshot(name: String, dialog: Boolean = false) {
         compose.runOnIdle {
             val activity = androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry.getInstance()
                 .getActivitiesInStage(androidx.test.runner.lifecycle.Stage.RESUMED).first()
-            val view = activity.window.decorView
+            val view = if (dialog) android.view.inspector.WindowInspector.getGlobalWindowViews().last { it.isAttachedToWindow }
+                else activity.window.decorView
             val bitmap = android.graphics.Bitmap.createBitmap(view.width, view.height, android.graphics.Bitmap.Config.ARGB_8888)
             view.draw(android.graphics.Canvas(bitmap))
             val file = java.io.File("build/ui-preview/$name.png"); file.parentFile!!.mkdirs()
@@ -109,5 +110,24 @@ class NativeUiRegressionTest {
         compose.onNodeWithContentDescription("Siguiente episodio").performClick()
         org.junit.Assert.assertEquals(1, next)
         screenshot("player-landscape")
+    }
+    @Test
+    @Config(qualifiers = "w800dp-h360dp-land")
+    fun landscapeEpisodeSheetScrollsToLastEpisodeInsideTheWindow() {
+        val state = com.anics.nativeapp.player.PlaybackSessionState(
+            entry = com.anics.nativeapp.data.local.HistoryEntity(animeTitle = "Koyomimonogatari", animeUrl = "anime", episodeNumber = 6, episodeUrl = "ep6"),
+            episodes = (1..12).map { PlaybackSessionTest.episode(it) })
+        var selected = 0
+        compose.setContent { AniCSTheme {
+            com.anics.nativeapp.player.PlayerPanel("episodes", state, com.anics.nativeapp.player.PlaybackState(), {},
+                onServer = {}, onEpisode = { selected = it.number.toInt() }, onQuality = {}, onSpeed = {}, onAutoNext = {},
+                fit = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT, onFit = {})
+        } }
+        compose.onNodeWithText("Episodios").assertIsDisplayed()
+        compose.onNodeWithText("Episodio 6").assertIsDisplayed()
+        compose.onNodeWithTag("player-panel-list").performScrollToNode(hasText("Episodio 12"))
+        compose.onNodeWithText("Episodio 12").assertIsDisplayed().performClick()
+        compose.runOnIdle { org.junit.Assert.assertEquals(12, selected) }
+        screenshot("episode-sheet-landscape", dialog = true)
     }
 }

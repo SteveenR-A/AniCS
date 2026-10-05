@@ -20,6 +20,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.anics.nativeapp.data.local.DownloadEntity
+import com.anics.nativeapp.downloads.EpisodeKey
+import com.anics.nativeapp.downloads.EpisodeWatchProgress
 import com.anics.nativeapp.ui.components.*
 import com.anics.nativeapp.ui.viewmodels.DownloadsViewModel
 
@@ -28,7 +30,7 @@ fun DownloadsScreen(viewModel: DownloadsViewModel, onPlayOffline: (String, Strin
     onAnime: (String, String) -> Unit = { _, _ -> }, onSearch: (String) -> Unit = {}) {
     val state by viewModel.uiState.collectAsState()
     val context = LocalContext.current
-    var queue by remember { mutableStateOf(false) }
+    val queue by viewModel.queueVisible.collectAsState()
     var remove by remember { mutableStateOf<DownloadEntity?>(null) }
     var deleteFile by remember { mutableStateOf(false) }
     val groups = state.completedDownloads.groupBy { com.anics.nativeapp.sync.SyncContract.titleKey(it.animeTitle) }.values.toList()
@@ -39,7 +41,7 @@ fun DownloadsScreen(viewModel: DownloadsViewModel, onPlayOffline: (String, Strin
             viewModel.selectFolder(uri.toString())
         } catch (e: Exception) { viewModel.showMessage(e.localizedMessage ?: "No se pudo acceder a la carpeta") }
     }
-    LaunchedEffect(Unit) { viewModel.refreshStorage(); if (state.folderUri.isNotBlank()) viewModel.refreshLibrary() }
+    LaunchedEffect(viewModel) { viewModel.onScreenVisible() }
     LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item { SectionTitle("Descargas", "Tu biblioteca sin conexión", AniIcons.Download) }
         if (state.totalSpace > 0) item {
@@ -57,11 +59,15 @@ fun DownloadsScreen(viewModel: DownloadsViewModel, onPlayOffline: (String, Strin
             }
         }
         state.message?.let { message -> item { Text(message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } }
+        val failed = state.activeDownloads.count { it.status == "failed" }
+        if (!queue && failed > 0) item {
+            TextButton(onClick = { viewModel.showQueue(true) }) { Text("$failed episodios con errores. Ver errores y reintentar", color = MaterialTheme.colorScheme.error) }
+        }
         if (state.isScanning) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                AniPill("Animes (${groups.size})", !queue, { queue = false }, Modifier.weight(1f), AniIcons.Folder)
-                AniPill("Cola (${state.activeDownloads.size})", queue, { queue = true }, Modifier.weight(1f), AniIcons.Download)
+                AniPill("Animes (${groups.size})", !queue, { viewModel.showQueue(false) }, Modifier.weight(1f), AniIcons.Folder)
+                AniPill("Cola (${state.activeDownloads.size})", queue, { viewModel.showQueue(true) }, Modifier.weight(1f), AniIcons.Download)
             }
         }
         if (queue) {
@@ -72,13 +78,13 @@ fun DownloadsScreen(viewModel: DownloadsViewModel, onPlayOffline: (String, Strin
         } else {
             if (groups.isEmpty()) item { AniEmptyState("Tu biblioteca está vacía", "Selecciona la carpeta Anime para cargar tus videos existentes.", AniIcons.Folder, "Elegir carpeta", { folder.launch(null) }) }
             items(groups, key = { com.anics.nativeapp.sync.SyncContract.titleKey(it.first().animeTitle) }) { rows ->
-                var expanded by remember { mutableStateOf(false) }
                 val title = rows.first().animeTitle
+                val expanded = com.anics.nativeapp.sync.SyncContract.titleKey(title) in state.expandedAnimeKeys
                 val cover = rows.firstNotNullOfOrNull { it.thumbnailUrl.takeIf(String::isNotBlank) }
                     ?: state.covers[com.anics.nativeapp.sync.SyncContract.titleKey(title)]
                     ?: com.anics.nativeapp.downloads.LocalCovers.cdnCover(title).takeIf(String::isNotBlank)
                 AniPanel {
-                    Row(Modifier.fillMaxWidth().clickable { expanded = !expanded }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(Modifier.fillMaxWidth().clickable { viewModel.toggleAnime(title) }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (cover != null) AsyncImage(cover, title, Modifier.width(42.dp).height(62.dp).clip(RoundedCornerShape(8.dp)), contentScale = ContentScale.Crop)
                         else Box(Modifier.width(42.dp).height(62.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp)), contentAlignment = Alignment.Center) { Icon(AniIcons.Tv, null, tint = MaterialTheme.colorScheme.primary) }
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -96,6 +102,7 @@ fun DownloadsScreen(viewModel: DownloadsViewModel, onPlayOffline: (String, Strin
                             Column(Modifier.weight(1f)) {
                                 Text("Episodio ${row.episodeNumber}", style = MaterialTheme.typography.bodyMedium)
                                 Text(formatBytes(row.downloadedBytes), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                EpisodeWatchIndicator(state.watchProgress[EpisodeKey.of(row.animeTitle, row.episodeNumber)] ?: EpisodeWatchProgress())
                             }
                             IconButton(onClick = { onPlayOffline(row.outputPath, row.animeTitle, row.episodeNumber) }) { Icon(AniIcons.Play, "Reproducir episodio ${row.episodeNumber}", tint = MaterialTheme.colorScheme.primary) }
                             IconButton(onClick = { deleteFile = false; remove = row }) { Icon(AniIcons.X, "Quitar de la biblioteca", Modifier.size(18.dp)) }
@@ -126,8 +133,18 @@ fun ActiveDownloadItem(download: DownloadEntity, onPause: () -> Unit, onResume: 
             IconButton(onClick = onCancel) { Icon(AniIcons.X, "Cancelar descarga") }
         }
         download.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-        LinearProgressIndicator(progress = { download.progress.coerceIn(0f,1f) }, modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(50)), drawStopIndicator = {})
-        Text("${(download.progress * 100).toInt()}% · ${formatBytes(download.downloadedBytes)}" + (download.totalBytes?.let { " / ${formatBytes(it)}" } ?: "") +
+        val bar = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(50))
+        if (download.status == "downloading" && download.totalBytes == null) LinearProgressIndicator(modifier = bar, drawStopIndicator = {})
+        else LinearProgressIndicator(progress = { download.progress.coerceIn(0f,1f) }, modifier = bar, drawStopIndicator = {})
+        Text((if (download.totalBytes != null) "${(download.progress * 100).toInt()}% · " else "") + formatBytes(download.downloadedBytes) + (download.totalBytes?.let { " / ${formatBytes(it)}" } ?: "") +
             (if (download.status == "downloading") " · ${formatBytes(download.speedBytesPerSecond)}/s" else ""), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+internal fun EpisodeWatchIndicator(progress: EpisodeWatchProgress) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Text(progress.state.label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+        LinearProgressIndicator(progress = { progress.fraction }, modifier = Modifier.fillMaxWidth().height(3.dp).clip(RoundedCornerShape(50)), drawStopIndicator = {})
     }
 }

@@ -23,6 +23,7 @@ class TauriLibraryMetadata(private val context: Context) {
     }.getOrDefault(emptyMap())
     /** The user grants the Anime tree once; subsequent scans need no database picker. */
     suspend fun importShared(root: DocumentFile): Map<String, LibraryMetadata> = withContext(Dispatchers.IO) {
+        val cacheValid = runCatching { json.decodeFromString(ListSerializer(LibraryMetadata.serializer()), file.readText()) }.isSuccess
         val bridge = root.findFile(".anics")
         val manifest = bridge?.findFile("library.json")
         if (manifest != null) try {
@@ -64,7 +65,15 @@ class TauriLibraryMetadata(private val context: Context) {
         }
         // Older exported databases placed next to the videos are discovered automatically.
         root.findFile("anics.db")?.takeIf { it.isFile && it.canRead() }?.let { db ->
-            try { importDatabase(db.uri) }
+            try {
+                val imports = context.getSharedPreferences("tauri-library-imports", Context.MODE_PRIVATE)
+                val stamp = "${com.anics.nativeapp.BuildConfig.VERSION_CODE}:${db.lastModified()}:${db.length()}"
+                // Providers without reliable timestamps are read again, never assumed unchanged.
+                if (!cacheValid || db.lastModified() <= 0 || db.length() <= 0 || imports.getString(db.uri.toString(), null) != stamp) {
+                    importDatabase(db.uri)
+                    imports.edit().putString(db.uri.toString(), stamp).apply()
+                }
+            }
             catch (e: kotlinx.coroutines.CancellationException) { throw e }
             catch (e: Exception) { android.util.Log.w("AniCS", "No se pudo leer anics.db en Anime", e) }
         }
@@ -72,9 +81,11 @@ class TauriLibraryMetadata(private val context: Context) {
     }
     @Synchronized
     private fun save(collected: Map<String, LibraryMetadata>) {
+        val data = json.encodeToString(ListSerializer(LibraryMetadata.serializer()), collected.toSortedMap().values.toList())
+        if (file.isFile && runCatching { file.readText() == data }.getOrDefault(false)) return
         val temporary = java.io.File(file.parentFile, "tauri-library-${java.util.UUID.randomUUID()}.tmp")
         try {
-            temporary.writeText(json.encodeToString(ListSerializer(LibraryMetadata.serializer()), collected.values.toList()))
+            temporary.writeText(data)
             try {
                 java.nio.file.Files.move(temporary.toPath(), file.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE)
             } catch (_: java.nio.file.AtomicMoveNotSupportedException) {

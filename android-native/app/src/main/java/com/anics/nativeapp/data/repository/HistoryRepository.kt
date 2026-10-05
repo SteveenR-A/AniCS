@@ -37,8 +37,10 @@ class HistoryRepository(private val database: com.anics.nativeapp.data.local.App
         progressSeconds: Long,
         durationSeconds: Long
     ) {
-        val completed = durationSeconds > 0 && progressSeconds >= (durationSeconds * 0.9)
         val previous = historyDao.getHistoryItem(profileId, episodeUrl)
+            ?: getEpisodeProgress(profileId, animeTitle, episodeNumber)
+        val completed = previous?.completed == true || (previous?.watchProgress ?: 0.0) >= .9 ||
+            durationSeconds > 0 && progressSeconds >= (durationSeconds * 0.9)
         val entity = HistoryEntity(
             profileId = profileId,
             animeTitle = animeTitle,

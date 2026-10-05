@@ -41,6 +41,15 @@ object LocalEpisodeNames {
 }
 class LocalLibrary(private val context: Context, private val dao: DownloadDao,
     private val openTree: (String) -> DocumentFile? = { DocumentFile.fromTreeUri(context, Uri.parse(it)) }) {
+    suspend fun validateCompletedDownloads() = withContext(Dispatchers.IO) {
+        val storage = StorageManager(context)
+        for (row in dao.getAllDownloads().first().filter { it.status == "completed" }) {
+            coroutineContext.ensureActive()
+            try { storage.requireReadableVideo(row.outputPath, row.totalBytes ?: row.downloadedBytes) }
+            catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: Exception) { dao.markFileUnavailable(row.id, e.localizedMessage ?: "El archivo del episodio no se puede leer") }
+        }
+    }
     suspend fun scan(treeUri: String): Int = withContext(Dispatchers.IO) {
         val root = openTree(treeUri) ?: error("La carpeta no está disponible")
         require(root.exists() && root.canRead()) { "Selecciona de nuevo la carpeta para conceder acceso" }
@@ -71,12 +80,18 @@ class LocalLibrary(private val context: Context, private val dao: DownloadDao,
                     val cover = localCover ?: meta?.thumbnailUrl?.takeIf(String::isNotBlank) ?: cdnCover
                     val animeUrl = meta?.animeUrl?.takeIf(String::isNotBlank).orEmpty()
                     val known = knownPaths[path]
-                    if (known != null && known.status != "completed") return@forEach
+                    if (known != null && known.status != "completed" &&
+                        !(known.status == "failed" && known.totalBytes != null && known.totalBytes > 0 && known.totalBytes == file.length())) return@forEach
+                    // A document can report a size even after its read permission was revoked.
+                    try { StorageManager(context).requireReadableVideo(path, known?.totalBytes ?: file.length()) }
+                    catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                    catch (_: Exception) { return@forEach }
                     found++
                     if (known != null) {
                         val updatedCover = if (known.thumbnailUrl.isNotBlank()) known.thumbnailUrl else cover
                         val updatedUrl = if (known.animeUrl.isNotBlank()) known.animeUrl else animeUrl
-                        result.add(known.copy(animeUrl = updatedUrl, thumbnailUrl = updatedCover, source = meta?.source ?: known.source))
+                        result.add(known.copy(animeUrl = updatedUrl, thumbnailUrl = updatedCover, source = meta?.source ?: known.source,
+                            status = "completed", progress = 1f, downloadedBytes = file.length(), totalBytes = file.length(), error = null))
                         return@forEach
                     }
                     val id = "local:" + MessageDigest.getInstance("SHA-256").digest(path.toByteArray()).joinToString("") { "%02x".format(it.toInt() and 255) }
@@ -89,6 +104,7 @@ class LocalLibrary(private val context: Context, private val dao: DownloadDao,
         coroutineContext.ensureActive()
         // Path-derived IDs make rescans idempotent. Existing cloud/download queues remain intact.
         dao.insertBatch(result)
+        validateCompletedDownloads()
         found
     }
 }

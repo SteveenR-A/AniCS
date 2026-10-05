@@ -40,6 +40,10 @@ class LibraryMigrationTest {
             assertEquals(1, library.scan("selected-tree"))
             assertEquals(1, db.downloadDao().getAllDownloads().first().size)
             assertTrue(cover.exists()); assertTrue(java.io.File(folder, "Ep001.mp4").exists())
+            val cache = java.io.File(context.filesDir, "tauri-library-metadata.json")
+            assertTrue(cache.setLastModified(1_000_000L))
+            assertEquals(1, library.scan("selected-tree"))
+            assertEquals(1_000_000L, cache.lastModified())
         } finally { db.close(); root.deleteRecursively() }
     }
     @Test fun localSharedCoverIsPreferredAndBlankNativeDataDoesNotHideTauriMetadata() {

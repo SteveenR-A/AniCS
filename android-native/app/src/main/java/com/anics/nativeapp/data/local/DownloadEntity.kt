@@ -59,6 +59,12 @@ interface DownloadDao {
     @Query("UPDATE downloads SET status = :status, progress = :progress, downloadedBytes = :bytes, totalBytes = :total, speedBytesPerSecond = :speed, error = :error WHERE id = :id")
     suspend fun updateTransfer(id: String, status: String, progress: Float, bytes: Long, total: Long?, speed: Long = 0, error: String? = null)
 
+    @Query("UPDATE downloads SET status = 'failed', progress = 0, speedBytesPerSecond = 0, error = :error WHERE id = :id AND status = 'completed'")
+    suspend fun markFileUnavailable(id: String, error: String)
+
+    @Query("UPDATE downloads SET animeUrl = :animeUrl, thumbnailUrl = :thumbnailUrl, source = :source WHERE id = :id AND status = 'completed'")
+    suspend fun updateLibraryMetadata(id: String, animeUrl: String, thumbnailUrl: String, source: String)
+
     @Query("UPDATE downloads SET status = 'paused', speedBytesPerSecond = 0 WHERE status = 'downloading'")
     suspend fun recoverInterrupted()
 
