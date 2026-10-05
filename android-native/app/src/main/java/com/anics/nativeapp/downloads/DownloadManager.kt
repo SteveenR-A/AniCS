@@ -3,7 +3,6 @@ package com.anics.nativeapp.downloads
 import android.content.Context
 import com.anics.nativeapp.data.local.*
 import com.anics.nativeapp.data.repository.SettingsRepository
-import com.anics.nativeapp.ffi.NativeMediaType
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
@@ -52,7 +51,6 @@ class DownloadManager(private val context: Context, private val downloadDao: Dow
         order.updateAndGet { maxOf(it, lastOrder) }
         val rows = mutableListOf<DownloadEntity>()
         for (request in requests) {
-            require(!request.streamUrl.contains(".m3u8", true)) { "Elige un servidor MP4 para descargar" }
             val equivalent = known.values.firstOrNull { it.episodeNumber == request.episodeNumber && com.anics.nativeapp.sync.SyncContract.titleKey(it.animeTitle) == com.anics.nativeapp.sync.SyncContract.titleKey(request.animeTitle) &&
                 (it.status in listOf("queued", "downloading", "paused") || it.status == "completed" && storageManager.getFileLength(it.outputPath) > 0) }
             if (equivalent != null) continue
@@ -85,13 +83,76 @@ class DownloadManager(private val context: Context, private val downloadDao: Dow
         val preferred = options.preferredDownloadServer
         val sorted = ServerSupport.ordered(servers).filter(ServerSupport::playable).sortedBy { if (it.name.equals(preferred, true)) 0 else 1 }
         val candidates = if (preferred.isNotBlank() && !options.allowFallback) sorted.filter { it.name.equals(preferred, true) } else sorted
-        var reason = "No hay un servidor MP4 disponible"
+        var reason = "No hay un servidor de descarga disponible"
         for (server in candidates) { try {
             val media = withTimeout(45000) { catalog.resolveStream(server, row.source) }
-            if (media.mediaType == NativeMediaType.HLS || media.directUrl.contains(".m3u8", true)) { reason = "${server.name} ofrece HLS. Elige un servidor MP4 para descargar."; continue }
-            return row.copy(streamUrl = media.directUrl, referer = media.referer).also { downloadDao.updateDownload(it) }
+            val resolved = row.copy(streamUrl = media.directUrl, referer = media.referer)
+            if (media.mediaType == com.anics.nativeapp.ffi.NativeMediaType.HLS || media.directUrl.contains(".m3u8", true)) hlsPlaylist(resolved)
+            return resolved.also { downloadDao.updateDownload(it) }
         } catch (e: CancellationException) { throw e } catch (e: Exception) { reason = e.localizedMessage ?: reason } }
         error(reason)
+    }
+    private suspend fun readHlsResource(row: DownloadEntity, url: String, limit: Int): ByteArray {
+        currentCoroutineContext().ensureActive()
+        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 15000; readTimeout = 20000
+            setRequestProperty("User-Agent", "Mozilla/5.0")
+            row.referer?.let { setRequestProperty("Referer", it) }
+        }
+        connections[row.id] = connection
+        try {
+            require(connection.responseCode == 200) { "Error HLS HTTP ${connection.responseCode}" }
+            return connection.inputStream.use { input ->
+                val output = java.io.ByteArrayOutputStream()
+                val buffer = ByteArray(64 * 1024)
+                while (true) {
+                    currentCoroutineContext().ensureActive()
+                    val count = input.read(buffer); if (count < 0) break
+                    require(output.size() + count <= limit) { "Recurso HLS demasiado grande" }
+                    output.write(buffer, 0, count)
+                }
+                output.toByteArray()
+            }
+        } finally { connections.remove(row.id, connection); connection.disconnect() }
+    }
+    private suspend fun hlsPlaylist(row: DownloadEntity): HlsPlaylist {
+        var url = row.streamUrl
+        repeat(4) {
+            val text = readHlsResource(row, url, 2 * 1024 * 1024).toString(Charsets.UTF_8)
+            require(!Regex("#EXT-X-MEDIA:.*TYPE=\"?AUDIO\"?.*URI=").containsMatchIn(text)) { "El HLS tiene audio separado. Elige otro servidor" }
+            val variant = HlsPlaylists.variant(text, url)
+            if (variant == null) return HlsPlaylists.parse(text, url)
+            url = variant
+        }
+        error("Demasiadas listas HLS anidadas")
+    }
+    private suspend fun transferHls(row: DownloadEntity, playlist: HlsPlaylist) {
+        // Restart at a segment boundary after pause/restart: no partial segment is appended.
+        val keys = mutableMapOf<String, ByteArray>()
+        var bytes = 0L
+        var lastBytes = 0L
+        var lastAt = android.os.SystemClock.elapsedRealtime()
+        val (output, _) = storageManager.openOutputStreamForAppend(row.outputPath, false)
+        output.use { out ->
+            playlist.initialization?.let { val data = readHlsResource(row, it, 8 * 1024 * 1024); out.write(data); bytes += data.size }
+            playlist.segments.forEachIndexed { index, segment ->
+                var data = readHlsResource(row, segment.url, 64 * 1024 * 1024)
+                segment.keyUrl?.let { url ->
+                    val key = keys[url] ?: readHlsResource(row, url, 16).also { require(it.size == 16) { "Clave AES no válida" }; keys[url] = it }
+                    val cipher = javax.crypto.Cipher.getInstance("AES/CBC/PKCS5Padding")
+                    cipher.init(javax.crypto.Cipher.DECRYPT_MODE, javax.crypto.spec.SecretKeySpec(key, "AES"), javax.crypto.spec.IvParameterSpec(segment.iv!!))
+                    data = cipher.doFinal(data)
+                }
+                currentCoroutineContext().ensureActive()
+                out.write(data); bytes += data.size
+                val now = android.os.SystemClock.elapsedRealtime()
+                downloadDao.updateTransfer(row.id, "downloading", (index + 1f) / playlist.segments.size, bytes, null, (bytes - lastBytes) * 1000 / (now - lastAt).coerceAtLeast(1))
+                lastAt = now; lastBytes = bytes
+            }
+            out.flush()
+        }
+        currentCoroutineContext().ensureActive()
+        downloadDao.updateTransfer(row.id, "completed", 1f, storageManager.getFileLength(row.outputPath), storageManager.getFileLength(row.outputPath))
     }
     private suspend fun transfer(original: DownloadEntity) {
         var row = original
@@ -106,7 +167,7 @@ class DownloadManager(private val context: Context, private val downloadDao: Dow
                 setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/128.0.0.0 Mobile Safari/537.36")
                 setRequestProperty("Accept-Encoding", "identity")
                 row.referer?.let { setRequestProperty("Referer", it) }
-                if (downloaded > 0) setRequestProperty("Range", "bytes=$downloaded-")
+                if (downloaded > 0 && !row.streamUrl.contains(".m3u8", true)) setRequestProperty("Range", "bytes=$downloaded-")
             }
             connections[row.id] = connection
             currentCoroutineContext().ensureActive()
@@ -118,6 +179,17 @@ class DownloadManager(private val context: Context, private val downloadDao: Dow
                 downloadDao.updateTransfer(row.id, "completed", 1f, downloaded, total); return
             }
             require(code == 200 || code == 206) { "Error HTTP $code" }
+            if (row.streamUrl.contains(".m3u8", true) || connection.contentType.orEmpty().contains("mpegurl", true)) {
+                connection.disconnect()
+                val playlist = hlsPlaylist(row)
+                val extension = if (playlist.initialization == null) "ts" else "mp4"
+                val path = storageManager.createDownloadTarget(settings.settings.first().downloadFolderUri, row.animeTitle, row.episodeNumber, extension)
+                if (path != row.outputPath) storageManager.deleteFile(row.outputPath)
+                row = row.copy(outputPath = path, downloadedBytes = 0, totalBytes = null, progress = 0f)
+                downloadDao.updateDownload(row)
+                transferHls(row, playlist)
+                return
+            }
             require(!connection.contentType.orEmpty().contains("text/html", true) && !connection.contentType.orEmpty().contains("mpegurl", true)) { "El servidor no devolvió un video descargable" }
             val append = code == 206
             if (append) {
@@ -152,7 +224,10 @@ class DownloadManager(private val context: Context, private val downloadDao: Dow
             withContext(NonCancellable) {
                 if (row.id !in cancelledTasks && downloadDao.getDownloadById(row.id) != null) {
                     val paused = e is CancellationException || row.id in pausedTasks
-                    downloadDao.updateTransfer(row.id, if (paused) "paused" else "failed", fraction(downloaded, total), downloaded, total, 0,
+                    val saved = downloadDao.getDownloadById(row.id)
+                    downloaded = storageManager.getFileLength(row.outputPath)
+                    val progress = if (total == null) saved?.progress ?: 0f else fraction(downloaded, total)
+                    downloadDao.updateTransfer(row.id, if (paused) "paused" else "failed", progress, downloaded, total, 0,
                         if (paused) null else e.localizedMessage ?: "Error durante la descarga")
                 }
             }

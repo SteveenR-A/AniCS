@@ -31,7 +31,6 @@ fun DownloadsScreen(viewModel: DownloadsViewModel, onPlayOffline: (String, Strin
     var queue by remember { mutableStateOf(false) }
     var remove by remember { mutableStateOf<DownloadEntity?>(null) }
     var deleteFile by remember { mutableStateOf(false) }
-    val databasePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(viewModel::importTauriDatabase) }
     val groups = state.completedDownloads.groupBy { com.anics.nativeapp.sync.SyncContract.titleKey(it.animeTitle) }.values.toList()
     val folder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) try {
@@ -47,7 +46,7 @@ fun DownloadsScreen(viewModel: DownloadsViewModel, onPlayOffline: (String, Strin
             AniPanel {
                 SectionTitle("Almacenamiento del dispositivo", icon = AniIcons.HardDrive, action = { IconButton(onClick = viewModel::refreshStorage) { Icon(AniIcons.RefreshCw, "Actualizar almacenamiento") } })
                 Text("${formatBytes(state.freeSpace)} libres de ${formatBytes(state.totalSpace)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                LinearProgressIndicator(progress = { ((state.totalSpace - state.freeSpace).toDouble() / state.totalSpace).toFloat().coerceIn(0f,1f) }, modifier = Modifier.fillMaxWidth().height(7.dp).clip(RoundedCornerShape(50)))
+                LinearProgressIndicator(progress = { ((state.totalSpace - state.freeSpace).toDouble() / state.totalSpace).toFloat().coerceIn(0f,1f) }, modifier = Modifier.fillMaxWidth().height(7.dp).clip(RoundedCornerShape(50)), drawStopIndicator = {})
                 Text("Videos de AniCS: ${formatBytes(state.completedDownloads.sumOf { it.downloadedBytes })}", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
             }
         }
@@ -58,10 +57,6 @@ fun DownloadsScreen(viewModel: DownloadsViewModel, onPlayOffline: (String, Strin
             }
         }
         state.message?.let { message -> item { Text(message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } }
-        item {
-            Text("Los metadatos y portadas de Tauri se detectan automáticamente en la carpeta Anime.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            TextButton(onClick = { databasePicker.launch(arrayOf("application/octet-stream", "application/vnd.sqlite3", "application/x-sqlite3", "*/*")) }) { Text("Importar una copia antigua de anics.db") }
-        }
         if (state.isScanning) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -70,7 +65,7 @@ fun DownloadsScreen(viewModel: DownloadsViewModel, onPlayOffline: (String, Strin
             }
         }
         if (queue) {
-            if (state.activeDownloads.isEmpty()) item { AniEmptyState("No hay descargas pendientes", "Elige un episodio y un servidor MP4 para descargarlo.", AniIcons.Download) }
+            if (state.activeDownloads.isEmpty()) item { AniEmptyState("No hay descargas pendientes", "Elige un episodio y un servidor compatible para descargarlo.", AniIcons.Download) }
             items(state.activeDownloads, key = { it.id }) { row ->
                 ActiveDownloadItem(row, { viewModel.pauseDownload(row.id) }, { viewModel.resumeDownload(row.id) }, { deleteFile = false; remove = row })
             }
@@ -131,7 +126,7 @@ fun ActiveDownloadItem(download: DownloadEntity, onPause: () -> Unit, onResume: 
             IconButton(onClick = onCancel) { Icon(AniIcons.X, "Cancelar descarga") }
         }
         download.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-        LinearProgressIndicator(progress = { download.progress.coerceIn(0f,1f) }, modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(50)))
+        LinearProgressIndicator(progress = { download.progress.coerceIn(0f,1f) }, modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(50)), drawStopIndicator = {})
         Text("${(download.progress * 100).toInt()}% · ${formatBytes(download.downloadedBytes)}" + (download.totalBytes?.let { " / ${formatBytes(it)}" } ?: "") +
             (if (download.status == "downloading") " · ${formatBytes(download.speedBytesPerSecond)}/s" else ""), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }

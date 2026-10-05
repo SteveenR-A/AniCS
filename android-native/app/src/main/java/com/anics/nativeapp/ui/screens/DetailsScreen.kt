@@ -44,15 +44,12 @@ fun DetailsScreen(url: String, source: String, viewModel: DetailsViewModel, onBa
                 item {
                     AnimeDetailHeader(details.title, details.thumbnailUrl,
                         listOfNotNull(details.status, details.year, sourceLabel(details.source)).joinToString(" · "),
-                        state.isFavorite, onBack, viewModel::toggleFavorite)
+                        state.isFavorite, onBack, viewModel::toggleFavorite, details.genres)
                 }
                 item {
                     Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            details.genres.forEach { genre -> Surface(color = MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(50)) { Text(genre, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) } }
-                        }
                         Text(details.synopsis, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = if (expanded) Int.MAX_VALUE else 3, overflow = TextOverflow.Ellipsis)
-                        if (details.synopsis.length > 150) TextButton(onClick = { expanded = !expanded }, contentPadding = PaddingValues(0.dp)) { Text(if (expanded) "Ver menos" else "Leer sinopsis completa") }
+                        if (details.synopsis.length > 150) TextButton(onClick = { expanded = !expanded }, contentPadding = PaddingValues(0.dp), modifier = Modifier.heightIn(min = 32.dp)) { Text(if (expanded) "Ver menos" else "Leer sinopsis completa") }
                         val resume = state.resumeEpisode ?: details.episodes.minByOrNull { it.number }
                         resume?.let { episode -> Button(onClick = { viewModel.selectEpisode(episode); servers = true }, modifier = Modifier.fillMaxWidth()) {
                             Icon(AniIcons.Play, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp))
@@ -99,7 +96,7 @@ fun DetailsScreen(url: String, source: String, viewModel: DetailsViewModel, onBa
                                 }
                             }
                         }
-                        if (details.episodes.isNotEmpty()) OutlinedButton(onClick = { batch = true }, modifier = Modifier.fillMaxWidth()) {
+                        if (details.episodes.size > 1) OutlinedButton(onClick = { batch = true }, modifier = Modifier.fillMaxWidth()) {
                             Icon(AniIcons.Download, null, Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text("Descargar lote / temporada")
                         }
                         Spacer(Modifier.height(2.dp))
@@ -155,8 +152,7 @@ fun DetailsScreen(url: String, source: String, viewModel: DetailsViewModel, onBa
                             Text(if (com.anics.nativeapp.downloads.ServerSupport.playable(server)) "Compatible · Disponibilidad según servidor" else "No compatible en esta versión", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         IconButton(enabled = com.anics.nativeapp.downloads.ServerSupport.playable(server), onClick = { viewModel.resolveServer(server) { media ->
-                            if (media.mediaType == NativeMediaType.HLS) viewModel.reportError("Para descargar, elige un servidor MP4. Las descargas HLS siguen pendientes.")
-                            else { onDownloadEpisode(media, state.details?.title ?: "Anime", state.selectedEpisode!!.number.toInt()); servers = false }
+                            onDownloadEpisode(media, state.details?.title ?: "Anime", state.selectedEpisode!!.number.toInt()); servers = false
                         } }) { Icon(AniIcons.Download, "Descargar desde ${server.name}", Modifier.size(20.dp)) }
                         IconButton(enabled = com.anics.nativeapp.downloads.ServerSupport.playable(server), onClick = { viewModel.resolveServer(server) { media -> servers = false; onPlayEpisode(media, state.details?.title ?: "Anime", state.selectedEpisode!!.number.toInt()) } }) { Icon(AniIcons.Play, "Reproducir desde ${server.name}", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary) }
                     }

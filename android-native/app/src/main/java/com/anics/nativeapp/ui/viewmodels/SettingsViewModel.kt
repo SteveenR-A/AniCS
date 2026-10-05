@@ -323,6 +323,21 @@ class SettingsViewModel(
         }
     }
 
+    fun editProfile(name: String, avatar: String) = operation("Perfil actualizado") {
+        val id = _uiState.value.activeProfile?.id ?: error("Selecciona un perfil")
+        profileRepository.updateProfile(id, name, avatar)
+    }
+
+    fun importAvatar(context: android.content.Context, uri: android.net.Uri) = operation("Foto actualizada") {
+        val profile = _uiState.value.activeProfile ?: error("Selecciona un perfil")
+        val avatar = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.anics.nativeapp.ui.components.ProfileImages.import(context, uri) }
+        profileRepository.updateProfile(profile.id, profile.name, avatar)
+    }
+
+    fun exportAvatar(context: android.content.Context, uri: android.net.Uri) = operation("Imagen exportada") {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.anics.nativeapp.ui.components.ProfileImages.export(context, _uiState.value.activeProfile?.avatar ?: "avatar-1", uri) }
+    }
+
     fun deleteProfile(profileId: String) {
         viewModelScope.launch {
             profileRepository.deleteProfile(profileId)

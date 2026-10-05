@@ -27,13 +27,13 @@ class StorageManager(private val context: Context) {
         return animeFolder
     }
 
-    fun createDownloadTarget(folderUri: String, title: String, episode: Int): String {
+    fun createDownloadTarget(folderUri: String, title: String, episode: Int, extension: String = "mp4"): String {
         val safeTitle = title.replace(Regex("""[\\/:*?"<>|]"""), " ").trim(' ', '.').ifBlank { "Anime" }
-        val name = "Ep" + episode.toString().padStart(3, '0') + ".mp4"
+        val name = "Ep" + episode.toString().padStart(3, '0') + ".$extension"
         if (folderUri.isNotBlank()) {
             val root = DocumentFile.fromTreeUri(context, Uri.parse(folderUri)) ?: error("La carpeta elegida no está disponible")
             val directory = root.findFile(safeTitle)?.takeIf { it.isDirectory } ?: root.createDirectory(safeTitle) ?: error("No se pudo crear la carpeta del anime")
-            return (directory.findFile(name) ?: directory.createFile("video/mp4", name) ?: error("No se pudo crear el episodio")).uri.toString()
+            return (directory.findFile(name) ?: directory.createFile(if (extension == "ts") "video/mp2t" else "video/mp4", name) ?: error("No se pudo crear el episodio")).uri.toString()
         }
         val directory = File(getDefaultDownloadFolder(), safeTitle).apply { mkdirs() }
         return File(directory, name).absolutePath

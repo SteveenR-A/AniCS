@@ -31,9 +31,10 @@ import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.anics.nativeapp.ui.components.AniIcons
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AnimeDetailHeader(title: String, imageUrl: String, metadata: String, isFavorite: Boolean,
-    onBack: () -> Unit, onFavorite: () -> Unit) {
+    onBack: () -> Unit, onFavorite: () -> Unit, genres: List<String> = emptyList()) {
     var showCover by remember(imageUrl) { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -44,11 +45,11 @@ fun AnimeDetailHeader(title: String, imageUrl: String, metadata: String, isFavor
             }
         }
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            Box(Modifier.width(110.dp).aspectRatio(2f / 3f).clip(RoundedCornerShape(12.dp))
+            Box(Modifier.width(88.dp).aspectRatio(2f / 3f).clip(RoundedCornerShape(12.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant)
                 .clickable(role = Role.Button, onClickLabel = "Ver portada en grande") { showCover = true }
                 .testTag("anime-cover")) {
-                AsyncImage(imageUrl, "Portada de $title", Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+                AsyncImage(imageUrl, "Portada de $title", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                 Surface(Modifier.align(Alignment.BottomEnd).padding(6.dp), color = Color.Black.copy(alpha = .65f), shape = RoundedCornerShape(6.dp)) {
                     Icon(AniIcons.Maximize, null, Modifier.padding(5.dp).size(16.dp), tint = Color.White)
                 }
@@ -58,6 +59,11 @@ fun AnimeDetailHeader(title: String, imageUrl: String, metadata: String, isFavor
                     Text(title, Modifier.testTag("anime-title"), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 }
                 Text(metadata, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    genres.forEach { genre -> Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(50)) {
+                        Text(genre, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
+                    } }
+                }
             }
         }
     }

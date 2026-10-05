@@ -48,6 +48,14 @@ class ProfileRepository(private val database: com.anics.nativeapp.data.local.App
         return newProfile
     }
 
+    suspend fun updateProfile(id: String, name: String, avatar: String) {
+        require(name.trim().isNotEmpty()) { "El nombre no puede estar vacío" }
+        database.withTransaction {
+            val profile = profileDao.getProfileById(id) ?: error("El perfil ya no existe")
+            profileDao.update(profile.copy(name = name.trim(), avatar = avatar))
+        }
+    }
+
     suspend fun deleteProfile(profileId: String) {
         if (profileId != "default") {
             database.withTransaction {

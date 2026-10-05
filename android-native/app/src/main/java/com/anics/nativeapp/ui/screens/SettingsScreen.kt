@@ -39,6 +39,7 @@ data class SettingsActions(
     val quality: (String) -> Unit = {}, val server: (String) -> Unit = {},
     val downloadServer: (String) -> Unit = {}, val downloadLimit: (Int) -> Unit = {}, val imageCache: (Int) -> Unit = {},
     val switchProfile: (String) -> Unit = {}, val createProfile: (String) -> Unit = {},
+    val editProfile: (String, String) -> Unit = { _, _ -> }, val importAvatar: () -> Unit = {}, val exportAvatar: () -> Unit = {},
     val sourceUrl: (String, String) -> Unit = { _, _ -> },
     val addSource: (String, String, String) -> Unit = { _, _, _ -> },
     val deleteSource: (String) -> Unit = {},
@@ -90,6 +91,8 @@ fun SettingsScreen(viewModel: SettingsViewModel, modifier: Modifier = Modifier, 
     }
     val import = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { it?.let { uri -> viewModel.importBackup(context, uri) } }
     val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { it?.let { uri -> viewModel.exportBackup(context, uri) } }
+    val avatarImport = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> uri?.let { viewModel.importAvatar(context, it) } }
+    val avatarExport = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/png")) { uri -> uri?.let { viewModel.exportAvatar(context, it) } }
     val folder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) try {
             try { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
@@ -102,6 +105,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, modifier: Modifier = Modifier, 
         autoNext = viewModel::toggleAutoPlayNext, fallback = viewModel::toggleFallback,
         quality = viewModel::selectDefaultQuality, server = viewModel::selectPreferredServer,
         downloadServer = viewModel::selectDownloadServer, downloadLimit = viewModel::selectDownloadLimit, imageCache = viewModel::selectImageCache,
+        editProfile = viewModel::editProfile, importAvatar = { avatarImport.launch("image/*") }, exportAvatar = { avatarExport.launch("AniCS-perfil.png") },
         switchProfile = viewModel::switchProfile, createProfile = { viewModel.createProfile(it, "avatar-default") },
         sourceUrl = viewModel::setCatalogUrl, addSource = viewModel::addCatalog,
         deleteSource = viewModel::deleteCatalog,
@@ -323,6 +327,8 @@ fun UpdatePanel(state: SettingsUiState, actions: SettingsActions) {
 fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: Modifier = Modifier,
     focusUpdates: Boolean = false, onUpdateFocused: () -> Unit = {}, cloud: @Composable () -> Unit = {}) {
     var profilesOpen by remember { mutableStateOf(false) }
+    var editProfile by remember { mutableStateOf(false) }
+    var avatar by remember { mutableStateOf("avatar-1") }
     var newProfile by remember { mutableStateOf(false) }
     var name by remember { mutableStateOf("") }
     var editingSource by remember { mutableStateOf<com.anics.nativeapp.ffi.NativeSourceConfig?>(null) }
@@ -381,13 +387,18 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
                 SectionTitle("Perfiles y datos", icon = AniIcons.Cloud)
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Box(Modifier.size(46.dp).background(Brush.linearGradient(listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.secondary)), RoundedCornerShape(16.dp)), contentAlignment = Alignment.Center) {
-                        Icon(AniIcons.Tv, null, tint = MaterialTheme.colorScheme.onPrimary)
+                        ProfileAvatar(state.activeProfile?.avatar ?: "avatar-1", Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp)))
                     }
                     Column(Modifier.weight(1f)) {
                         Text(state.activeProfile?.name ?: "Principal", fontWeight = FontWeight.Bold)
                         Text("${state.profiles.size} perfiles locales", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                     }
                     OutlinedButton(onClick = { profilesOpen = true }) { Text("Cambiar") }
+                }
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = { name = state.activeProfile?.name.orEmpty(); avatar = state.activeProfile?.avatar ?: "avatar-1"; editProfile = true }) { Text("Editar perfil") }
+                    TextButton(onClick = actions.importAvatar) { Text("Elegir foto") }
+                    TextButton(onClick = actions.exportAvatar) { Text("Exportar imagen") }
                 }
                 val activeStats = state.profileStats[state.activeProfile?.id ?: "default"]
                 if (activeStats != null) {
@@ -567,6 +578,17 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
             }
         } }
         item(key = "updates") { UpdatePanel(state, actions) }
+        item { AniPanel {
+            SectionTitle("Arquitectura", icon = AniIcons.Tv)
+            Text("Android nativo: Kotlin y Jetpack Compose. Catálogos y resolución de servidores: Rust mediante UniFFI. Reproducción: Media3. Perfiles, historial y favoritos: Room / SQLite. Preferencias: DataStore.", style = MaterialTheme.typography.bodySmall)
+            Text("ABI del dispositivo: ${android.os.Build.SUPPORTED_ABIS.joinToString()}", style = MaterialTheme.typography.bodySmall)
+        } }
+        item { AniPanel {
+            SectionTitle("Licencia", icon = AniIcons.Tv)
+            Text("GNU General Public License v3 (GPL-3.0). Puedes usar, estudiar, modificar y redistribuir AniCS conforme a esta licencia.", style = MaterialTheme.typography.bodySmall)
+            val context = LocalContext.current
+            TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/SteveenR-A/AniCS/blob/main/LICENSE"))) }) { Text("Leer licencia y código fuente") }
+        } }
         item { Text("AniCS para Android · Kotlin + Rust", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 16.dp)) }
     }
     if (profilesOpen) AlertDialog(onDismissRequest = { profilesOpen = false }, title = { Text("Cambiar perfil") },
@@ -578,6 +600,16 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
             }
             TextButton(onClick = { profilesOpen = false; newProfile = true }) { Icon(AniIcons.Plus, null, Modifier.size(18.dp)); Text(" Crear perfil") }
         } }, confirmButton = { TextButton(onClick = { profilesOpen = false }) { Text("Cerrar") } })
+    if (editProfile) AlertDialog(onDismissRequest = { editProfile = false }, title = { Text("Editar perfil") },
+        text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(name, { name = it }, label = { Text("Nombre") }, singleLine = true)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("avatar-1", "avatar-2", "avatar-3", "avatar-4").forEach { preset ->
+                    Surface(onClick = { avatar = preset }, shape = RoundedCornerShape(12.dp), border = if (avatar == preset) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null) { ProfileAvatar(preset, Modifier.size(48.dp)) }
+                }
+            }
+        } }, confirmButton = { TextButton(enabled = name.isNotBlank(), onClick = { actions.editProfile(name.trim(), avatar); editProfile = false }) { Text("Guardar") } },
+        dismissButton = { TextButton(onClick = { editProfile = false }) { Text("Cancelar") } })
     if (newProfile) AlertDialog(onDismissRequest = { newProfile = false }, title = { Text("Nuevo perfil") },
         text = { OutlinedTextField(name, { name = it }, label = { Text("Nombre") }, singleLine = true) },
         confirmButton = { TextButton(enabled = name.isNotBlank(), onClick = { actions.createProfile(name.trim()); name = ""; newProfile = false }) { Text("Crear") } },
