@@ -60,6 +60,11 @@ class PlaybackSessionViewModel(
     private var generation = 0
     private var endedEpisode: String? = null
     private val historyMutex = Mutex()
+    private var recoveryEpisode: String? = null
+    private val recoveryServers = mutableSetOf<String>()
+
+    private fun serverKey(server: NativeVideoServer) = server.name + "|" + server.url
+    private fun resetRecovery() { recoveryEpisode = null; recoveryServers.clear() }
 
     fun updateSettings(value: AppSettings) {
         settings = value
@@ -119,6 +124,7 @@ class PlaybackSessionViewModel(
         engine.setQuality(quality)
     }
     fun selectServer(server: NativeVideoServer, autoPlay: Boolean = true) {
+        resetRecovery()
         val entry = _state.value.entry ?: return
         val (position, duration) = engine.updatePosition()
         launchOperation {
@@ -152,6 +158,37 @@ class PlaybackSessionViewModel(
     }
     fun next() { _state.value.next?.let(::selectEpisode) }
     fun previous() { _state.value.previous?.let(::selectEpisode) }
+    /** Exhausted network retries may move to another provider once per server/episode. */
+    fun recoverNetworkFailure(autoPlay: Boolean): Boolean {
+        val current = _state.value
+        val entry = current.entry ?: return false
+        if (entry.source == "local" || !settings.allowFallback || current.isResolving) return false
+        if (recoveryEpisode != entry.episodeUrl) { resetRecovery(); recoveryEpisode = entry.episodeUrl }
+        current.selectedServer?.let { recoveryServers.add(serverKey(it)) }
+        val candidates = current.servers.filter(com.anics.nativeapp.downloads.ServerSupport::playable)
+            .filter { serverKey(it) !in recoveryServers }
+        if (candidates.isEmpty()) return false
+        val (position, duration) = engine.updatePosition()
+        launchOperation {
+            persist(entry, position, duration)
+            val resume = if (position == 0L && duration == 0L) savedProgress(entry) else null
+            var lastError: Exception? = null
+            for (server in candidates) {
+                recoveryServers.add(serverKey(server))
+                try {
+                    val media = catalog.resolveStream(server, entry.source)
+                    currentCoroutineContext().ensureActive()
+                    _state.update { it.copy(selectedServer = server) }
+                    applyMedia(entry, media, position, resumeFraction = resume, autoPlay = autoPlay)
+                    _state.update { it.copy(notice = "Servidor alternativo: ${server.name}") }
+                    return@launchOperation
+                } catch (error: CancellationException) { throw error }
+                  catch (error: Exception) { lastError = error }
+            }
+            error(lastError?.localizedMessage ?: "No hay otro servidor disponible")
+        }
+        return true
+    }
     fun ended() {
         val current = _state.value
         val entry = current.entry ?: return
@@ -162,6 +199,7 @@ class PlaybackSessionViewModel(
         else _state.update { it.copy(notice = if (it.next == null) "Has llegado al último episodio disponible" else "Episodio terminado. Puedes continuar con el siguiente.") }
     }
     fun retry() {
+        resetRecovery()
         val current = _state.value; val entry = current.entry ?: return
         val (position, duration) = engine.updatePosition()
         launchOperation {
@@ -197,6 +235,7 @@ class PlaybackSessionViewModel(
         }
     }
     fun close() {
+        resetRecovery()
         saveProgress(); job?.cancel(); generation++
         _state.value = PlaybackSessionState(autoNext = settings.autoPlayNext)
         endedEpisode = null; engine.resetPlayback()

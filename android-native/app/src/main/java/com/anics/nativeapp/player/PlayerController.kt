@@ -12,6 +12,7 @@ import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
+import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -23,6 +24,7 @@ data class PlaybackState(
     val durationMs: Long = 0L,
     val bufferedPositionMs: Long = 0L,
     val error: String? = null,
+    val errorCode: Int? = null,
     val speed: Float = 1f,
     val muted: Boolean = false,
     val ended: Boolean = false,
@@ -40,7 +42,7 @@ class PlayerController(private val context: Context) : PlaybackEngine {
 
     fun initializePlayer(): ExoPlayer {
         if (exoPlayer == null) {
-            exoPlayer = ExoPlayer.Builder(context).build().apply {
+            exoPlayer = ExoPlayer.Builder(context).setLoadControl(streamingLoadControl()).build().apply {
                 // Start at a decodable sync frame instead of decoding/discarding a long GOP.
                 setSeekParameters(SeekParameters.CLOSEST_SYNC)
                 playWhenReady = true
@@ -80,6 +82,7 @@ class PlayerController(private val context: Context) : PlaybackEngine {
                         _playbackState.value = _playbackState.value.copy(
                             isLoading = false,
                             isPlaying = false,
+                            errorCode = error.errorCode,
                             error = error.localizedMessage ?: "Error de reproducción"
                         )
                     }
@@ -104,18 +107,22 @@ class PlayerController(private val context: Context) : PlaybackEngine {
 
         val httpDataSourceFactory = DefaultHttpDataSource.Factory()
             .setAllowCrossProtocolRedirects(true)
-            .setConnectTimeoutMs(15000)
-            .setReadTimeoutMs(20000)
+            .setConnectTimeoutMs(10_000)
+            .setReadTimeoutMs(15_000)
 
         referer?.let { httpDataSourceFactory.setDefaultRequestProperties(mapOf("Referer" to it)) }
         userAgent?.let { httpDataSourceFactory.setUserAgent(it) }
 
+        val dataSourceFactory = StreamingDataSourceFactory(httpDataSourceFactory)
+        val loadErrorPolicy = DefaultLoadErrorHandlingPolicy(4)
         val mediaItem = MediaItem.fromUri(directUrl)
         val mediaSource: MediaSource = if (isHls || directUrl.contains(".m3u8")) {
-            HlsMediaSource.Factory(httpDataSourceFactory)
+            HlsMediaSource.Factory(dataSourceFactory)
+                .setLoadErrorHandlingPolicy(loadErrorPolicy)
                 .setExtractorFactory(playbackHlsExtractorsFactory()).createMediaSource(mediaItem)
         } else {
-            ProgressiveMediaSource.Factory(httpDataSourceFactory, playbackExtractorsFactory())
+            ProgressiveMediaSource.Factory(dataSourceFactory, playbackExtractorsFactory())
+                .setLoadErrorHandlingPolicy(loadErrorPolicy)
                 .createMediaSource(mediaItem)
         }
 
@@ -134,7 +141,7 @@ class PlayerController(private val context: Context) : PlaybackEngine {
         _playbackState.value = _playbackState.value.copy(currentPositionMs = position, durationMs = duration, bufferedPositionMs = buffered)
         return position to duration
     }
-    fun reportError(message: String) { _playbackState.value = _playbackState.value.copy(error = message, isLoading = false) }
+    fun reportError(message: String) { _playbackState.value = _playbackState.value.copy(error = message, errorCode = null, isLoading = false) }
     fun pause() { exoPlayer?.pause() }
     fun play() { exoPlayer?.play() }
     fun setSpeed(speed: Float) { exoPlayer?.setPlaybackSpeed(speed); _playbackState.value = _playbackState.value.copy(speed = speed) }
