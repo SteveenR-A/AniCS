@@ -38,6 +38,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.common.PlaybackException
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.anics.nativeapp.ui.components.*
@@ -69,6 +70,15 @@ fun PlayerScreen(controller: PlayerController, viewModel: PlaybackSessionViewMod
     LaunchedEffect(feedback) { if (feedback != null) { delay(1200); feedback = null } }
     LaunchedEffect(session.notice) { if (session.notice != null) { delay(3500); viewModel.dismissNotice() } }
     LaunchedEffect(playback.ended) { if (playback.ended) { hud = true; viewModel.ended() } }
+    LaunchedEffect(playback.error, playback.errorCode, session.selectedServer?.url) {
+        if (playback.error != null && playback.errorCode in listOf(
+            PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+            PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT,
+            PlaybackException.ERROR_CODE_IO_INVALID_HTTP_CONTENT_TYPE,
+            PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS)) {
+            viewModel.recoverNetworkFailure(player.playWhenReady)
+        }
+    }
     LaunchedEffect(session.entry?.episodeUrl) {
         var ticks = 0
         while (true) { delay(250); val (position, duration) = controller.updatePosition(); if (++ticks % 40 == 0 && duration > 0 && position > 0) viewModel.saveProgress(position, duration) }
@@ -140,7 +150,7 @@ fun PlayerScreen(controller: PlayerController, viewModel: PlaybackSessionViewMod
             IconButton(onClick = { locked = false; hud = true }) { Icon(AniIcons.Unlock, "Desbloquear controles", tint = Color.White) }
         }
         val error = session.error ?: playback.error
-        if (error != null && !locked) Surface(Modifier.align(Alignment.Center).padding(24.dp).widthIn(max = 460.dp), color = Color.Black.copy(alpha = .9f), shape = RoundedCornerShape(18.dp)) {
+        if (error != null && !locked && !session.isResolving) Surface(Modifier.align(Alignment.Center).padding(24.dp).widthIn(max = 460.dp), color = Color.Black.copy(alpha = .9f), shape = RoundedCornerShape(18.dp)) {
             Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("No se pudo reproducir", color = Color.White, fontWeight = FontWeight.Bold)
                 Text(error, color = Color.LightGray, style = MaterialTheme.typography.bodySmall)

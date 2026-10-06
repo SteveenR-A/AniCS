@@ -115,6 +115,50 @@ class PlaybackSessionTest {
         assertEquals(servers, vm.state.value.servers)
         assertEquals(1, engine.prepared.size)
     }
+    @Test fun networkRecoveryPreservesPositionProfileAndPausedIntentWithoutCyclingThroughFailedServers() = runTest(dispatcher) {
+        val engine = Engine(); val history = History(); val vm = PlaybackSessionViewModel(Catalog(), history, engine, { it })
+        vm.open(entry, episodes, servers, servers[0], media()); advanceUntilIdle()
+        engine.position = 123000; engine.duration = 900000
+        assertTrue(vm.recoverNetworkFailure(autoPlay = false)); advanceUntilIdle()
+        assertEquals("Desu", vm.state.value.selectedServer!!.name)
+        assertEquals("desu.mp4", engine.prepared.last().url)
+        assertEquals(123000, engine.prepared.last().start); assertFalse(engine.prepared.last().play)
+        assertEquals(entry.profileId, history.recorded.last().profileId)
+        assertFalse(vm.recoverNetworkFailure(autoPlay = true)); advanceUntilIdle()
+        assertEquals(2, engine.prepared.size)
+    }
+    @Test fun networkRecoveryHonorsFallbackSettingAndDoesNotSwitchLocalPlayback() = runTest(dispatcher) {
+        val engine = Engine(); val vm = PlaybackSessionViewModel(Catalog(), History(), engine, { it })
+        vm.updateSettings(AppSettings(allowFallback = false))
+        vm.open(entry, episodes, servers, servers[0], media()); advanceUntilIdle()
+        assertFalse(vm.recoverNetworkFailure(true)); assertEquals(1, engine.prepared.size)
+        vm.updateSettings(AppSettings(allowFallback = true))
+        vm.open(entry.copy(source = "local"), episodes, servers, servers[0], media()); advanceUntilIdle()
+        assertFalse(vm.recoverNetworkFailure(true)); assertEquals(2, engine.prepared.size)
+    }
+    @Test fun networkRecoveryBeforeTheTimelineLoadsKeepsSavedHistoryProgress() = runTest(dispatcher) {
+        val engine = Engine(); val history = History()
+        history.saved[entry.profileId to entry.episodeUrl] = entry.copy(watchProgress = .42)
+        val vm = PlaybackSessionViewModel(Catalog(), history, engine, { it })
+        vm.open(entry, episodes, servers, servers[0], media()); advanceUntilIdle()
+        assertTrue(vm.recoverNetworkFailure(true)); advanceUntilIdle()
+        assertEquals(.42, engine.prepared.last().fraction!!, .00001)
+    }
+    @Test fun failedAlternativeResolutionCanBeRetriedManuallyAndRecoveryIsResetForANewEpisode() = runTest(dispatcher) {
+        val engine = Engine(); val catalog = Catalog(); val vm = PlaybackSessionViewModel(catalog, History(), engine, { it })
+        vm.open(entry, episodes, servers, servers[0], media()); advanceUntilIdle()
+        catalog.failure = true
+        assertTrue(vm.recoverNetworkFailure(true)); advanceUntilIdle()
+        assertNotNull(vm.state.value.error)
+        assertFalse(vm.recoverNetworkFailure(true))
+        catalog.failure = false
+        vm.selectServer(servers[1]); advanceUntilIdle()
+        assertNull(vm.state.value.error)
+        assertTrue(vm.recoverNetworkFailure(true)); advanceUntilIdle()
+        vm.selectEpisode(episodes[1]); advanceUntilIdle()
+        assertTrue(vm.recoverNetworkFailure(true)); advanceUntilIdle()
+        assertEquals(2, vm.state.value.entry!!.episodeNumber)
+    }
     companion object {
         fun episode(number: Int) = NativeEpisode(number.toUInt(), null, "ep$number", null, false, null)
         fun media() = NativeResolvedMedia("initial.mp4", NativeMediaType.MP4, null, null, emptyList())
