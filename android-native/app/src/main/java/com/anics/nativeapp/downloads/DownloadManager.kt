@@ -23,6 +23,7 @@ class DownloadManager(private val context: Context, private val downloadDao: Dow
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val activeJobs = ConcurrentHashMap<String, Job>()
     private val connections = ConcurrentHashMap<String, HttpURLConnection>()
+    private val sizeConnections = ConcurrentHashMap<String, HttpURLConnection>()
     private val pausedTasks = ConcurrentHashMap.newKeySet<String>()
     private val cancelledTasks = ConcurrentHashMap.newKeySet<String>()
     private val admission = Mutex()
@@ -156,7 +157,7 @@ class DownloadManager(private val context: Context, private val downloadDao: Dow
                 currentCoroutineContext().ensureActive()
                 out.write(data); bytes += data.size
                 val now = android.os.SystemClock.elapsedRealtime()
-                downloadDao.updateTransfer(row.id, "downloading", (index + 1f) / playlist.segments.size, bytes, null, (bytes - lastBytes) * 1000 / (now - lastAt).coerceAtLeast(1))
+                downloadDao.updateTransfer(row.id, "downloading", playlist.progress(index + 1), bytes, null, (bytes - lastBytes) * 1000 / (now - lastAt).coerceAtLeast(1))
                 lastAt = now; lastBytes = bytes
             }
             out.flush()
@@ -176,7 +177,7 @@ class DownloadManager(private val context: Context, private val downloadDao: Dow
             currentCoroutineContext().ensureActive()
             val connection = (URL(row.streamUrl).openConnection() as HttpURLConnection).apply {
                 connectTimeout = 15000; readTimeout = 20000; instanceFollowRedirects = true
-                setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/128.0.0.0 Mobile Safari/537.36")
+                setRequestProperty("User-Agent", DownloadSizes.USER_AGENT)
                 setRequestProperty("Accept-Encoding", "identity")
                 row.referer?.let { setRequestProperty("Referer", it) }
                 if (downloaded > 0 && !row.streamUrl.contains(".m3u8", true)) setRequestProperty("Range", "bytes=$downloaded-")
@@ -194,6 +195,7 @@ class DownloadManager(private val context: Context, private val downloadDao: Dow
             }
             require(code == 200 || code == 206) { "Error HTTP $code" }
             if (row.streamUrl.contains(".m3u8", true) || connection.contentType.orEmpty().contains("mpegurl", true)) {
+                total = null
                 connection.disconnect()
                 val playlist = hlsPlaylist(row)
                 val extension = if (playlist.initialization == null) "ts" else "mp4"
@@ -212,9 +214,21 @@ class DownloadManager(private val context: Context, private val downloadDao: Dow
                 val end = match?.groupValues?.get(2)?.toLongOrNull()
                 total = match?.groupValues?.get(3)?.toLongOrNull()
                 require(start == downloaded && end != null && total != null && end >= start!! && end < total!! && (connection.contentLengthLong < 0 || connection.contentLengthLong == end - start + 1)) { "El servidor no respetó el rango de reanudación" }
-            } else { downloaded = 0; total = connection.contentLengthLong.takeIf { it > 0 } }
+            } else {
+                downloaded = 0
+                total = connection.contentLengthLong.takeIf { it > 0 }
+                if (total == null) {
+                    currentCoroutineContext().ensureActive()
+                    total = DownloadSizes.probe(connection.url.toString(), row.referer,
+                        onOpen = { probe -> sizeConnections[row.id] = probe },
+                        onClose = { probe -> sizeConnections.remove(row.id, probe) })
+                    currentCoroutineContext().ensureActive()
+                }
+            }
             val (output, offset) = storageManager.openOutputStreamForAppend(row.outputPath, append)
             downloaded = offset
+            // Publish size as soon as response headers/probe are available, even before the first buffer.
+            downloadDao.updateTransfer(row.id, "downloading", fraction(downloaded, total), downloaded, total)
             var lastAt = android.os.SystemClock.elapsedRealtime(); var lastBytes = downloaded
             output.use { out -> connection.inputStream.use { input ->
                 val buffer = ByteArray(64 * 1024)
@@ -241,15 +255,17 @@ class DownloadManager(private val context: Context, private val downloadDao: Dow
                     val paused = e is CancellationException || row.id in pausedTasks
                     val saved = downloadDao.getDownloadById(row.id)
                     downloaded = storageManager.getFileLength(row.outputPath)
+                    // HLS owns progress and its eventual actual total; an estimate is display-only.
+                    total = saved?.totalBytes ?: total
                     val progress = if (total == null) saved?.progress ?: 0f else fraction(downloaded, total)
                     downloadDao.updateTransfer(row.id, if (paused) "paused" else "failed", progress, downloaded, total, 0,
                         if (paused) null else e.localizedMessage ?: "Error durante la descarga")
                 }
             }
-        } finally { connections.remove(row.id)?.disconnect(); activeJobs.remove(row.id, currentCoroutineContext()[Job]) }
+        } finally { sizeConnections.remove(row.id)?.disconnect(); connections.remove(row.id)?.disconnect(); activeJobs.remove(row.id, currentCoroutineContext()[Job]) }
     }
     suspend fun pauseDownload(id: String) = controls.withLock {
-        val job = admission.withLock { pausedTasks.add(id); activeJobs[id]?.also { it.cancel(); connections[id]?.disconnect() } }
+        val job = admission.withLock { pausedTasks.add(id); activeJobs[id]?.also { it.cancel(); connections[id]?.disconnect(); sizeConnections[id]?.disconnect() } }
         job?.join()
         downloadDao.getDownloadById(id)?.takeIf { it.status in listOf("queued", "downloading") }?.let { downloadDao.updateTransfer(id, "paused", it.progress, it.downloadedBytes, it.totalBytes) }
     }
@@ -269,9 +285,9 @@ class DownloadManager(private val context: Context, private val downloadDao: Dow
         }
     }
     fun startDownload(id: String) { scope.launch { resumeDownload(id) } }
-    fun close() { scope.cancel(); connections.values.forEach { it.disconnect() } }
+    fun close() { scope.cancel(); connections.values.forEach { it.disconnect() }; sizeConnections.values.forEach { it.disconnect() } }
     suspend fun cancelDownload(id: String) = controls.withLock {
-        val job = admission.withLock { cancelledTasks.add(id); pausedTasks.add(id); activeJobs[id]?.also { it.cancel(); connections[id]?.disconnect() } }
+        val job = admission.withLock { cancelledTasks.add(id); pausedTasks.add(id); activeJobs[id]?.also { it.cancel(); connections[id]?.disconnect(); sizeConnections[id]?.disconnect() } }
         try {
             job?.join()
             downloadDao.getDownloadById(id)?.let { storageManager.deleteFile(it.outputPath); downloadDao.deleteDownload(id) }
