@@ -2,8 +2,23 @@ package com.anics.nativeapp.downloads
 
 import java.net.URI
 
-data class HlsSegment(val url: String, val keyUrl: String? = null, val iv: ByteArray? = null)
-data class HlsPlaylist(val segments: List<HlsSegment>, val initialization: String? = null)
+data class HlsSegment(val url: String, val keyUrl: String? = null, val iv: ByteArray? = null, val durationSeconds: Double = 0.0)
+data class HlsPlaylist(val segments: List<HlsSegment>, val initialization: String? = null) {
+    private val fractions: FloatArray by lazy {
+        val duration = segments.sumOf { it.durationSeconds }
+        val weighted = duration.isFinite() && duration > 0 && segments.all { it.durationSeconds > 0 }
+        var elapsed = 0.0
+        FloatArray(segments.size + 1) { index ->
+            if (index == 0) 0f else {
+                elapsed += segments[index - 1].durationSeconds
+                if (weighted) (elapsed / duration).toFloat().coerceIn(0f, 1f) else index.toFloat() / segments.size
+            }
+        }
+    }
+    fun progress(completedSegments: Int): Float {
+        return fractions[completedSegments.coerceIn(0, segments.size)]
+    }
+}
 
 /** Finite full-resource playlists. Reject unsupported formats before writing a video. */
 object HlsPlaylists {
@@ -24,8 +39,11 @@ object HlsPlaylists {
         var explicitIv: ByteArray? = null
         var sequence = 0L
         var initialization: String? = null
+        var duration = 0.0
         val segments = mutableListOf<HlsSegment>()
         for (line in text.lineSequence().map(String::trim)) when {
+            line.startsWith("#EXTINF:") -> duration = line.substringAfter(':').substringBefore(',').toDoubleOrNull()
+                ?.takeIf { it.isFinite() && it > 0 } ?: 0.0
             line.startsWith("#EXT-X-MEDIA-SEQUENCE:") -> sequence = line.substringAfter(':').toLong()
             line.startsWith("#EXT-X-MAP:") -> {
                 require(attribute(line, "BYTERANGE") == null && key == null) { "Inicialización HLS no compatible" }
@@ -44,7 +62,8 @@ object HlsPlaylists {
             }
             line.isNotBlank() && !line.startsWith('#') -> {
                 val iv = explicitIv ?: java.nio.ByteBuffer.allocate(16).putLong(0).putLong(sequence).array()
-                segments.add(HlsSegment(URI(base).resolve(line).toString(), key, if (key != null) iv else null))
+                segments.add(HlsSegment(URI(base).resolve(line).toString(), key, if (key != null) iv else null, duration))
+                duration = 0.0
                 sequence++
             }
         }

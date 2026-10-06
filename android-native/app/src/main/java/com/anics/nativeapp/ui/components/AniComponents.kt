@@ -15,6 +15,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.testTag
 import com.anics.nativeapp.ffi.NativeSourceConfig
 
 @Composable
@@ -78,15 +79,18 @@ fun AniHeader(sources: List<NativeSourceConfig>, selectedSource: String, onSourc
     var menu by remember { mutableStateOf(false) }
     Surface(color = MaterialTheme.colorScheme.background) {
         Column {
-            Row(Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = 48.dp).padding(horizontal = 10.dp),
-                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Row(Modifier.weight(1f).clickable(onClick = onHome), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Box(Modifier.size(26.dp).clip(RoundedCornerShape(8.dp)).background(Brush.linearGradient(listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.secondary))), contentAlignment = Alignment.Center) {
-                        Icon(AniIcons.Monitor, "AniCS", Modifier.size(20.dp), tint = Color.White)
+            Row(Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = 48.dp).padding(horizontal = 10.dp).testTag("anics-header"),
+                verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f)) {
+                    Row(Modifier.clickable(onClick = onHome), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Box(Modifier.size(26.dp).clip(RoundedCornerShape(8.dp)).background(Brush.linearGradient(listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.secondary))), contentAlignment = Alignment.Center) {
+                            Icon(AniIcons.Monitor, "AniCS", Modifier.size(20.dp), tint = Color.White)
+                        }
+                        Text("AniCS", fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
-                    Text("AniCS", fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
-                if (showSource) Box {
+                // Equal side slots keep the source at the actual center, independent of the logo width.
+                if (showSource) Box(Modifier.testTag("header-source-selector")) {
                     Surface(onClick = { menu = true }, color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(50), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
                         Row(Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                             Box(Modifier.size(6.dp).clip(RoundedCornerShape(50)).background(MaterialTheme.colorScheme.primary))
@@ -123,8 +127,12 @@ fun AniHeader(sources: List<NativeSourceConfig>, selectedSource: String, onSourc
                         }
                     }
                 }
-                IconButton(onClick = onFavorites, modifier = Modifier.size(38.dp)) { Icon(AniIcons.Heart, "Favoritos", tint = if (favoritesActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) }
-                IconButton(onClick = onSettings, modifier = Modifier.size(38.dp)) { Icon(AniIcons.Settings, "Ajustes", tint = if (settingsActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) }
+                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+                    Row {
+                        IconButton(onClick = onFavorites, modifier = Modifier.size(38.dp)) { Icon(AniIcons.Heart, "Favoritos", tint = if (favoritesActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) }
+                        IconButton(onClick = onSettings, modifier = Modifier.size(38.dp)) { Icon(AniIcons.Settings, "Ajustes", tint = if (settingsActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) }
+                    }
+                }
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         }

@@ -8,6 +8,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
@@ -40,6 +41,8 @@ class PlayerController(private val context: Context) : PlaybackEngine {
     fun initializePlayer(): ExoPlayer {
         if (exoPlayer == null) {
             exoPlayer = ExoPlayer.Builder(context).build().apply {
+                // Start at a decodable sync frame instead of decoding/discarding a long GOP.
+                setSeekParameters(SeekParameters.CLOSEST_SYNC)
                 playWhenReady = true
                 addListener(object : Player.Listener {
                     override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
@@ -109,9 +112,11 @@ class PlayerController(private val context: Context) : PlaybackEngine {
 
         val mediaItem = MediaItem.fromUri(directUrl)
         val mediaSource: MediaSource = if (isHls || directUrl.contains(".m3u8")) {
-            HlsMediaSource.Factory(httpDataSourceFactory).createMediaSource(mediaItem)
+            HlsMediaSource.Factory(httpDataSourceFactory)
+                .setExtractorFactory(playbackHlsExtractorsFactory()).createMediaSource(mediaItem)
         } else {
-            ProgressiveMediaSource.Factory(httpDataSourceFactory).createMediaSource(mediaItem)
+            ProgressiveMediaSource.Factory(httpDataSourceFactory, playbackExtractorsFactory())
+                .createMediaSource(mediaItem)
         }
 
         player.setMediaSource(mediaSource)
@@ -147,17 +152,15 @@ class PlayerController(private val context: Context) : PlaybackEngine {
     }
 
     fun seekRelative(offsetMs: Long) {
-        exoPlayer?.let {
-            val target = (it.currentPosition + offsetMs).coerceIn(0L, it.duration.coerceAtLeast(0L))
-            it.seekTo(target)
-            _playbackState.value = _playbackState.value.copy(currentPositionMs = target)
-        }
+        exoPlayer?.let { seekTo(it.currentPosition + offsetMs) }
     }
 
     fun seekTo(positionMs: Long) {
-        exoPlayer?.let {
-            it.seekTo(positionMs)
-            _playbackState.value = _playbackState.value.copy(currentPositionMs = positionMs)
+        exoPlayer?.let { player ->
+            if (seekPlayback(player, positionMs)) {
+                // Media3 may adjust the request to a nearby keyframe; use its actual position.
+                updatePosition()
+            }
         }
     }
 

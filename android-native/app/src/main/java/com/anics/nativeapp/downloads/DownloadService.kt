@@ -107,8 +107,9 @@ class DownloadService : Service() {
     internal fun notification(row: DownloadEntity?, active: List<DownloadEntity>): Notification {
         val launch = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java).putExtra("open_downloads", true), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val running = row?.status in listOf("queued", "downloading")
+        val size = row?.let { DownloadSizes.info(it.downloadedBytes, it.totalBytes, it.progress) }
         val text = when (row?.status) {
-            "downloading" -> "${(row.progress * 100).toInt()}% · ${formatBytes(row.speedBytesPerSecond)}/s · ${active.size} pendientes"
+            "downloading" -> com.anics.nativeapp.ui.components.downloadTransferText(row) + " · ${active.size} pendientes"
             "queued" -> "En cola · Preparando servidor"
             "paused" -> "Pausada · ${formatBytes(row.downloadedBytes)}"
             "failed" -> row.error ?: "No se pudo descargar"
@@ -119,7 +120,7 @@ class DownloadService : Service() {
             .setContentTitle(row?.let { "${it.animeTitle} · Ep. ${it.episodeNumber}" } ?: "Descargas AniCS")
             .setContentText(text).setOnlyAlertOnce(true).setContentIntent(launch).setOngoing(running).setAutoCancel(!running)
         if (row != null && row.status != "completed") {
-            builder.setProgress(100, (row.progress * 100).toInt(), row.status == "queued" || (running && row.totalBytes == null))
+            builder.setProgress(100, ((size?.fraction ?: 0f) * 100).toInt(), row.status == "queued" || (running && size?.fraction == null))
             val action = if (running) ACTION_PAUSE else ACTION_RESUME
             builder.addAction(if (running) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
                 if (running) "Pausar" else "Reanudar", actionIntent(row.id, action))

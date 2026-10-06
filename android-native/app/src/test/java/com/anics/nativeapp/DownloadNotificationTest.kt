@@ -15,7 +15,7 @@ import org.robolectric.annotation.Config
 class DownloadNotificationTest {
     @Test fun notificationExposesProgressSpeedAndPauseOrResumeActions() {
         val service = Robolectric.buildService(DownloadService::class.java).get()
-        val row = DownloadEntity("notification", animeTitle = "Anime", episodeNumber = 3, streamUrl = "", outputPath = "/video.mp4", status = "downloading", progress = .42f, totalBytes = 10000, speedBytesPerSecond = 1024, createdAt = "2026-10-02")
+        val row = DownloadEntity("notification", animeTitle = "Anime", episodeNumber = 3, streamUrl = "", outputPath = "/video.mp4", status = "downloading", progress = .42f, downloadedBytes = 4200, totalBytes = 10000, speedBytesPerSecond = 1024, createdAt = "2026-10-02")
         val running = service.notification(row, listOf(row))
         assertEquals(42, running.extras.getInt(Notification.EXTRA_PROGRESS))
         assertTrue(running.extras.getCharSequence(Notification.EXTRA_TEXT).toString().contains("/s"))
@@ -24,5 +24,19 @@ class DownloadNotificationTest {
         val paused = service.notification(row.copy(status = "paused"), emptyList())
         assertEquals(listOf("Reanudar", "Cancelar"), paused.actions.map { it.title.toString() })
         assertEquals(0, paused.flags and Notification.FLAG_ONGOING_EVENT)
+    }
+
+    @Test fun hlsShowsEstimatedSizeAndDeterminateProgressButUnknownDirectSizeDoesNotInventAPercentage() {
+        val service = Robolectric.buildService(DownloadService::class.java).get()
+        val row = DownloadEntity("hls", animeTitle = "Anime", episodeNumber = 1, streamUrl = "list.m3u8", outputPath = "/video.ts",
+            status = "downloading", downloadedBytes = 1024, progress = .25f, createdAt = "2026-10-05")
+        val hls = service.notification(row, listOf(row))
+        assertEquals(25, hls.extras.getInt(Notification.EXTRA_PROGRESS))
+        assertFalse(hls.extras.getBoolean(Notification.EXTRA_PROGRESS_INDETERMINATE))
+        assertTrue(hls.extras.getCharSequence(Notification.EXTRA_TEXT).toString().contains("4 KB (estimado)"))
+        val unknown = service.notification(row.copy(progress = 0f, streamUrl = "video.mp4"), listOf(row))
+        assertTrue(unknown.extras.getBoolean(Notification.EXTRA_PROGRESS_INDETERMINATE))
+        assertTrue(unknown.extras.getCharSequence(Notification.EXTRA_TEXT).toString().contains("Total no disponible"))
+        assertFalse(unknown.extras.getCharSequence(Notification.EXTRA_TEXT).toString().contains("%"))
     }
 }

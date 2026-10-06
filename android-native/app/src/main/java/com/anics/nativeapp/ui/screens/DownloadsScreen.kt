@@ -22,6 +22,7 @@ import coil.compose.AsyncImage
 import com.anics.nativeapp.data.local.DownloadEntity
 import com.anics.nativeapp.downloads.EpisodeKey
 import com.anics.nativeapp.downloads.EpisodeWatchProgress
+import com.anics.nativeapp.downloads.DownloadSizes
 import com.anics.nativeapp.ui.components.*
 import com.anics.nativeapp.ui.viewmodels.DownloadsViewModel
 
@@ -43,20 +44,12 @@ fun DownloadsScreen(viewModel: DownloadsViewModel, onPlayOffline: (String, Strin
     }
     LaunchedEffect(viewModel) { viewModel.onScreenVisible() }
     LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        item { SectionTitle("Descargas", "Tu biblioteca sin conexión", AniIcons.Download) }
+        item { SectionTitle("Descargas", "Tu biblioteca sin conexión", AniIcons.Download, action = {
+            DownloadOptionsMenu(state.isScanning, state.folderUri.isNotBlank(), { folder.launch(null) },
+                viewModel::refreshLibrary, viewModel::refreshStorage)
+        }) }
         if (state.totalSpace > 0) item {
-            AniPanel {
-                SectionTitle("Almacenamiento del dispositivo", icon = AniIcons.HardDrive, action = { IconButton(onClick = viewModel::refreshStorage) { Icon(AniIcons.RefreshCw, "Actualizar almacenamiento") } })
-                Text("${formatBytes(state.freeSpace)} libres de ${formatBytes(state.totalSpace)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                LinearProgressIndicator(progress = { ((state.totalSpace - state.freeSpace).toDouble() / state.totalSpace).toFloat().coerceIn(0f,1f) }, modifier = Modifier.fillMaxWidth().height(7.dp).clip(RoundedCornerShape(50)), drawStopIndicator = {})
-                Text("Videos de AniCS: ${formatBytes(state.completedDownloads.sumOf { it.downloadedBytes })}", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
-            }
-        }
-        item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { folder.launch(null) }, modifier = Modifier.weight(1f), enabled = !state.isScanning) { Icon(AniIcons.Folder, null, Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text("Carpeta") }
-                OutlinedButton(onClick = viewModel::refreshLibrary, modifier = Modifier.weight(1f), enabled = !state.isScanning && state.folderUri.isNotBlank()) { Icon(AniIcons.RefreshCw, null, Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text("Buscar videos") }
-            }
+            DownloadStorageSummary(state.totalSpace, state.freeSpace, state.completedDownloads.sumOf { it.downloadedBytes })
         }
         state.message?.let { message -> item { Text(message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } }
         val failed = state.activeDownloads.count { it.status == "failed" }
@@ -93,7 +86,7 @@ fun DownloadsScreen(viewModel: DownloadsViewModel, onPlayOffline: (String, Strin
                         }
                         Icon(AniIcons.ChevronDown, if (expanded) "Ocultar episodios" else "Mostrar episodios", Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    TextButton(onClick = { val anime = rows.firstOrNull { it.animeUrl.startsWith("http") }; if (anime != null) onAnime(anime.animeUrl, anime.source) else onSearch(title) }) {
+                    if (expanded) TextButton(onClick = { val anime = rows.firstOrNull { it.animeUrl.startsWith("http") }; if (anime != null) onAnime(anime.animeUrl, anime.source) else onSearch(title) }) {
                         Icon(AniIcons.Tv, null, Modifier.size(15.dp)); Spacer(Modifier.width(6.dp)); Text("Ver en línea")
                     }
                     if (expanded) rows.sortedBy { it.episodeNumber }.forEach { row ->
@@ -134,10 +127,10 @@ fun ActiveDownloadItem(download: DownloadEntity, onPause: () -> Unit, onResume: 
         }
         download.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
         val bar = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(50))
-        if (download.status == "downloading" && download.totalBytes == null) LinearProgressIndicator(modifier = bar)
-        else LinearProgressIndicator(progress = { download.progress.coerceIn(0f,1f) }, modifier = bar, drawStopIndicator = {})
-        Text((if (download.totalBytes != null) "${(download.progress * 100).toInt()}% · " else "") + formatBytes(download.downloadedBytes) + (download.totalBytes?.let { " / ${formatBytes(it)}" } ?: "") +
-            (if (download.status == "downloading") " · ${formatBytes(download.speedBytesPerSecond)}/s" else ""), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        val size = DownloadSizes.info(download.downloadedBytes, download.totalBytes, download.progress)
+        if (download.status == "downloading" && size.fraction == null) LinearProgressIndicator(modifier = bar)
+        else LinearProgressIndicator(progress = { size.fraction ?: 0f }, modifier = bar, drawStopIndicator = {})
+        Text(downloadTransferText(download), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
