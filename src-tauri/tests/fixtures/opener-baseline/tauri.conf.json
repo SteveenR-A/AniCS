@@ -1,13 +1,10 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "AniCS",
-  "version": "0.3.12",
+  "version": "0.3.11",
   "identifier": "com.anics.app",
   "build": {
-    "frontendDist": "../dist",
-    "devUrl": "http://localhost:1420",
-    "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build"
+    "frontendDist": "../../../../dist"
   },
   "app": {
     "windows": [
@@ -30,19 +27,25 @@
         "scope": [
           "**"
         ]
-      }
+      },
+      "capabilities": [
+        {
+          "identifier": "original-opener",
+          "windows": [
+            "main"
+          ],
+          "permissions": [
+            "opener:default",
+            "opener:allow-open-path"
+          ]
+        }
+      ]
     }
   },
   "bundle": {
-    "active": true,
-    "targets": "all",
+    "active": false,
     "icon": [
-      "icons/32x32.png",
-      "icons/64x64.png",
-      "icons/128x128.png",
-      "icons/128x128@2x.png",
-      "icons/icon.png",
-      "icons/icon.ico"
+      "../../../../src-tauri/icons/icon.ico"
     ]
   }
 }

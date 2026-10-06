@@ -1,0 +1,57 @@
+name: Windows & frontend checks
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'src-tauri/**'
+      - 'crates/**'
+      - 'public/**'
+      - 'package*.json'
+      - '*config.*'
+      - 'index.html'
+      - '.github/workflows/quality.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'src-tauri/**'
+      - 'crates/**'
+      - 'public/**'
+      - 'package*.json'
+      - '*config.*'
+      - 'index.html'
+      - '.github/workflows/quality.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Frontend tests
+        run: npm test
+      - name: Frontend production build
+        run: npm run build
+      - name: Windows Rust check
+        working-directory: src-tauri
+        run: cargo check --locked
+      - name: Rust unit, security and contract tests
+        working-directory: src-tauri
+        # Live scraper tests depend on third-party availability; this gate is deterministic.
+        run: cargo test --locked --lib --test folder_security --test catalog_contract --test sync_contract

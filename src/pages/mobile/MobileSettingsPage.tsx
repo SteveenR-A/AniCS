@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { openUrl, openPath } from '@tauri-apps/plugin-opener';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import { ChangelogModal } from '@/components/ChangelogModal';
 import { ProfileSelectorModal, getProfileAvatarIcon } from '@/components/ProfileSelectorModal';
 import { GistSyncModal } from '@/components/GistSyncModal';
@@ -1468,14 +1468,9 @@ export function MobileSettingsPage() {
                         alert(`Error al iniciar instalación nativa: ${bridgeErr?.message || bridgeErr}`);
                       }
                     } else {
-                      const bridgeMissingMsg = 'Puente AndroidBridge no disponible. ¿Deseas abrir el instalador con el sistema?';
-                      if (window.confirm(bridgeMissingMsg)) {
-                        openPath(path).catch((openErr: any) => {
-                          console.warn('Error abriendo paquete con openPath:', openErr);
-                          alert(`No se pudo abrir el instalador (${openErr?.message || openErr}). Abriendo enlace en navegador...`);
-                          openBrowserFallback(asset.browser_download_url);
-                        });
-                      }
+                      // APK installation needs Android's FileProvider and URI grant.
+                      // Without the native bridge, let the browser download the package.
+                      openBrowserFallback(asset.browser_download_url);
                     }
                   };
 

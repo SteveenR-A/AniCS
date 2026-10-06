@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.3.12",
+    "date": "2026-10-06",
+    "title": "Optimizaciones de descarga y almacenamiento seguro",
+    "type": "patch",
+    "highlights": [
+      "Mejoras en el gestor de descargas Android",
+      "Apertura segura de carpetas locales",
+      "Estabilidad en reproducción"
+    ]
+  },
+  {
     "version": "0.3.11",
     "date": "2026-10-05",
     "title": "Corrección en tests unitarios de Android Native",

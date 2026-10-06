@@ -211,6 +211,7 @@ pub fn run() {
             commands::optimize_database,
             commands::reset_database,
             commands::get_storage_locations,
+            commands::open_storage_folder,
             commands::set_image_cache_dir,
             commands::set_window_decorations,
             commands::get_window_decorations,

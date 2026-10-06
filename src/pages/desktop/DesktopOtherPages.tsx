@@ -8,7 +8,7 @@ import {
   CheckSquare, Square, X, Layers, PlayCircle, Heart, AlertTriangle, CheckCircle2
 } from 'lucide-react';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
-import { openPath } from '@tauri-apps/plugin-opener';
+import { openStorageFolder } from '@/services/storageService';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import {
   getHistory, clearHistory, removeHistory, removeHistoryBatch,
@@ -1260,7 +1260,7 @@ export function DesktopDownloadsPage() {
                 onClick={async () => {
                   if (downloadFolder) {
                     try {
-                      await openPath(downloadFolder);
+                      await openStorageFolder('downloads', downloadFolder);
                     } catch (err) {
                       console.error('Error abriendo carpeta de descargas:', err);
                     }
@@ -1385,7 +1385,7 @@ export function DesktopDownloadsPage() {
                         <button
                           onClick={async () => {
                             try {
-                              await openPath(anime.folderPath);
+                              await openStorageFolder('downloads', anime.folderPath);
                             } catch (err) {
                               console.error('Error abriendo carpeta del anime:', err);
                             }

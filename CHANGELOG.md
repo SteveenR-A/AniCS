@@ -5,6 +5,15 @@ El formato está basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1
 
 ---
 
+## [0.3.12] - 2026-10-06
+
+### <Título del Release>
+- <Mejora 1
+- Mejora 2
+- Corrección 3>
+
+---
+
 ## [0.3.11] - 2026-10-05
 
 ### Corrección en tests unitarios de Android Native

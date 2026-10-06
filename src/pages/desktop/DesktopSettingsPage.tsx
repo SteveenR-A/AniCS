@@ -9,7 +9,7 @@ import {
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
-import { openUrl, openPath } from '@tauri-apps/plugin-opener';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import { ChangelogModal } from '@/components/ChangelogModal';
 import { ProfileSelectorModal, getProfileAvatarIcon } from '@/components/ProfileSelectorModal';
 import { GistSyncModal } from '@/components/GistSyncModal';
@@ -22,7 +22,7 @@ import { useAnimeStore } from '@/stores/useAnimeStore';
 import { FEATURE_FLAGS } from '@/config/features';
 import { getProfileStats } from '@/services/profileService';
 import { getCacheStats, clearImageCache } from '@/services/downloadService';
-import { getDatabaseStats, optimizeDatabase, resetDatabase, clearHistory, type DatabaseStats } from '@/services/storageService';
+import { getDatabaseStats, optimizeDatabase, resetDatabase, clearHistory, openStorageFolder, type DatabaseStats } from '@/services/storageService';
 import { clearMemoryCache } from '@/components/CachedImage';
 import { DEFAULT_JKANIME, DEFAULT_MUNDODONGHUA, DEFAULT_OTAKUSTV } from '@/services/animeService';
 import { CURRENT_VERSION } from '@/services/updateService';
@@ -244,6 +244,7 @@ export function DesktopSettingsPage() {
       await invoke('set_setting', { key: 'custom_sources', value: JSON.stringify(customSources) });
       await useAnimeStore.getState().loadSources();
 
+      await loadLocations();
       setSaveStatus('Ajustes guardados correctamente');
       setTimeout(() => setSaveStatus(null), 3000);
     } catch (e) {
@@ -1412,13 +1413,16 @@ export function DesktopSettingsPage() {
                   onClick={async () => {
                     if (downloadDir) {
                       try {
-                        await openPath(downloadDir);
+                        await openStorageFolder('downloads', downloadDir);
                       } catch (err) {
                         console.error('Error al abrir carpeta de descargas:', err);
                       }
                     }
                   }}
-                  title="Abrir carpeta de descargas en el gestor de archivos"
+                  disabled={Boolean(storageLocations && downloadDir.trim() !== storageLocations.downloadDir)}
+                  title={storageLocations && downloadDir.trim() !== storageLocations.downloadDir
+                    ? 'Guarda los ajustes para abrir la nueva carpeta'
+                    : 'Abrir carpeta de descargas en el gestor de archivos'}
                   style={{
                     background: 'var(--bg-elevated)', border: '1px solid var(--border-moderate)',
                     borderRadius: 'var(--radius-md)', padding: '10px 16px',
@@ -1562,7 +1566,7 @@ export function DesktopSettingsPage() {
                 onClick={async () => {
                   if (storageLocations?.imageCacheDir) {
                     try {
-                      await openPath(storageLocations.imageCacheDir);
+                      await openStorageFolder('imageCache');
                     } catch (err) {
                       console.error('Error abriendo caché:', err);
                     }
@@ -1712,7 +1716,7 @@ export function DesktopSettingsPage() {
               onClick={async () => {
                 if (storageLocations?.appDataDir) {
                   try {
-                    await openPath(storageLocations.appDataDir);
+                    await openStorageFolder('appData');
                   } catch (err) {
                     console.error('Error abriendo carpeta de datos:', err);
                   }

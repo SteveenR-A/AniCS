@@ -1,6 +1,9 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { HistoryEntry, AnimeResult } from '@/types';
 
+export const openStorageFolder = (folder: 'downloads' | 'imageCache' | 'appData', path?: string): Promise<void> =>
+  invoke('open_storage_folder', { folder, path });
+
 export const upsertHistory = (entry: HistoryEntry): Promise<void> =>
   invoke('upsert_history', { entry });
 

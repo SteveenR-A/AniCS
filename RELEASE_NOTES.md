@@ -1,11 +1,12 @@
-# AniCS v0.3.11 — Corrección en tests unitarios de Android Native
+# AniCS v0.3.12 — Optimizaciones de descarga y almacenamiento seguro
 
-**Fecha de lanzamiento:** 2026-10-05
+**Fecha de lanzamiento:** 2026-10-06
 
 ### Novedades y correcciones
 
-- Corrección de tests en Android Native: Restauración de importación dp en AnimeDetailContentTest
-- Compilación y suite de pruebas unitarias verificadas para CI
+- Mejoras en el gestor de descargas Android
+- Apertura segura de carpetas locales
+- Estabilidad en reproducción
 
 ---
 *Para ver el historial acumulativo completo de todas las versiones, consulta [CHANGELOG.md](./CHANGELOG.md).*
