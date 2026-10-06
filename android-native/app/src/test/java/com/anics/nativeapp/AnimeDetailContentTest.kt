@@ -7,7 +7,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.unit.dp
+import com.anics.nativeapp.ui.components.AniIcons
 import com.anics.nativeapp.ui.screens.AnimeDetailActions
 import com.anics.nativeapp.ui.screens.AnimeSynopsis
 import com.anics.nativeapp.ui.theme.AniCSTheme
@@ -64,5 +64,15 @@ class AnimeDetailContentTest {
         compose.onNodeWithText("Ver menos").assertIsDisplayed().performClick()
         compose.onNodeWithText("Leer sinopsis completa").assertIsDisplayed()
         compose.onNodeWithText("Una aventura corta.").assertIsDisplayed()
+    }
+
+    @Test fun favoriteStateUsesHeartFilledAndShowsGuardado() {
+        compose.setContent { AniCSTheme("cyberpunk") { Surface {
+            AnimeDetailActions("Ver ep. 1", true, {}, {}, {})
+        } } }
+        compose.onNodeWithContentDescription("Quitar favorito").assertIsDisplayed()
+        compose.onNodeWithText("Guardado").assertIsDisplayed()
+        assertNotNull(AniIcons.HeartFilled)
+        assertNotNull(AniIcons.Heart)
     }
 }

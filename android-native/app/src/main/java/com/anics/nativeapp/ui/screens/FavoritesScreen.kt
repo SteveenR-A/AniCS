@@ -27,7 +27,7 @@ fun FavoritesScreen(viewModel: FavoritesViewModel, onAnimeClick: (String, String
             Box {
                 AnimeCard(NativeAnimeResult(favorite.title, favorite.url, favorite.thumbnailUrl, null, null, null, null, null, null, null, favorite.source, favorite.profileId), { onAnimeClick(favorite.url, favorite.source) })
                 Surface(Modifier.align(Alignment.TopEnd).padding(6.dp), color = Color.Black.copy(alpha = .6f), shape = RoundedCornerShape(50)) {
-                    IconButton(onClick = { remove = favorite }, modifier = Modifier.size(30.dp)) { Icon(AniIcons.Heart, "Quitar favorito", Modifier.size(17.dp), tint = MaterialTheme.colorScheme.primary) }
+                    IconButton(onClick = { remove = favorite }, modifier = Modifier.size(30.dp)) { Icon(AniIcons.HeartFilled, "Quitar favorito", Modifier.size(17.dp), tint = MaterialTheme.colorScheme.primary) }
                 }
             }
         }

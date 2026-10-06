@@ -684,15 +684,15 @@ export function MobileDetailsPage() {
             onClick={handleToggleFavorite}
             style={{
               flex: 1, minWidth: 100,
-              background: isFavorite ? 'rgba(236, 72, 153, 0.15)' : 'var(--bg-surface)',
-              border: `1px solid ${isFavorite ? 'rgba(236, 72, 153, 0.4)' : 'var(--border-moderate)'}`,
-              color: isFavorite ? '#ec4899' : 'var(--text-primary)',
+              background: isFavorite ? 'color-mix(in srgb, var(--accent-primary) 15%, transparent)' : 'var(--bg-surface)',
+              border: `1px solid ${isFavorite ? 'var(--border-accent)' : 'var(--border-moderate)'}`,
+              color: isFavorite ? 'var(--accent-primary)' : 'var(--text-primary)',
               borderRadius: 'var(--radius-md)', padding: '10px 12px',
               fontSize: 12, fontWeight: 600, cursor: 'pointer',
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
             }}
           >
-            {isFavorite ? <Heart size={15} fill="#ec4899" color="#ec4899" /> : <Heart size={15} />}
+            {isFavorite ? <Heart size={15} fill="var(--accent-primary)" color="var(--accent-primary)" /> : <Heart size={15} />}
             {isFavorite ? 'Favorito' : 'Guardar'}
           </motion.button>
 

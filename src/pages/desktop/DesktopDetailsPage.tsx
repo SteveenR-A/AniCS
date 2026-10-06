@@ -740,15 +740,15 @@ export function DesktopDetailsPage() {
               whileTap={{ scale: 0.97 }}
               onClick={handleToggleFavorite}
               style={{
-                background: isFavorite ? 'rgba(236, 72, 153, 0.15)' : 'var(--bg-surface)',
-                border: `1px solid ${isFavorite ? 'rgba(236, 72, 153, 0.4)' : 'var(--border-moderate)'}`,
-                color: isFavorite ? '#ec4899' : 'var(--text-primary)',
+                background: isFavorite ? 'color-mix(in srgb, var(--accent-primary) 15%, transparent)' : 'var(--bg-surface)',
+                border: `1px solid ${isFavorite ? 'var(--border-accent)' : 'var(--border-moderate)'}`,
+                color: isFavorite ? 'var(--accent-primary)' : 'var(--text-primary)',
                 borderRadius: 'var(--radius-lg)', padding: '12px 20px',
                 fontSize: 14, fontWeight: 600, cursor: 'pointer',
                 display: 'flex', alignItems: 'center', gap: 8,
               }}
             >
-              {isFavorite ? <Heart size={18} fill="#ec4899" color="#ec4899" /> : <Heart size={18} />}
+              {isFavorite ? <Heart size={18} fill="var(--accent-primary)" color="var(--accent-primary)" /> : <Heart size={18} />}
               {isFavorite ? 'En Favoritos' : 'Añadir a Favoritos'}
             </motion.button>
 

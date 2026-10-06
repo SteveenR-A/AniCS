@@ -15,8 +15,24 @@ function svgPath([tag,a]) {
   }
   throw Error('Unsupported SVG '+tag);
 }
-const header = `// Generated from Lucide SVGs by scripts/android-native/generate-icons.cjs.\n// Lucide ISC license: docs/android-native/lucide-LICENSE.\npackage com.anics.nativeapp.ui.components\n\nimport androidx.compose.ui.graphics.*\nimport androidx.compose.ui.graphics.vector.*\nimport androidx.compose.ui.unit.dp\n\nobject AniIcons {\n    private fun icon(name: String, vararg paths: String) = ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f).apply {\n        paths.forEach { addPath(PathParser().parsePathString(it).toNodes(), fill = null, stroke = SolidColor(Color.Black), strokeLineWidth = 2f, strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round) }\n    }.build()\n`;
-const out = header + names.map(name => `    val ${name} by lazy { icon("${name}", ${lucide[name].render({},null).props.iconNode.map(svgPath).map(JSON.stringify).join(', ')}) }`).join('\n') + '\n}\n';
+const header = `// Generated from Lucide SVGs by scripts/android-native/generate-icons.cjs.
+// Lucide ISC license: docs/android-native/lucide-LICENSE.
+package com.anics.nativeapp.ui.components
+
+import androidx.compose.ui.graphics.*
+import androidx.compose.ui.graphics.vector.*
+import androidx.compose.ui.unit.dp
+
+object AniIcons {
+    private fun icon(name: String, vararg paths: String) = ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f).apply {
+        paths.forEach { addPath(PathParser().parsePathString(it).toNodes(), fill = null, stroke = SolidColor(Color.Black), strokeLineWidth = 2f, strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round) }
+    }.build()
+    private fun filledIcon(name: String, path: String) = ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f).apply {
+        addPath(PathParser().parsePathString(path).toNodes(), fill = SolidColor(Color.Black), stroke = SolidColor(Color.Black), strokeLineWidth = 2f, strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round)
+    }.build()
+`;
+const heartPath = JSON.stringify(lucide.Heart.render({},null).props.iconNode.map(svgPath)[0] + 'Z');
+const out = header + names.map(name => `    val ${name} by lazy { icon("${name}", ${lucide[name].render({},null).props.iconNode.map(svgPath).map(JSON.stringify).join(', ')}) }`).join('\n') + `\n    val HeartFilled by lazy { filledIcon("HeartFilled", ${heartPath}) }\n}\n`;
 const root=path.resolve(__dirname,'../..');
 const destination=path.join(root,'android-native/app/src/main/java/com/anics/nativeapp/ui/components');
 fs.mkdirSync(destination,{recursive:true});

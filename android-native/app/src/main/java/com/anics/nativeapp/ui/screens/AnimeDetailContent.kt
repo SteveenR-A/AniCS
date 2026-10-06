@@ -41,15 +41,24 @@ fun AnimeDetailActions(playLabel: String, isFavorite: Boolean, onPlay: (() -> Un
         }
     }
     val favorite: @Composable (Modifier) -> Unit = { actionModifier ->
+        val favoriteColor = colors.primary
         OutlinedButton(onClick = onFavorite, modifier = actionModifier.heightIn(min = 52.dp).semantics {
             contentDescription = if (isFavorite) "Quitar favorito" else "Guardar favorito"
             stateDescription = if (isFavorite) "Guardado" else "Sin guardar"
         }, shape = shape, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
-            colors = ButtonDefaults.outlinedButtonColors(containerColor = if (isFavorite) colors.primary.copy(alpha = .12f) else colors.surface),
-            border = BorderStroke(1.dp, if (isFavorite) colors.primary else colors.outlineVariant)) {
-            Icon(if (isFavorite) AniIcons.Check else AniIcons.Heart, null, Modifier.size(18.dp))
+            colors = ButtonDefaults.outlinedButtonColors(
+                containerColor = if (isFavorite) favoriteColor.copy(alpha = .12f) else colors.surface,
+                contentColor = if (isFavorite) favoriteColor else colors.onSurface
+            ),
+            border = BorderStroke(1.dp, if (isFavorite) favoriteColor else colors.outlineVariant)) {
+            Icon(
+                if (isFavorite) AniIcons.HeartFilled else AniIcons.Heart,
+                null,
+                Modifier.size(18.dp),
+                tint = if (isFavorite) favoriteColor else colors.onSurfaceVariant
+            )
             Spacer(Modifier.width(6.dp))
-            Text(if (isFavorite) "Guardado" else "Guardar")
+            Text(if (isFavorite) "Guardado" else "Guardar", color = if (isFavorite) favoriteColor else colors.onSurface)
         }
     }
     val batch: @Composable (Modifier) -> Unit = { actionModifier ->

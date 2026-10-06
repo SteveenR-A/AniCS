@@ -129,7 +129,7 @@ fun AniHeader(sources: List<NativeSourceConfig>, selectedSource: String, onSourc
                 }
                 Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
                     Row {
-                        IconButton(onClick = onFavorites, modifier = Modifier.size(38.dp)) { Icon(AniIcons.Heart, "Favoritos", tint = if (favoritesActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) }
+                        IconButton(onClick = onFavorites, modifier = Modifier.size(38.dp)) { Icon(if (favoritesActive) AniIcons.HeartFilled else AniIcons.Heart, "Favoritos", tint = if (favoritesActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) }
                         IconButton(onClick = onSettings, modifier = Modifier.size(38.dp)) { Icon(AniIcons.Settings, "Ajustes", tint = if (settingsActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) }
                     }
                 }
