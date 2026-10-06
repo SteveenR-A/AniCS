@@ -53,8 +53,10 @@ fun BrowseScreen(viewModel: BrowseViewModel, onAnime: (String, String) -> Unit) 
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun HistoryScreen(viewModel: HistoryViewModel, onResume: (HistoryEntity) -> Unit) {
+fun HistoryScreen(viewModel: HistoryViewModel, onResume: (HistoryEntity) -> Unit,
+    onAnime: (String, String) -> Unit, onSearch: (String) -> Unit) {
     val state by viewModel.state.collectAsState()
     var query by remember { mutableStateOf("") }
     var clear by remember { mutableStateOf(false) }
@@ -81,7 +83,13 @@ fun HistoryScreen(viewModel: HistoryViewModel, onResume: (HistoryEntity) -> Unit
                     }
                     IconButton(onClick = { remove = rows }, modifier = Modifier.size(32.dp)) { Icon(AniIcons.Trash2, "Quitar este anime del historial", Modifier.size(18.dp)) }
                 }
-                TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "Ocultar episodios" else "Ver ${rows.size} episodios vistos"); Spacer(Modifier.width(6.dp)); Icon(AniIcons.ChevronDown, null, Modifier.size(16.dp)) }
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    HistoryAnimeAction(rows, onAnime, onSearch)
+                    TextButton(onClick = { expanded = !expanded }) {
+                        Text(if (expanded) "Ocultar episodios" else "Episodios (${rows.size})")
+                        Spacer(Modifier.width(6.dp)); Icon(AniIcons.ChevronDown, null, Modifier.size(16.dp))
+                    }
+                }
                 if (expanded) rows.sortedBy { it.episodeNumber }.forEach { episode ->
                     Row(Modifier.fillMaxWidth().clickable { onResume(episode) }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text("Episodio ${episode.episodeNumber}", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)

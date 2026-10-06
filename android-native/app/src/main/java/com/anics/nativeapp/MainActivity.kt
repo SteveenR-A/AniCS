@@ -170,7 +170,10 @@ class MainActivity : ComponentActivity() {
                         }
                         composable("schedule") { val vm = viewModel { BrowseViewModel(catalog, preferences, false) }; BrowseScreen(vm, anime) }
                         composable("top") { val vm = viewModel { BrowseViewModel(catalog, preferences, true) }; BrowseScreen(vm, anime) }
-                        composable("history") { val vm = viewModel { HistoryViewModel(history, profiles) }; HistoryScreen(vm, resume) }
+                        composable("history") {
+                            val vm = viewModel { HistoryViewModel(history, profiles) }
+                            HistoryScreen(vm, resume, onAnime = anime, onSearch = { nav.navigate("search?query=${Uri.encode(it)}") })
+                        }
                         composable("favorites") { val vm = viewModel { FavoritesViewModel(favorites, profiles) }; FavoritesScreen(vm, anime) }
                         composable("settings") { val vm = viewModel { SettingsViewModel(preferences, profiles, catalog, com.anics.nativeapp.sync.BackupManager(database, preferences), database, applicationContext) }; SettingsScreen(vm, initialUpdate = selectedUpdate, focusUpdates = focusUpdates, onUpdateFocused = { focusUpdates = false; selectedUpdate = null }) }
                         composable("downloads") {

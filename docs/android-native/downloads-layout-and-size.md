@@ -29,6 +29,17 @@ Las estimaciones nunca se almacenan en `totalBytes` ni se usan para validar inte
 Sin tamaño HTTP confirmado o progreso HLS suficiente se indica **Total no disponible**
 y la barra permanece indeterminada. No se cambia el esquema de Room ni Rust/UniFFI.
 
+## Historial: abrir el anime en línea
+
+`HistoryEntity` ya guarda `animeUrl`, `episodeUrl` y `source`. La acción **Ver anime en línea**
+abre la ficha usando la URL del anime y la fuente guardadas, sin iniciar reproducción.
+En grupos de episodios se elige el registro en línea más reciente, aunque el último visto
+sea un archivo local. No se usa la URL del episodio como sustituto de la del anime.
+Si únicamente hay URLs locales, vacías o inválidas, **Buscar anime en línea** abre Buscar
+con el título precargado y codificado con `Uri.encode` (incluidos espacios, `/` y `&`).
+El filtro local del historial, Reanudar y la lista de episodios conservan su funcionamiento.
+`HistoryAnimeActionTest` cubre enlace/fuente, último episodio local y búsqueda sin URL válida.
+
 ## Validación
 
 - `npm run build`: correcto, con avisos existentes de imports/chunks.
