@@ -18,7 +18,8 @@ import java.util.concurrent.CopyOnWriteArrayList
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class HlsDownloadTest {
-    @Test fun downloadsAndDecryptsFiniteHlsWithoutSavingTheManifestAsVideo() = runBlocking {
+    @Test fun downloadsAndDecryptsFiniteHlsWithoutSavingTheManifestAsVideo() {
+        runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).build()
         val key = ByteArray(16) { it.toByte() }
@@ -62,5 +63,6 @@ class HlsDownloadTest {
             assertTrue(referers.all { it == "https://catalog.example/episode" })
             java.io.File(row.outputPath).delete()
         } finally { manager.close(); server.close(); executor.shutdownNow(); delay(100); db.close() }
+        }
     }
 }
