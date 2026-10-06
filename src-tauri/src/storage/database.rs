@@ -866,7 +866,9 @@ pub fn remove_favorite(url: &str, profile_id: Option<&str>) -> AppResult<()> {
             Some(pid) => pid.to_string(),
             None => get_active_profile_id_inner(conn),
         };
-        conn.execute("DELETE FROM favorites WHERE url = ?1 AND profile_id = ?2", params![url, target_profile])?;
+        let trimmed = url.trim_end_matches('/');
+        let with_slash = format!("{trimmed}/");
+        conn.execute("DELETE FROM favorites WHERE (url = ?1 OR url = ?2 OR url = ?3) AND profile_id = ?4", params![url, trimmed, with_slash, target_profile])?;
 
         // Registrar tombstone
         let tombstone_id = uuid::Uuid::new_v4().to_string();
@@ -887,7 +889,7 @@ pub fn is_favorite(url: &str, profile_id: Option<&str>) -> AppResult<bool> {
             None => get_active_profile_id_inner(conn),
         };
         let count: u32 = conn.query_row(
-            "SELECT COUNT(*) FROM favorites WHERE url = ?1 AND profile_id = ?2",
+            "SELECT COUNT(*) FROM favorites WHERE (url = ?1 OR url = ?1 || '/' OR rtrim(url, '/') = rtrim(?1, '/')) AND profile_id = ?2",
             params![url, target_profile],
             |row| row.get(0),
         )?;

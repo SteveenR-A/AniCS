@@ -119,8 +119,12 @@ export function MobileDetailsPage() {
         if (isCancelled) return;
         setDetails(det);
         cacheDetails(det);
-        setIsFavorite(fav);
-        if (fav) {
+        let finalFav = fav;
+        if (!finalFav && det.url && det.url !== decodedUrl) {
+          finalFav = await checkFavorite(det.url, activeProfile?.id).catch(() => false);
+        }
+        setIsFavorite(finalFav);
+        if (finalFav) {
           getFavorites(activeProfile?.id).then(list => {
             if (isCancelled) return;
             const found = list.find(f => f.url === decodedUrl);
@@ -423,12 +427,15 @@ export function MobileDetailsPage() {
     try {
       if (isFavorite) {
         await removeFavorite(decodedUrl, activeProfile?.id);
+        if (details.url && details.url !== decodedUrl) {
+          await removeFavorite(details.url, activeProfile?.id).catch(() => {});
+        }
         setIsFavorite(false);
         useSyncStore.getState().triggerDebouncedSync();
       } else {
         await addFavorite({
           title: details.title,
-          url: decodedUrl,
+          url: details.url || decodedUrl,
           thumbnailUrl: details.thumbnailUrl,
           source: details.source,
           status: favoriteStatus,

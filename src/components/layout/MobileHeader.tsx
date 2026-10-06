@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Tv2, Heart, Settings, User, Crown, ChevronDown, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAnimeStore } from '@/stores/useAnimeStore';
@@ -11,6 +11,8 @@ import { ProfileSelectorModal, getProfileAvatarIcon } from '@/components/Profile
 
 export function MobileHeader() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const isFavoritesActive = location.pathname === '/favorites';
   const { sources, activeSource, setActiveSource } = useAnimeStore();
   const { activeProfile } = useProfileStore();
   const { isVip, openModal: openVipModal } = useSubscriptionStore();
@@ -272,9 +274,9 @@ export function MobileHeader() {
             onClick={() => navigate('/favorites')}
             title="Favoritos"
             style={{
-              background: 'transparent',
+              background: isFavoritesActive ? 'color-mix(in srgb, var(--accent-primary) 15%, transparent)' : 'transparent',
               border: 'none',
-              color: 'var(--text-secondary)',
+              color: isFavoritesActive ? 'var(--accent-primary)' : 'var(--text-secondary)',
               padding: 6,
               borderRadius: 'var(--radius-full)',
               cursor: 'pointer',
@@ -283,7 +285,7 @@ export function MobileHeader() {
               justifyContent: 'center',
             }}
           >
-            <Heart size={18} />
+            <Heart size={18} fill={isFavoritesActive ? 'var(--accent-primary)' : 'none'} color={isFavoritesActive ? 'var(--accent-primary)' : 'var(--text-secondary)'} />
           </button>
 
           <button

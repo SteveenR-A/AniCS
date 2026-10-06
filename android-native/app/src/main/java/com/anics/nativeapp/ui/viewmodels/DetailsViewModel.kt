@@ -76,8 +76,13 @@ class DetailsViewModel(
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
             try {
                 val activeProfile = profileRepository.getActiveProfile()
-                val isFav = favoriteRepository.isFavorite(activeProfile.id, url)
+                var isFav = favoriteRepository.isFavorite(activeProfile.id, url)
                 val details = catalogRepository.getDetails(url, source)
+                currentUrl = details.url.ifBlank { url }
+
+                if (!isFav && details.url.isNotBlank() && details.url != url) {
+                    isFav = favoriteRepository.isFavorite(activeProfile.id, details.url)
+                }
 
                 // Enriquecer episodios con progreso del historial local
                 val rows = historyRepository.getHistoryForProfile(activeProfile.id).first()
@@ -105,10 +110,11 @@ class DetailsViewModel(
         val details = _uiState.value.details ?: return
         viewModelScope.launch {
             val activeProfile = profileRepository.getActiveProfile()
+            val targetUrl = details.url.ifBlank { currentUrl }
             val newFavStatus = favoriteRepository.toggleFavorite(
                 profileId = activeProfile.id,
                 title = details.title,
-                url = details.url,
+                url = targetUrl,
                 thumbnailUrl = details.thumbnailUrl,
                 source = details.source
             )

@@ -20,9 +20,9 @@ fun FavoritesScreen(viewModel: FavoritesViewModel, onAnimeClick: (String, String
     val state by viewModel.uiState.collectAsState()
     var remove by remember { mutableStateOf<FavoriteEntity?>(null) }
     LazyVerticalGrid(GridCells.Adaptive(145.dp), modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item(span = { GridItemSpan(maxLineSpan) }) { SectionTitle("Favoritos", "Perfil: ${state.profileName}", AniIcons.Heart) }
+        item(span = { GridItemSpan(maxLineSpan) }) { SectionTitle("Favoritos", "Perfil: ${state.profileName}", AniIcons.HeartFilled) }
         if (state.isLoading) item(span = { GridItemSpan(maxLineSpan) }) { Box(Modifier.fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() } }
-        else if (state.favorites.isEmpty()) item(span = { GridItemSpan(maxLineSpan) }) { Box(Modifier.heightIn(min = 300.dp), contentAlignment = Alignment.Center) { AniEmptyState("Sin favoritos todavía", "Toca el corazón en la ficha de un anime para guardarlo en este perfil.", AniIcons.Heart) } }
+        else if (state.favorites.isEmpty()) item(span = { GridItemSpan(maxLineSpan) }) { Box(Modifier.heightIn(min = 300.dp), contentAlignment = Alignment.Center) { AniEmptyState("Sin favoritos todavía", "Toca el corazón en la ficha de un anime para guardarlo en este perfil.", AniIcons.HeartFilled) } }
         items(state.favorites, key = { it.id }) { favorite ->
             Box {
                 AnimeCard(NativeAnimeResult(favorite.title, favorite.url, favorite.thumbnailUrl, null, null, null, null, null, null, null, favorite.source, favorite.profileId), { onAnimeClick(favorite.url, favorite.source) })

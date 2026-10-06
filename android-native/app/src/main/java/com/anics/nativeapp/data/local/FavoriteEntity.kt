@@ -53,6 +53,9 @@ interface FavoriteDao {
     @Query("SELECT EXISTS(SELECT 1 FROM favorites WHERE profileId = :profileId AND url = :url)")
     suspend fun isFavorite(profileId: String, url: String): Boolean
 
+    @Query("SELECT EXISTS(SELECT 1 FROM favorites WHERE profileId = :profileId AND (url = :url OR url = :cleanUrl OR url = :slashUrl OR url = :canonicalUrl OR url = :canonicalClean))")
+    suspend fun isFavoriteFlexible(profileId: String, url: String, cleanUrl: String, slashUrl: String, canonicalUrl: String, canonicalClean: String): Boolean
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(fav: FavoriteEntity)
 
