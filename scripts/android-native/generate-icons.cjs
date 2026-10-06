@@ -2,7 +2,37 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const lucide = require('lucide-react');
-const names = ['House','Search','CalendarDays','Flame','Download','History','Heart','Settings','Tv','ChevronDown','ChevronLeft','ChevronRight','ArrowLeft','RefreshCw','SlidersHorizontal','X','Check','Play','Pause','SkipBack','SkipForward','RotateCcw','RotateCw','ListVideo','Server','Maximize','Minimize','Smartphone','Monitor','Volume2','VolumeX','Lock','Unlock','Folder','HardDrive','Trash2','Palette','Cloud','Globe','Plus','Trophy','Star','Clock','CircleAlert','SearchX','Database','CheckCheck','Film','Sparkles'];
+const baseNames = ['House','Search','CalendarDays','Flame','Download','History','Heart','Settings','Tv','ChevronDown','ChevronLeft','ChevronRight','ArrowLeft','RefreshCw','SlidersHorizontal','X','Check','Play','Pause','SkipBack','SkipForward','RotateCcw','RotateCw','ListVideo','Server','Maximize','Minimize','Smartphone','Monitor','Volume2','VolumeX','Lock','Unlock','Folder','HardDrive','Trash2','Palette','Cloud','Globe','Plus','Trophy','Star','Clock','CircleAlert','SearchX','Database','CheckCheck','Film','Sparkles','LayoutGrid','List'];
+
+function scanUsedIcons(dir) {
+  const used = new Set();
+  if (!fs.existsSync(dir)) return used;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      for (const icon of scanUsedIcons(full)) used.add(icon);
+    } else if (entry.name.endsWith('.kt') && entry.name !== 'AniIcons.kt') {
+      const code = fs.readFileSync(full, 'utf8');
+      const matches = code.matchAll(/AniIcons\.([A-Za-z0-9_]+)/g);
+      for (const match of matches) {
+        if (match[1] !== 'HeartFilled') used.add(match[1]);
+      }
+    }
+  }
+  return used;
+}
+
+const root = path.resolve(__dirname, '../..');
+const nativeAppDir = path.join(root, 'android-native/app');
+const usedInCode = scanUsedIcons(nativeAppDir);
+const iconNamesSet = new Set([...baseNames, ...usedInCode]);
+const names = Array.from(iconNamesSet);
+for (const name of names) {
+  if (!lucide[name]) {
+    throw new Error(`Icon '${name}' used in android-native does not exist in lucide-react!`);
+  }
+}
+
 function svgPath([tag,a]) {
   if(tag==='path') return a.d;
   if(tag==='line') return `M${a.x1} ${a.y1}L${a.x2} ${a.y2}`;
@@ -33,7 +63,6 @@ object AniIcons {
 `;
 const heartPath = JSON.stringify(lucide.Heart.render({},null).props.iconNode.map(svgPath)[0] + 'Z');
 const out = header + names.map(name => `    val ${name} by lazy { icon("${name}", ${lucide[name].render({},null).props.iconNode.map(svgPath).map(JSON.stringify).join(', ')}) }`).join('\n') + `\n    val HeartFilled by lazy { filledIcon("HeartFilled", ${heartPath}) }\n}\n`;
-const root=path.resolve(__dirname,'../..');
 const destination=path.join(root,'android-native/app/src/main/java/com/anics/nativeapp/ui/components');
 fs.mkdirSync(destination,{recursive:true});
 fs.writeFileSync(path.join(destination,'AniIcons.kt'),out);

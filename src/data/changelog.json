@@ -1,5 +1,15 @@
 [
   {
+    "version": "0.3.10",
+    "date": "2026-10-05",
+    "title": "Corrección de compilación en Android Native y blindaje de iconos Lucide",
+    "type": "patch",
+    "highlights": [
+      "Corrección de compilación en Android Native: Restauración de iconos LayoutGrid y List en selector de vista",
+      "Blindaje del generador: Detección y validación automática de iconos Lucide en Android Native"
+    ]
+  },
+  {
     "version": "0.3.9",
     "date": "2026-10-05",
     "title": "Estabilidad de Streaming, Recuperación de Red y Fix de Favoritos",

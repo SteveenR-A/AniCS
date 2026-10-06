@@ -74,5 +74,7 @@ class AnimeDetailContentTest {
         compose.onNodeWithText("Guardado").assertIsDisplayed()
         assertNotNull(AniIcons.HeartFilled)
         assertNotNull(AniIcons.Heart)
+        assertNotNull(AniIcons.LayoutGrid)
+        assertNotNull(AniIcons.List)
     }
 }

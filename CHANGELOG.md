@@ -5,6 +5,14 @@ El formato está basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1
 
 ---
 
+## [0.3.10] - 2026-10-05
+
+### Corrección de compilación en Android Native y blindaje de iconos Lucide
+- Corrección de compilación en Android Native: Restauración de iconos LayoutGrid y List en selector de vista
+- Blindaje del generador: Detección y validación automática de iconos Lucide en Android Native
+
+---
+
 ## [0.3.9] - 2026-10-05
 
 ### Estabilidad de Streaming, Recuperación de Red y Fix de Favoritos
