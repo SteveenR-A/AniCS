@@ -85,8 +85,8 @@ class DownloadManager(private val context: Context, private val downloadDao: Dow
         val rows = downloadDao.getAllDownloads().first().filter { it.status == "queued" && !activeJobs.containsKey(it.id) && it.id !in pausedTasks }.take(available)
         rows.forEach { row -> val job = scope.launch(start = CoroutineStart.LAZY) { transfer(row) }; activeJobs[row.id] = job; job.start() }
     }
-    private suspend fun resolve(row: DownloadEntity): DownloadEntity {
-        if (row.streamUrl.isNotBlank()) return row
+    private suspend fun resolve(row: DownloadEntity, forceRefresh: Boolean = false): DownloadEntity {
+        if (!forceRefresh && row.streamUrl.isNotBlank()) return row
         require(row.episodeUrl.isNotBlank()) { "No hay un episodio de catálogo asociado" }
         val options = settings.settings.first()
         catalog.updateSettings(kotlinx.serialization.json.JsonObject(settings.syncSettings.first().mapValues { kotlinx.serialization.json.JsonPrimitive(it.value) }).toString())
@@ -175,7 +175,7 @@ class DownloadManager(private val context: Context, private val downloadDao: Dow
             downloadDao.updateTransfer(row.id, "downloading", row.progress, downloaded, total)
             row = resolve(row)
             currentCoroutineContext().ensureActive()
-            val connection = (URL(row.streamUrl).openConnection() as HttpURLConnection).apply {
+            var connection = (URL(row.streamUrl).openConnection() as HttpURLConnection).apply {
                 connectTimeout = 15000; readTimeout = 20000; instanceFollowRedirects = true
                 setRequestProperty("User-Agent", DownloadSizes.USER_AGENT)
                 setRequestProperty("Accept-Encoding", "identity")
@@ -185,7 +185,23 @@ class DownloadManager(private val context: Context, private val downloadDao: Dow
             connections[row.id] = connection
             currentCoroutineContext().ensureActive()
             connection.connect()
-            val code = connection.responseCode
+            var code = connection.responseCode
+            if ((code == 403 || code == 410) && row.episodeUrl.isNotBlank()) {
+                connection.disconnect()
+                row = resolve(row, forceRefresh = true)
+                currentCoroutineContext().ensureActive()
+                connection = (URL(row.streamUrl).openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 15000; readTimeout = 20000; instanceFollowRedirects = true
+                    setRequestProperty("User-Agent", DownloadSizes.USER_AGENT)
+                    setRequestProperty("Accept-Encoding", "identity")
+                    row.referer?.let { setRequestProperty("Referer", it) }
+                    if (downloaded > 0 && !row.streamUrl.contains(".m3u8", true)) setRequestProperty("Range", "bytes=$downloaded-")
+                }
+                connections[row.id] = connection
+                currentCoroutineContext().ensureActive()
+                connection.connect()
+                code = connection.responseCode
+            }
             if (code == 416) {
                 total = connection.getHeaderField("Content-Range")?.substringAfter("bytes */", "")?.toLongOrNull()
                 require(total != null && total == downloaded && downloaded > 0) { "No se pudo confirmar el archivo completo" }
@@ -279,7 +295,10 @@ class DownloadManager(private val context: Context, private val downloadDao: Dow
                     val extension = if (row.streamUrl.contains(".m3u8", true)) "ts" else "mp4"
                     val path = storageManager.createDownloadTarget(folder, row.animeTitle, row.episodeNumber, extension)
                     downloadDao.updateDownload(row.copy(outputPath = path, status = "queued", progress = 0f, downloadedBytes = 0, totalBytes = null, error = null))
-                } else downloadDao.updateTransfer(id, "queued", row.progress, row.downloadedBytes, row.totalBytes)
+                } else {
+                    val resetUrl = if (row.status == "failed") "" else row.streamUrl
+                    downloadDao.updateDownload(row.copy(streamUrl = resetUrl, status = "queued", error = null))
+                }
             } catch (e: CancellationException) { throw e }
               catch (e: Exception) { downloadDao.updateTransfer(id, "failed", row.progress, row.downloadedBytes, row.totalBytes, error = e.localizedMessage ?: "No se pudo preparar el destino") }
         }

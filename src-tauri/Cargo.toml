@@ -1,6 +1,6 @@
 [package]
 name = "anics"
-version = "0.3.8"
+version = "0.3.9"
 description = "AniCS - Anime & Donghua Desktop Application"
 authors = ["AniCS"]
 edition = "2021"

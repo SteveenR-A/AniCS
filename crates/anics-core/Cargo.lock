@@ -19,7 +19,7 @@ dependencies = [
 
 [[package]]
 name = "anics-core"
-version = "0.2.11"
+version = "0.3.9"
 dependencies = [
  "async-trait",
  "base64 0.22.1",

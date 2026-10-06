@@ -5,6 +5,17 @@ El formato está basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1
 
 ---
 
+## [0.3.9] - 2026-10-05
+
+### Estabilidad de Streaming, Recuperación de Red y Fix de Favoritos
+- Estabilidad de reproducción: Búfer VOD optimizado, rotación de espejos CDN ducvomes y recuperación de fallos de red sin perder el minuto reproducido
+- Persistencia completa de favoritos: Soporte robusto de URLs canónicas y coincidencia flexible sin desmarcar animes al reabrirlos
+- Iconografía de favoritos perfeccionada: Icono de corazón relleno y color de acento según el tema activo en todas las pantallas
+- Integridad en descargas: Re-resolución automática de enlaces caducados (403/410) al reanudar y minimizado a la barra de tareas en PC para descargas activas
+- Gestión de perfiles saneada: Borrado en cascada de favoritos e historial huérfano al eliminar perfiles locales en Android
+
+---
+
 ## [0.3.8] - 2026-10-05
 
 ### Mejoras de descargas HLS, perfiles y navegación

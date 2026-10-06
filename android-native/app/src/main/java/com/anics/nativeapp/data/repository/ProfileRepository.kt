@@ -61,6 +61,8 @@ class ProfileRepository(private val database: com.anics.nativeapp.data.local.App
             database.withTransaction {
                 val payload = buildJsonObject { put("profileId", profileId); put("deletedAt", com.anics.nativeapp.sync.SyncContract.iso(System.currentTimeMillis())) }
                 database.tombstoneDao().upsert(TombstoneEntity("profile:$profileId", "deletedProfiles", payload.toString()))
+                database.historyDao().clearHistoryForProfile(profileId)
+                database.favoriteDao().clearFavoritesForProfile(profileId)
                 profileDao.deleteProfile(profileId)
             }
             val active = profileDao.getActiveProfile()

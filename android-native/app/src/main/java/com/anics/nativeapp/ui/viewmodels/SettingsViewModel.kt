@@ -348,8 +348,10 @@ class SettingsViewModel(
 
     fun refreshDatabaseStats() {
         viewModelScope.launch(Dispatchers.IO) {
-            val dbFile = context?.getDatabasePath("anics.db")
-            val sizeBytes = if (dbFile != null && dbFile.exists()) dbFile.length() else 0L
+            val dbFile = context?.getDatabasePath("anics_native.db")?.takeIf { it.exists() }
+                ?: context?.getDatabasePath("anics.db")?.takeIf { it.exists() }
+            val walFile = context?.getDatabasePath("anics_native.db-wal")?.takeIf { it.exists() }
+            val sizeBytes = (dbFile?.length() ?: 0L) + (walFile?.length() ?: 0L)
             val sizeFormatted = when {
                 sizeBytes >= 1024 * 1024 -> String.format(java.util.Locale.US, "%.1f MB", sizeBytes.toDouble() / (1024 * 1024))
                 sizeBytes >= 1024 -> String.format(java.util.Locale.US, "%.0f KB", sizeBytes.toDouble() / 1024)

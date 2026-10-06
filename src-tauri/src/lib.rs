@@ -93,7 +93,7 @@ pub fn run() {
                             if has_active {
                                 api.prevent_close();
                                 if let Some(w) = app_handle.get_webview_window("main") {
-                                    let _ = w.hide();
+                                    let _ = w.minimize();
                                 }
                                 let _ = app_handle.emit("window-hidden-downloads-active", ());
                             }
