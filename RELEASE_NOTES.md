@@ -1,11 +1,11 @@
-# AniCS v0.3.10 — Corrección de compilación en Android Native y blindaje de iconos Lucide
+# AniCS v0.3.11 — Corrección en tests unitarios de Android Native
 
 **Fecha de lanzamiento:** 2026-10-05
 
 ### Novedades y correcciones
 
-- Corrección de compilación en Android Native: Restauración de iconos LayoutGrid y List en selector de vista
-- Blindaje del generador: Detección y validación automática de iconos Lucide en Android Native
+- Corrección de tests en Android Native: Restauración de importación dp en AnimeDetailContentTest
+- Compilación y suite de pruebas unitarias verificadas para CI
 
 ---
 *Para ver el historial acumulativo completo de todas las versiones, consulta [CHANGELOG.md](./CHANGELOG.md).*

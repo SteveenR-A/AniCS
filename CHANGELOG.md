@@ -5,6 +5,14 @@ El formato está basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1
 
 ---
 
+## [0.3.11] - 2026-10-05
+
+### Corrección en tests unitarios de Android Native
+- Corrección de tests en Android Native: Restauración de importación dp en AnimeDetailContentTest
+- Compilación y suite de pruebas unitarias verificadas para CI
+
+---
+
 ## [0.3.10] - 2026-10-05
 
 ### Corrección de compilación en Android Native y blindaje de iconos Lucide

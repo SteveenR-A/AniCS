@@ -1,5 +1,15 @@
 [
   {
+    "version": "0.3.11",
+    "date": "2026-10-05",
+    "title": "Corrección en tests unitarios de Android Native",
+    "type": "patch",
+    "highlights": [
+      "Corrección de tests en Android Native: Restauración de importación dp en AnimeDetailContentTest",
+      "Compilación y suite de pruebas unitarias verificadas para CI"
+    ]
+  },
+  {
     "version": "0.3.10",
     "date": "2026-10-05",
     "title": "Corrección de compilación en Android Native y blindaje de iconos Lucide",

@@ -7,6 +7,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.unit.dp
 import com.anics.nativeapp.ui.components.AniIcons
 import com.anics.nativeapp.ui.screens.AnimeDetailActions
 import com.anics.nativeapp.ui.screens.AnimeSynopsis
