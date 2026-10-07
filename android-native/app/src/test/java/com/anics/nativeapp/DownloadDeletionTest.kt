@@ -139,7 +139,8 @@ class DownloadDeletionTest {
             library = LocalLibrary(context, db.downloadDao()),
             settingsRepository = SettingsRepository(context),
             context = context,
-            savedStateHandle = SavedStateHandle()
+            savedStateHandle = SavedStateHandle(),
+            ioDispatcher = testDispatcher
         )
 
         vm.deleteVideo("test-ep1")
@@ -176,7 +177,8 @@ class DownloadDeletionTest {
             library = LocalLibrary(context, db.downloadDao()),
             settingsRepository = SettingsRepository(context),
             context = context,
-            savedStateHandle = SavedStateHandle()
+            savedStateHandle = SavedStateHandle(),
+            ioDispatcher = testDispatcher
         )
 
         vm.deleteAnime(title)

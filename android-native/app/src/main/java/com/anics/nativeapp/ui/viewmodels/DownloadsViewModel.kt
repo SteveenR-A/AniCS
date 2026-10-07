@@ -28,7 +28,8 @@ class DownloadsViewModel(
     private val settingsRepository: com.anics.nativeapp.data.repository.SettingsRepository,
     private val context: android.content.Context,
     private val catalogRepository: com.anics.nativeapp.data.repository.CatalogRepository? = null,
-    private val savedStateHandle: SavedStateHandle = SavedStateHandle()
+    private val savedStateHandle: SavedStateHandle = SavedStateHandle(),
+    private val ioDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.IO
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(DownloadsUiState())
@@ -73,7 +74,7 @@ class DownloadsViewModel(
 
     fun refreshStorage() {
         viewModelScope.launch {
-            val values = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val values = kotlinx.coroutines.withContext(ioDispatcher) {
                 val db = com.anics.nativeapp.data.local.AppDatabase.getInstance(context)
                 val images = db.historyDao().getAllHistorySync().map { it.animeTitle to it.thumbnailUrl } + db.favoriteDao().getAllFavoritesSync().map { it.title to it.thumbnailUrl }
                 val covers = images.filter { it.second.isNotBlank() }.associate { com.anics.nativeapp.sync.SyncContract.titleKey(it.first) to it.second }.toMutableMap()
@@ -99,7 +100,7 @@ class DownloadsViewModel(
         if (key == coverRequestKey) return
         coverRequestKey = key
         resolveJob?.cancel()
-        resolveJob = viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+        resolveJob = viewModelScope.launch(ioDispatcher) {
             for ((_, group) in missing.groupBy { com.anics.nativeapp.sync.SyncContract.titleKey(it.animeTitle) }) {
                 val title = group.first().animeTitle
                 try {
@@ -159,10 +160,11 @@ class DownloadsViewModel(
             val row = downloadDao.getDownloadById(id) ?: return@launch
             val folderUri = _uiState.value.folderUri
             if (row.status == "completed") {
-                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                kotlinx.coroutines.withContext(ioDispatcher) {
                     val storage = com.anics.nativeapp.downloads.StorageManager(context)
+                    val targetFile = if (row.outputPath.isNotBlank()) java.io.File(row.outputPath) else null
                     storage.deleteFile(row.outputPath, folderUri, row.animeTitle)
-                    storage.cleanEmptyAnimeFolderSafely(row.animeTitle, folderUri)
+                    storage.cleanEmptyAnimeFolderSafely(row.animeTitle, folderUri, targetFile)
                     downloadDao.deleteDownload(id)
                 }
                 refreshStorage()
@@ -176,18 +178,21 @@ class DownloadsViewModel(
     fun deleteAnime(animeTitle: String) { viewModelScope.launch {
         try {
             val folderUri = _uiState.value.folderUri
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            kotlinx.coroutines.withContext(ioDispatcher) {
                 val storage = com.anics.nativeapp.downloads.StorageManager(context)
                 val all = downloadDao.getAllDownloads().first()
                 val targetRows = all.filter {
                     com.anics.nativeapp.sync.SyncContract.titleKey(it.animeTitle) == com.anics.nativeapp.sync.SyncContract.titleKey(animeTitle)
+                }
+                val targetDirs = targetRows.mapNotNull {
+                    if (it.outputPath.isNotBlank()) java.io.File(it.outputPath).parentFile else null
                 }
                 targetRows.forEach { row ->
                     if (row.outputPath.isNotBlank()) {
                         storage.deleteFile(row.outputPath, folderUri, row.animeTitle)
                     }
                 }
-                storage.deleteAnimeFolder(animeTitle, folderUri)
+                storage.deleteAnimeFolder(animeTitle, folderUri, targetDirs)
                 targetRows.forEach { downloadDao.deleteDownload(it.id) }
             }
             refreshStorage()
@@ -197,7 +202,7 @@ class DownloadsViewModel(
     fun showMessage(message: String) { _uiState.update { it.copy(message = message) } }
     private fun scan(uri: String) {
         if (_uiState.value.isScanning) return
-        viewModelScope.launch {
+        viewModelScope.launch(ioDispatcher) {
             _uiState.update { it.copy(isScanning = true, message = null) }
             try {
                 require(uri.isNotBlank()) { "Selecciona la carpeta Anime que usa Tauri" }

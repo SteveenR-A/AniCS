@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.3.13",
+    "date": "2026-10-07",
+    "title": "Atajos del reproductor y optimización en descargas nativas",
+    "type": "patch",
+    "highlights": [
+      "Navegación y atajos del reproductor accesibles sin interferencia de foco",
+      "Eliminación segura y completa de descargas y carpetas en Android nativo",
+      "Sincronización robusta de metadatos de biblioteca"
+    ]
+  },
+  {
     "version": "0.3.12",
     "date": "2026-10-06",
     "title": "Optimizaciones de descarga y almacenamiento seguro",

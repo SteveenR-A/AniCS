@@ -5,6 +5,15 @@ El formato está basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1
 
 ---
 
+## [0.3.13] - 2026-10-07
+
+### Atajos del reproductor y optimización en descargas nativas
+- Navegación y atajos del reproductor accesibles sin interferencia de foco
+- Eliminación segura y completa de descargas y carpetas en Android nativo
+- Sincronización robusta de metadatos de biblioteca
+
+---
+
 ## [0.3.12] - 2026-10-06
 
 ### <Título del Release>

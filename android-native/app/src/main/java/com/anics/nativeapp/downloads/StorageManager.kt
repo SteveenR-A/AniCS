@@ -153,7 +153,7 @@ class StorageManager(private val context: Context) {
         }
     } catch (_: Exception) { false }
 
-    fun cleanEmptyAnimeFolderSafely(animeTitle: String, folderUri: String? = null): Boolean {
+    fun cleanEmptyAnimeFolderSafely(animeTitle: String, folderUri: String? = null, fallbackTarget: File? = null): Boolean {
         var cleaned = false
         val safeTitle = animeTitle.replace(Regex("""[\\/:*?"<>|]"""), " ").trim(' ', '.').ifBlank { "Anime" }
         val videoExts = setOf("mp4", "mkv", "webm", "ts", "avi", "mov", "m4v")
@@ -207,10 +207,24 @@ class StorageManager(private val context: Context) {
             }
         } catch (_: Exception) { }
 
+        // 4. En carpeta padre del archivo específico si se proporcionó
+        try {
+            val parentDir = if (fallbackTarget?.isDirectory == true) fallbackTarget else fallbackTarget?.parentFile
+            if (parentDir != null && parentDir.exists() && parentDir.isDirectory) {
+                val children = parentDir.listFiles() ?: emptyArray()
+                val hasVideos = children.any { child ->
+                    child.isFile && child.extension.lowercase() in videoExts
+                }
+                if (!hasVideos) {
+                    cleaned = parentDir.deleteRecursively() || cleaned
+                }
+            }
+        } catch (_: Exception) { }
+
         return cleaned
     }
 
-    fun deleteAnimeFolder(animeTitle: String, folderUri: String? = null): Boolean {
+    fun deleteAnimeFolder(animeTitle: String, folderUri: String? = null, fallbackDirs: List<File> = emptyList()): Boolean {
         var anyDeleted = false
         val safeTitle = animeTitle.replace(Regex("""[\\/:*?"<>|]"""), " ").trim(' ', '.').ifBlank { "Anime" }
 
@@ -249,6 +263,18 @@ class StorageManager(private val context: Context) {
                 }
             }
         } catch (_: Exception) { }
+
+        // 4. Carpetas directas fallback
+        fallbackDirs.forEach { dir ->
+            try {
+                val target = if (dir.isDirectory) dir else dir.parentFile
+                if (target != null && target.exists() && target.isDirectory) {
+                    if (target.deleteRecursively()) {
+                        anyDeleted = true
+                    }
+                }
+            } catch (_: Exception) { }
+        }
 
         return anyDeleted
     }
