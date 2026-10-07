@@ -29,7 +29,8 @@ class DownloadsViewModel(
     private val context: android.content.Context,
     private val catalogRepository: com.anics.nativeapp.data.repository.CatalogRepository? = null,
     private val savedStateHandle: SavedStateHandle = SavedStateHandle(),
-    private val ioDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.IO
+    private val ioDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.IO,
+    private val database: com.anics.nativeapp.data.local.AppDatabase = com.anics.nativeapp.data.local.AppDatabase.getInstance(context)
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(DownloadsUiState())
@@ -56,7 +57,6 @@ class DownloadsViewModel(
                 _uiState.update { it.copy(expandedAnimeKeys = keys.toSet()) }
             }
         }
-        val database = com.anics.nativeapp.data.local.AppDatabase.getInstance(context)
         viewModelScope.launch {
             database.profileDao().getActiveProfileFlow().flatMapLatest { profile ->
                 database.historyDao().getHistoryForProfile(profile?.id ?: "default").onStart { emit(emptyList()) }
@@ -75,10 +75,9 @@ class DownloadsViewModel(
     fun refreshStorage() {
         viewModelScope.launch {
             val values = kotlinx.coroutines.withContext(ioDispatcher) {
-                val db = com.anics.nativeapp.data.local.AppDatabase.getInstance(context)
-                val images = db.historyDao().getAllHistorySync().map { it.animeTitle to it.thumbnailUrl } + db.favoriteDao().getAllFavoritesSync().map { it.title to it.thumbnailUrl }
+                val images = database.historyDao().getAllHistorySync().map { it.animeTitle to it.thumbnailUrl } + database.favoriteDao().getAllFavoritesSync().map { it.title to it.thumbnailUrl }
                 val covers = images.filter { it.second.isNotBlank() }.associate { com.anics.nativeapp.sync.SyncContract.titleKey(it.first) to it.second }.toMutableMap()
-                val list = downloadDao.getAllDownloads().first()
+                val list = downloadDao.getAllDownloadsSnapshot()
                 list.forEach { dl ->
                     val key = com.anics.nativeapp.sync.SyncContract.titleKey(dl.animeTitle)
                     if (!covers.containsKey(key) || covers[key].isNullOrBlank()) {
@@ -155,7 +154,7 @@ class DownloadsViewModel(
             } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { showMessage(e.localizedMessage ?: "No se pudo importar anics.db") }
         }
     }
-    fun deleteVideo(id: String) { viewModelScope.launch {
+    fun deleteVideo(id: String): kotlinx.coroutines.Job = viewModelScope.launch {
         try {
             val row = downloadDao.getDownloadById(id) ?: return@launch
             val folderUri = _uiState.value.folderUri
@@ -173,14 +172,14 @@ class DownloadsViewModel(
                 action(id, com.anics.nativeapp.downloads.DownloadService.ACTION_CANCEL)
             }
         } catch (e: Exception) { showMessage(e.localizedMessage ?: "No se pudo borrar el video") }
-    } }
+    }
 
-    fun deleteAnime(animeTitle: String) { viewModelScope.launch {
+    fun deleteAnime(animeTitle: String): kotlinx.coroutines.Job = viewModelScope.launch {
         try {
             val folderUri = _uiState.value.folderUri
             kotlinx.coroutines.withContext(ioDispatcher) {
                 val storage = com.anics.nativeapp.downloads.StorageManager(context)
-                val all = downloadDao.getAllDownloads().first()
+                val all = downloadDao.getAllDownloadsSnapshot()
                 val targetRows = all.filter {
                     com.anics.nativeapp.sync.SyncContract.titleKey(it.animeTitle) == com.anics.nativeapp.sync.SyncContract.titleKey(animeTitle)
                 }
@@ -198,7 +197,7 @@ class DownloadsViewModel(
             refreshStorage()
             showMessage("Anime '$animeTitle' y sus episodios eliminados")
         } catch (e: Exception) { showMessage(e.localizedMessage ?: "No se pudo eliminar el anime") }
-    } }
+    }
     fun showMessage(message: String) { _uiState.update { it.copy(message = message) } }
     private fun scan(uri: String) {
         if (_uiState.value.isScanning) return

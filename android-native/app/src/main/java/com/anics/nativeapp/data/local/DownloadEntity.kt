@@ -38,6 +38,9 @@ interface DownloadDao {
     @Query("SELECT * FROM downloads ORDER BY queueOrder ASC")
     fun getAllDownloads(): Flow<List<DownloadEntity>>
 
+    @Query("SELECT * FROM downloads ORDER BY queueOrder ASC")
+    suspend fun getAllDownloadsSnapshot(): List<DownloadEntity>
+
     @Query("SELECT * FROM downloads WHERE status = :status ORDER BY queueOrder ASC")
     fun getDownloadsByStatus(status: String): Flow<List<DownloadEntity>>
 

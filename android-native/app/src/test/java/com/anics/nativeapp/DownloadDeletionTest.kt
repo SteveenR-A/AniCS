@@ -140,15 +140,22 @@ class DownloadDeletionTest {
             settingsRepository = SettingsRepository(context),
             context = context,
             savedStateHandle = SavedStateHandle(),
-            ioDispatcher = testDispatcher
+            ioDispatcher = testDispatcher,
+            database = db
         )
 
-        vm.deleteVideo("test-ep1")
+        val job = vm.deleteVideo("test-ep1")
+        var loops = 100
+        while (!job.isCompleted && loops-- > 0) {
+            testScheduler.advanceUntilIdle()
+            org.robolectric.shadows.ShadowSystemClock.advanceBy(java.time.Duration.ofMillis(50))
+            Thread.sleep(20)
+        }
         testScheduler.advanceUntilIdle()
 
-        assertFalse(epFile.exists())
-        assertFalse(epFile.parentFile!!.exists())
-        assertNull(db.downloadDao().getDownloadById("test-ep1"))
+        assertFalse("epFile must be deleted", epFile.exists())
+        assertFalse("epFile parent dir must be deleted", epFile.parentFile!!.exists())
+        assertNull("database row must be deleted", db.downloadDao().getDownloadById("test-ep1"))
 
         Dispatchers.resetMain()
         db.close()
@@ -178,16 +185,23 @@ class DownloadDeletionTest {
             settingsRepository = SettingsRepository(context),
             context = context,
             savedStateHandle = SavedStateHandle(),
-            ioDispatcher = testDispatcher
+            ioDispatcher = testDispatcher,
+            database = db
         )
 
-        vm.deleteAnime(title)
+        val job = vm.deleteAnime(title)
+        var loops = 100
+        while (!job.isCompleted && loops-- > 0) {
+            testScheduler.advanceUntilIdle()
+            org.robolectric.shadows.ShadowSystemClock.advanceBy(java.time.Duration.ofMillis(50))
+            Thread.sleep(20)
+        }
         testScheduler.advanceUntilIdle()
 
-        assertFalse(animeDir.exists())
-        assertFalse(ep1.exists())
-        assertFalse(ep2.exists())
-        assertEquals(0, db.downloadDao().getAllDownloads().first().size)
+        assertFalse("animeDir must be deleted", animeDir.exists())
+        assertFalse("ep1 must be deleted", ep1.exists())
+        assertFalse("ep2 must be deleted", ep2.exists())
+        assertEquals("all downloads must be removed", 0, db.downloadDao().getAllDownloadsSnapshot().size)
 
         Dispatchers.resetMain()
         db.close()
