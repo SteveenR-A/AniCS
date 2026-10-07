@@ -1011,7 +1011,16 @@ export function PlayerPage() {
   const seekRelative = (seconds: number, showHud: boolean | React.SyntheticEvent = true) => {
     const v = videoRef.current;
     if (!v) return;
-    v.currentTime = Math.max(0, Math.min(v.duration || 0, v.currentTime + seconds));
+    const maxDur = (Number.isFinite(v.duration) && v.duration > 0)
+      ? v.duration
+      : (durationRef.current > 0 ? durationRef.current : (duration > 0 ? duration : Infinity));
+    const cur = Number.isFinite(v.currentTime) ? v.currentTime : (playbackTimeRef.current || 0);
+    const target = Math.max(0, Math.min(maxDur, cur + seconds));
+    if (Number.isFinite(target)) {
+      v.currentTime = target;
+      playbackTimeRef.current = target;
+      setPlaybackTime(target);
+    }
     showToast({
       icon: 'seek',
       text: seconds > 0 ? `+${seconds}s` : `${seconds}s`,
@@ -1198,20 +1207,24 @@ export function PlayerPage() {
   // Atajos de teclado
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.target as HTMLElement).closest('input, select, textarea, button, [contenteditable="true"]')) return;
+      const target = e.target;
+      if (target instanceof HTMLElement && target.closest('input, select, textarea, [contenteditable="true"]')) return;
 
       switch (e.key.toLowerCase()) {
         case ' ':
+        case 'spacebar':
         case 'k':
           e.preventDefault();
           togglePlay();
           break;
         case 'arrowleft':
+        case 'left':
         case 'j':
           e.preventDefault();
           seekRelative(-10);
           break;
         case 'arrowright':
+        case 'right':
         case 'l':
           e.preventDefault();
           seekRelative(10);
@@ -1221,11 +1234,13 @@ export function PlayerPage() {
           seekRelative(85);
           break;
         case 'arrowup':
+        case 'up':
           e.preventDefault();
           setVolume(Math.min(1, volume + 0.1));
           showToast({ icon: 'volume', text: `Volumen: ${Math.round(Math.min(1, volume + 0.1) * 100)}%`, value: Math.min(1, volume + 0.1) });
           break;
         case 'arrowdown':
+        case 'down':
           e.preventDefault();
           setVolume(Math.max(0, volume - 0.1));
           showToast({ icon: 'volume', text: `Volumen: ${Math.round(Math.max(0, volume - 0.1) * 100)}%`, value: Math.max(0, volume - 0.1) });

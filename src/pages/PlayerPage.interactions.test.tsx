@@ -284,4 +284,50 @@ describe('Player interactions', () => {
     expect(video.paused).toBe(!playing);
     expect(play).toHaveBeenCalledTimes(playing ? 1 : 0);
   });
+
+  it('allows arrow keys and space shortcuts to advance, rewind and toggle play even when a button has focus', async () => {
+    const { video } = await mountPlayer();
+    video.currentTime = 50;
+
+    // Focus on a button (e.g. Pause/Play button)
+    const playPauseBtn = screen.getByRole('button', { name: /Pausar video|Reproducir video/i });
+    playPauseBtn.focus();
+    expect(document.activeElement).toBe(playPauseBtn);
+
+    // Press ArrowRight directly on focused button to seek +10s
+    await act(async () => {
+      playPauseBtn.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+      vi.runOnlyPendingTimers();
+    });
+    expect(video.currentTime).toBe(60);
+
+    // Press ArrowLeft to seek -10s
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+      vi.runOnlyPendingTimers();
+    });
+    expect(video.currentTime).toBe(50);
+
+    // Press Space to toggle play/pause
+    expect(video.paused).toBe(false);
+    await act(async () => {
+      playPauseBtn.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
+      vi.runOnlyPendingTimers();
+    });
+    expect(video.paused).toBe(true);
+
+    // Press 'k' to toggle play/pause back
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', bubbles: true }));
+      vi.runOnlyPendingTimers();
+    });
+    expect(video.paused).toBe(false);
+
+    // Press 's' to skip intro (+85s)
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', bubbles: true }));
+      vi.runOnlyPendingTimers();
+    });
+    expect(video.currentTime).toBe(135);
+  });
 });

@@ -33,7 +33,8 @@ fun DownloadsScreen(viewModel: DownloadsViewModel, onPlayOffline: (String, Strin
     val context = LocalContext.current
     val queue by viewModel.queueVisible.collectAsState()
     var remove by remember { mutableStateOf<DownloadEntity?>(null) }
-    var deleteFile by remember { mutableStateOf(false) }
+    var deleteFile by remember { mutableStateOf(true) }
+    var removeAnime by remember { mutableStateOf<String?>(null) }
     val groups = state.completedDownloads.groupBy { com.anics.nativeapp.sync.SyncContract.titleKey(it.animeTitle) }.values.toList()
     val folder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) try {
@@ -84,6 +85,9 @@ fun DownloadsScreen(viewModel: DownloadsViewModel, onPlayOffline: (String, Strin
                             Text(title, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
                             Text("${rows.size} eps · ${formatBytes(rows.sumOf { it.downloadedBytes })}", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
                         }
+                        IconButton(onClick = { removeAnime = title }) {
+                            Icon(AniIcons.Trash2, "Eliminar anime y descargas", Modifier.size(18.dp), tint = MaterialTheme.colorScheme.error)
+                        }
                         Icon(AniIcons.ChevronDown, if (expanded) "Ocultar episodios" else "Mostrar episodios", Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     if (expanded) TextButton(onClick = { val anime = rows.firstOrNull { it.animeUrl.startsWith("http") }; if (anime != null) onAnime(anime.animeUrl, anime.source) else onSearch(title) }) {
@@ -98,19 +102,83 @@ fun DownloadsScreen(viewModel: DownloadsViewModel, onPlayOffline: (String, Strin
                                 EpisodeWatchIndicator(state.watchProgress[EpisodeKey.of(row.animeTitle, row.episodeNumber)] ?: EpisodeWatchProgress())
                             }
                             IconButton(onClick = { onPlayOffline(row.outputPath, row.animeTitle, row.episodeNumber) }) { Icon(AniIcons.Play, "Reproducir episodio ${row.episodeNumber}", tint = MaterialTheme.colorScheme.primary) }
-                            IconButton(onClick = { deleteFile = false; remove = row }) { Icon(AniIcons.X, "Quitar de la biblioteca", Modifier.size(18.dp)) }
+                            IconButton(onClick = { deleteFile = true; remove = row }) { Icon(AniIcons.Trash2, "Eliminar episodio", Modifier.size(18.dp)) }
                         }
                     }
                 }
             }
         }
     }
-    remove?.let { row -> AlertDialog(onDismissRequest = { remove = null }, title = { Text(if (deleteFile) "Eliminar video del dispositivo" else if (row.status == "completed") "Quitar de la biblioteca" else "Cancelar descarga") },
-        text = { Column {
-            Text(if (deleteFile) "Se borrará el archivo del episodio ${row.episodeNumber}." else if (row.status == "completed") "Se quitará el registro. El video se conserva y puede volver a detectarse." else "Se eliminará el archivo parcial de este episodio.")
-            if (row.status == "completed" && !deleteFile) TextButton(onClick = { deleteFile = true }) { Text("También quiero eliminar el video", color = MaterialTheme.colorScheme.error) }
-        } },
-        confirmButton = { TextButton(onClick = { if (deleteFile) viewModel.deleteVideo(row.id) else viewModel.cancelDownload(row.id); remove = null }) { Text(if (deleteFile) "Borrar video" else "Confirmar") } }, dismissButton = { TextButton(onClick = { remove = null }) { Text("Volver") } }) }
+    removeAnime?.let { animeTitle ->
+        AlertDialog(
+            onDismissRequest = { removeAnime = null },
+            title = { Text("Eliminar anime descargado") },
+            text = { Text("Se eliminarán todos los episodios descargados de '$animeTitle' y se borrará su carpeta del dispositivo.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.deleteAnime(animeTitle)
+                    removeAnime = null
+                }) {
+                    Text("Eliminar anime", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = { TextButton(onClick = { removeAnime = null }) { Text("Volver") } }
+        )
+    }
+    remove?.let { row ->
+        val isCompleted = row.status == "completed"
+        AlertDialog(
+            onDismissRequest = { remove = null },
+            title = {
+                Text(
+                    if (isCompleted) {
+                        if (deleteFile) "Eliminar video del dispositivo" else "Quitar de la biblioteca"
+                    } else "Cancelar descarga"
+                )
+            },
+            text = {
+                Column {
+                    Text(
+                        if (isCompleted) {
+                            if (deleteFile) "Se borrará el archivo del episodio ${row.episodeNumber} de '${row.animeTitle}' de tu dispositivo."
+                            else "Se quitará el registro. El archivo de video se conserva en el dispositivo."
+                        } else "Se eliminará el archivo parcial de este episodio."
+                    )
+                    if (isCompleted) {
+                        Spacer(Modifier.height(4.dp))
+                        if (deleteFile) {
+                            TextButton(onClick = { deleteFile = false }) {
+                                Text("Solo quitar de la biblioteca (conservar archivo)", style = MaterialTheme.typography.bodySmall)
+                            }
+                        } else {
+                            TextButton(onClick = { deleteFile = true }) {
+                                Text("También quiero eliminar el archivo del video", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (isCompleted) {
+                        if (deleteFile) viewModel.deleteVideo(row.id)
+                        else viewModel.cancelDownload(row.id)
+                    } else {
+                        viewModel.cancelDownload(row.id)
+                    }
+                    remove = null
+                }) {
+                    Text(
+                        if (isCompleted) {
+                            if (deleteFile) "Borrar video" else "Confirmar"
+                        } else "Confirmar",
+                        color = if (deleteFile || !isCompleted) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                    )
+                }
+            },
+            dismissButton = { TextButton(onClick = { remove = null }) { Text("Volver") } }
+        )
+    }
 }
 
 @Composable

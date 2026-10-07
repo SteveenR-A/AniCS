@@ -109,8 +109,147 @@ class StorageManager(private val context: Context) {
         }
     }
 
-    fun deleteFile(destinationPath: String): Boolean = try {
-        if (destinationPath.startsWith("content://")) DocumentFile.fromSingleUri(context, Uri.parse(destinationPath))?.delete() ?: false
-        else localFile(destinationPath).delete()
+    fun deleteFile(destinationPath: String, folderUri: String? = null, animeTitle: String? = null): Boolean = try {
+        if (destinationPath.startsWith("content://")) {
+            val uri = Uri.parse(destinationPath)
+            var deleted = DocumentFile.fromSingleUri(context, uri)?.delete() == true
+            if (!deleted) {
+                deleted = try {
+                    android.provider.DocumentsContract.deleteDocument(context.contentResolver, uri)
+                } catch (_: Exception) { false }
+            }
+            if (!deleted) {
+                deleted = try {
+                    context.contentResolver.delete(uri, null, null) > 0
+                } catch (_: Exception) { false }
+            }
+            if (!deleted && !folderUri.isNullOrBlank()) {
+                try {
+                    val root = DocumentFile.fromTreeUri(context, Uri.parse(folderUri))
+                    if (root != null && root.exists()) {
+                        val fileName = uri.lastPathSegment?.substringAfterLast('/') ?: ""
+                        val candidates = mutableListOf<DocumentFile>()
+                        if (!animeTitle.isNullOrBlank()) {
+                            val safeTitle = animeTitle.replace(Regex("""[\\/:*?"<>|]"""), " ").trim(' ', '.').ifBlank { "Anime" }
+                            val dir = root.findFile(safeTitle)
+                                ?: root.listFiles().firstOrNull { it.isDirectory && (it.name.equals(safeTitle, true) || it.name.equals(animeTitle, true)) }
+                            if (dir != null) {
+                                candidates.addAll(dir.listFiles())
+                            }
+                        }
+                        if (candidates.isEmpty()) {
+                            candidates.addAll(root.listFiles())
+                        }
+                        val matched = candidates.firstOrNull { it.isFile && (it.uri == uri || it.name.equals(fileName, true)) }
+                        if (matched?.delete() == true) deleted = true
+                    }
+                } catch (_: Exception) { }
+            }
+            deleted || getFileLength(destinationPath) == 0L
+        } else {
+            val file = localFile(destinationPath)
+            val deleted = file.delete() || !file.exists()
+            deleted
+        }
     } catch (_: Exception) { false }
+
+    fun cleanEmptyAnimeFolderSafely(animeTitle: String, folderUri: String? = null): Boolean {
+        var cleaned = false
+        val safeTitle = animeTitle.replace(Regex("""[\\/:*?"<>|]"""), " ").trim(' ', '.').ifBlank { "Anime" }
+        val videoExts = setOf("mp4", "mkv", "webm", "ts", "avi", "mov", "m4v")
+
+        // 1. En árbol SAF
+        if (!folderUri.isNullOrBlank()) {
+            try {
+                val root = DocumentFile.fromTreeUri(context, Uri.parse(folderUri))
+                if (root != null && root.exists() && root.canWrite()) {
+                    val dir = root.findFile(safeTitle)
+                        ?: root.listFiles().firstOrNull { it.isDirectory && (it.name.equals(safeTitle, true) || it.name.equals(animeTitle, true)) }
+                    if (dir != null && dir.isDirectory) {
+                        val children = dir.listFiles()
+                        val hasVideos = children.any { child ->
+                            child.isFile && child.name?.substringAfterLast('.', "")?.lowercase() in videoExts
+                        }
+                        if (!hasVideos) {
+                            children.forEach { runCatching { it.delete() } }
+                            cleaned = dir.delete() || !dir.exists()
+                        }
+                    }
+                }
+            } catch (_: Exception) { }
+        }
+
+        // 2. En carpeta local de la app
+        try {
+            val localDir = File(getDefaultDownloadFolder(), safeTitle)
+            if (localDir.exists() && localDir.isDirectory) {
+                val children = localDir.listFiles() ?: emptyArray()
+                val hasVideos = children.any { child ->
+                    child.isFile && child.extension.lowercase() in videoExts
+                }
+                if (!hasVideos) {
+                    cleaned = localDir.deleteRecursively() || cleaned
+                }
+            }
+        } catch (_: Exception) { }
+
+        // 3. En carpeta compartida si existe
+        try {
+            val sharedDir = File("/storage/emulated/0/Anime", safeTitle)
+            if (sharedDir.exists() && sharedDir.isDirectory && sharedDir.canWrite()) {
+                val children = sharedDir.listFiles() ?: emptyArray()
+                val hasVideos = children.any { child ->
+                    child.isFile && child.extension.lowercase() in videoExts
+                }
+                if (!hasVideos) {
+                    cleaned = sharedDir.deleteRecursively() || cleaned
+                }
+            }
+        } catch (_: Exception) { }
+
+        return cleaned
+    }
+
+    fun deleteAnimeFolder(animeTitle: String, folderUri: String? = null): Boolean {
+        var anyDeleted = false
+        val safeTitle = animeTitle.replace(Regex("""[\\/:*?"<>|]"""), " ").trim(' ', '.').ifBlank { "Anime" }
+
+        // 1. Árbol SAF
+        if (!folderUri.isNullOrBlank()) {
+            try {
+                val root = DocumentFile.fromTreeUri(context, Uri.parse(folderUri))
+                if (root != null && root.exists() && root.canWrite()) {
+                    val dir = root.findFile(safeTitle)
+                        ?: root.listFiles().firstOrNull { it.isDirectory && (it.name.equals(safeTitle, true) || it.name.equals(animeTitle, true)) }
+                    if (dir != null && dir.isDirectory) {
+                        if (dir.delete() || !dir.exists()) {
+                            anyDeleted = true
+                        }
+                    }
+                }
+            } catch (_: Exception) { }
+        }
+
+        // 2. Carpeta local de la app
+        try {
+            val localDir = File(getDefaultDownloadFolder(), safeTitle)
+            if (localDir.exists() && localDir.isDirectory) {
+                if (localDir.deleteRecursively()) {
+                    anyDeleted = true
+                }
+            }
+        } catch (_: Exception) { }
+
+        // 3. Carpeta compartida
+        try {
+            val sharedDir = File("/storage/emulated/0/Anime", safeTitle)
+            if (sharedDir.exists() && sharedDir.isDirectory && sharedDir.canWrite()) {
+                if (sharedDir.deleteRecursively()) {
+                    anyDeleted = true
+                }
+            }
+        } catch (_: Exception) { }
+
+        return anyDeleted
+    }
 }

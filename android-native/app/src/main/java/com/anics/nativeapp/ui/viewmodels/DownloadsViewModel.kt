@@ -157,12 +157,42 @@ class DownloadsViewModel(
     fun deleteVideo(id: String) { viewModelScope.launch {
         try {
             val row = downloadDao.getDownloadById(id) ?: return@launch
-            if (row.status == "completed") kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                com.anics.nativeapp.downloads.StorageManager(context).deleteFile(row.outputPath)
-                require(com.anics.nativeapp.downloads.StorageManager(context).getFileLength(row.outputPath) == 0L) { "No se pudo borrar el video; revisa el permiso de la carpeta" }
-                downloadDao.deleteDownload(id)
-            } else action(id, com.anics.nativeapp.downloads.DownloadService.ACTION_CANCEL)
+            val folderUri = _uiState.value.folderUri
+            if (row.status == "completed") {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    val storage = com.anics.nativeapp.downloads.StorageManager(context)
+                    storage.deleteFile(row.outputPath, folderUri, row.animeTitle)
+                    storage.cleanEmptyAnimeFolderSafely(row.animeTitle, folderUri)
+                    downloadDao.deleteDownload(id)
+                }
+                refreshStorage()
+                showMessage("Episodio ${row.episodeNumber} eliminado")
+            } else {
+                action(id, com.anics.nativeapp.downloads.DownloadService.ACTION_CANCEL)
+            }
         } catch (e: Exception) { showMessage(e.localizedMessage ?: "No se pudo borrar el video") }
+    } }
+
+    fun deleteAnime(animeTitle: String) { viewModelScope.launch {
+        try {
+            val folderUri = _uiState.value.folderUri
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                val storage = com.anics.nativeapp.downloads.StorageManager(context)
+                val all = downloadDao.getAllDownloads().first()
+                val targetRows = all.filter {
+                    com.anics.nativeapp.sync.SyncContract.titleKey(it.animeTitle) == com.anics.nativeapp.sync.SyncContract.titleKey(animeTitle)
+                }
+                targetRows.forEach { row ->
+                    if (row.outputPath.isNotBlank()) {
+                        storage.deleteFile(row.outputPath, folderUri, row.animeTitle)
+                    }
+                }
+                storage.deleteAnimeFolder(animeTitle, folderUri)
+                targetRows.forEach { downloadDao.deleteDownload(it.id) }
+            }
+            refreshStorage()
+            showMessage("Anime '$animeTitle' y sus episodios eliminados")
+        } catch (e: Exception) { showMessage(e.localizedMessage ?: "No se pudo eliminar el anime") }
     } }
     fun showMessage(message: String) { _uiState.update { it.copy(message = message) } }
     private fun scan(uri: String) {
