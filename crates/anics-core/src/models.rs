@@ -252,3 +252,15 @@ pub struct DownloadTask {
     pub error: Option<String>,
     pub created_at: String,
 }
+
+/// Detecta el tipo de medio (Hls, Mp4 o Unknown) según la extensión o contenido de la URL.
+pub fn detect_media_type(url: &str) -> MediaType {
+    let clean = url.split('?').next().unwrap_or(url).to_lowercase();
+    if clean.ends_with(".m3u8") || clean.contains(".m3u8") {
+        MediaType::Hls
+    } else if clean.ends_with(".mp4") || clean.ends_with(".mkv") || clean.contains(".mp4") {
+        MediaType::Mp4
+    } else {
+        MediaType::Unknown
+    }
+}

@@ -1,6 +1,5 @@
-import { memo, useState } from 'react';
-import type { FormEvent } from 'react';
-import { ChevronDown, Server, Check, Plus, Crown } from 'lucide-react';
+import { memo } from 'react';
+import { ChevronDown, Server, Check, Crown } from 'lucide-react';
 import type { PlaybackServer } from '@/hooks/usePlaybackServers';
 import { isVipServer } from '@/utils/serverUtils';
 import './ServerSelector.css';
@@ -13,41 +12,19 @@ interface Props {
   isResolving: boolean;
   isPortrait?: boolean;
   onOpenChange: (open: boolean) => void;
-  onRefresh: () => Promise<void>;
+  onRefresh?: () => Promise<void>;
   onSelect: (server: PlaybackServer) => void;
-  onAdd: (name: string, url: string) => Promise<void>;
+  onAdd?: (name: string, url: string) => Promise<void>;
 }
 
 export const ServerSelector = memo(function ServerSelector({
   servers, selectedUrl, selectedName, isOpen, isResolving,
-  isPortrait = false, onOpenChange, onRefresh, onSelect, onAdd,
+  isPortrait = false, onOpenChange, onRefresh, onSelect,
 }: Props) {
-  const [name, setName] = useState('');
-  const [url, setUrl] = useState('');
-  const [error, setError] = useState('');
-  const [saving, setSaving] = useState(false);
-
   const toggleMenu = () => {
     onOpenChange(!isOpen);
-    if (!isOpen) {
-      setError('');
-      void onRefresh().catch(() => setError('No se pudieron cargar los servidores guardados.'));
-    }
-  };
-
-  const saveServer = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (saving) return;
-    setSaving(true);
-    setError('');
-    try {
-      await onAdd(name, url);
-      setName('');
-      setUrl('');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo guardar el servidor.');
-    } finally {
-      setSaving(false);
+    if (!isOpen && onRefresh) {
+      void onRefresh().catch(() => {});
     }
   };
 
@@ -110,30 +87,6 @@ export const ServerSelector = memo(function ServerSelector({
               {selectedUrl === server.url && <Check size={16} />}
             </button>
           ))}
-
-          <form onSubmit={saveServer} className="player-server-form">
-            <strong>Agregar servidor para este episodio</strong>
-            <input
-              aria-label="Nombre del servidor"
-              placeholder="Nombre"
-              required
-              value={name}
-              onChange={event => setName(event.target.value)}
-            />
-            <input
-              aria-label="URL del servidor"
-              placeholder="https://… (video o embed)"
-              type="url"
-              required
-              value={url}
-              onChange={event => setUrl(event.target.value)}
-            />
-            <small>MP4/HLS directo o embed compatible con la fuente actual.</small>
-            <button type="submit" disabled={saving}>
-              <Plus size={14} /> {saving ? 'Guardando…' : 'Guardar servidor'}
-            </button>
-            {error && <p role="alert" className="player-server-error">{error}</p>}
-          </form>
         </div>
       )}
     </div>

@@ -13,21 +13,12 @@ fn supported(server: &VideoServer) -> bool {
         "fembed",
         "movearnpre",
         "dhcplay",
-        "streamwish",
-        "sfastwish",
-        "embedwish",
-        "swish",
-        "mp4upload",
-        "voe.sx",
-        "voe",
         "mixdrop",
         "streamtape",
         "doodstream",
         "dooodster",
         "d-s.io",
-        "filemoon",
         "bysesukior",
-        "bysekoze",
     ];
     !server.url.trim().is_empty()
         && name != "descarga"
@@ -46,6 +37,8 @@ fn priority(server: &VideoServer) -> u32 {
         95
     } else if name.contains("mediafire") || url.contains("mediafire") {
         90
+    } else if name.contains("mp4upload") || url.contains("mp4upload") {
+        89
     } else if name.contains("vidhide") || url.contains("vidhide") {
         88
     } else if name.contains("asura")
@@ -54,8 +47,18 @@ fn priority(server: &VideoServer) -> u32 {
         || name.contains("m3u8")
     {
         85
+    } else if name.contains("streamwish")
+        || url.contains("streamwish")
+        || url.contains("embedwish")
+        || url.contains("sfastwish")
+    {
+        84
+    } else if name.contains("voe") || url.contains("voe") {
+        83
     } else if name.contains("uqload") || url.contains("uqload") {
         82
+    } else if name.contains("filemoon") || url.contains("filemoon") || url.contains("bysekoze") {
+        81
     } else if name.contains("lulustream") || url.contains("luluvdo") {
         80
     } else if server.is_direct || url.ends_with(".mp4") {

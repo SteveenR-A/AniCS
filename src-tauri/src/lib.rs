@@ -135,6 +135,8 @@ pub fn run() {
             // Streaming
             commands::get_servers,
             commands::resolve_stream,
+            commands::resolve_stream_native,
+            commands::get_supported_extractor_hosts,
             commands::detect_media_type,
             commands::open_in_external_player,
             // Descargas y Archivos Locales

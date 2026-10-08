@@ -16,6 +16,24 @@ pub async fn get_servers(
     extractor.get_servers(&episode_url).await.map_err(|e| e.to_string())
 }
 
+fn wrap_proxied_stream_if_needed(media: &mut ResolvedMedia) {
+    if media.direct_url.starts_with("http://127.0.0.1") || media.direct_url.starts_with("http://localhost") {
+        return;
+    }
+    let needs_proxy = media.media_type == MediaType::Mp4 && (
+        media.referer.is_some()
+        || media.direct_url.contains("mp4upload.com")
+        || media.direct_url.contains("cloudwindow-route.com")
+    );
+    if needs_proxy {
+        let referer = media.referer.as_deref();
+        media.direct_url = crate::downloader::media_server::get_proxied_stream_url(
+            &media.direct_url,
+            referer,
+        );
+    }
+}
+
 /// Resolver un servidor de video a URL directa (HLS/MP4)
 #[tauri::command]
 pub async fn resolve_stream(
@@ -23,9 +41,36 @@ pub async fn resolve_stream(
     source: String,
     _state: State<'_, AppState>,
 ) -> Result<ResolvedMedia, String> {
-    let extractor = create_extractor(&source)
-        .ok_or_else(|| format!("Unknown source: {source}"))?;
-    extractor.resolve_stream(&server).await.map_err(|e| e.to_string())
+    let mut media = if let Some(extractor) = create_extractor(&source) {
+        extractor.resolve_stream(&server).await.map_err(|e| e.to_string())?
+    } else {
+        anics_core::extractors::resolve_server(&server)
+            .await
+            .map_err(|e| e.to_string())?
+    };
+    wrap_proxied_stream_if_needed(&mut media);
+    Ok(media)
+}
+
+/// Resolver directamente un servidor usando el motor de extractores nativo en Rust
+#[tauri::command]
+pub async fn resolve_stream_native(
+    server: VideoServer,
+) -> Result<ResolvedMedia, String> {
+    let mut media = anics_core::extractors::resolve_server(&server)
+        .await
+        .map_err(|e| e.to_string())?;
+    wrap_proxied_stream_if_needed(&mut media);
+    Ok(media)
+}
+
+/// Obtener lista de servidores con soporte en el motor nativo de Rust
+#[tauri::command]
+pub fn get_supported_extractor_hosts() -> Vec<String> {
+    anics_core::extractors::supported_hosts()
+        .into_iter()
+        .map(|s| s.to_string())
+        .collect()
 }
 
 /// Detectar tipo de media de una URL (sin descargarla)

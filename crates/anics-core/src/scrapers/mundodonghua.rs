@@ -539,69 +539,7 @@ impl AnimeExtractor for MundoDonghuaExtractor {
 
     // Resolver de URL de video
     async fn resolve_stream(&self, server: &VideoServer) -> AppResult<ResolvedMedia> {
-        let url = &server.url;
-
-        // 1. Stream directo HLS de MundoDonghua (redirector.php o .m3u8)
-        if url.contains("redirector.php") || url.contains(".m3u8") {
-            return Ok(ResolvedMedia {
-                direct_url: url.clone(),
-                media_type: MediaType::Hls,
-                referer: Some(self.base_url.clone()),
-                user_agent: None,
-                qualities: vec![],
-            });
-        }
-
-        // 2. Extractor VOE
-        if url.contains("voe.sx") {
-            let html = fetch_html(url, server.referer.as_deref())
-                .await
-                .map_err(AppError::Network)?;
-            if let Some(stream_url) = JsUnpacker::extract_stream_url(&html) {
-                let media_type = detect_media_type(&stream_url);
-                return Ok(ResolvedMedia {
-                    direct_url: stream_url,
-                    media_type,
-                    referer: Some("https://voe.sx/".to_string()),
-                    user_agent: None,
-                    qualities: vec![],
-                });
-            }
-        }
-
-        // 3. Fallback genérico para otros servidores embebidos (Vidhide, Streamwish, Fmoon, etc.)
-        let html = fetch_html(url, server.referer.as_deref())
-            .await
-            .map_err(AppError::Network)?;
-
-        if let Some(stream_url) = JsUnpacker::extract_stream_url(&html) {
-            let media_type = detect_media_type(&stream_url);
-            let stream_referer = if url.contains("vidhide") {
-                Some("https://vidhidepro.com/".to_string())
-            } else if url.contains("streamwish") || url.contains("embedwish") || url.contains("sfastwish") {
-                Some("https://embedwish.com/".to_string())
-            } else if url.contains("fmoon") || url.contains("bysekoze") {
-                Some("https://bysekoze.com/".to_string())
-            } else {
-                Some(self.base_url.clone())
-            };
-            return Ok(ResolvedMedia {
-                direct_url: stream_url,
-                media_type,
-                referer: stream_referer,
-                user_agent: None,
-                qualities: vec![],
-            });
-        }
-
-        let media_type = detect_media_type(url);
-        Ok(ResolvedMedia {
-            direct_url: url.clone(),
-            media_type,
-            referer: server.referer.clone(),
-            user_agent: None,
-            qualities: vec![],
-        })
+        crate::extractors::resolve_server(server).await
     }
 
     // Lista dinámica de géneros para MundoDonghua
@@ -684,17 +622,6 @@ fn normalize_url(href: &str, base_url: &str) -> String {
                 format!("/{}", href)
             }
         )
-    }
-}
-
-fn detect_media_type(url: &str) -> MediaType {
-    let lower = url.to_lowercase();
-    if lower.contains(".m3u8") || lower.contains("hls") {
-        MediaType::Hls
-    } else if lower.contains(".mp4") {
-        MediaType::Mp4
-    } else {
-        MediaType::Unknown
     }
 }
 

@@ -9,7 +9,6 @@ use crate::error::*;
 use crate::http::{fetch_html, HTTP_CLIENT};
 use crate::models::*;
 use crate::scrapers::AnimeExtractor;
-use crate::unpacker::JsUnpacker;
 
 const DEFAULT_OTAKUSTV_URL: &str = "https://www.otakustv.net";
 
@@ -20,16 +19,6 @@ static EPISODIO_NUM_RE: Lazy<Regex> = Lazy::new(|| {
 static DIGITS_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r#"\d+"#).unwrap()
 });
-
-fn detect_media_type(url: &str) -> MediaType {
-    if url.contains(".m3u8") {
-        MediaType::Hls
-    } else if url.contains(".mp4") {
-        MediaType::Mp4
-    } else {
-        MediaType::Unknown
-    }
-}
 
 pub struct OtakusTVExtractor {
     base_url: String,
@@ -563,118 +552,7 @@ impl AnimeExtractor for OtakusTVExtractor {
 
     // Resuelve servidor de video a URL directa
     async fn resolve_stream(&self, server: &VideoServer) -> AppResult<ResolvedMedia> {
-        let url = &server.url;
-
-        // 1. Streams directos
-        if url.ends_with(".mp4") {
-            return Ok(ResolvedMedia {
-                direct_url: url.clone(),
-                media_type: MediaType::Mp4,
-                referer: server.referer.clone(),
-                user_agent: None,
-                qualities: vec![],
-            });
-        }
-
-        if url.contains(".m3u8") {
-            return Ok(ResolvedMedia {
-                direct_url: url.clone(),
-                media_type: MediaType::Hls,
-                referer: server.referer.clone(),
-                user_agent: None,
-                qualities: vec![],
-            });
-        }
-
-        // 2. Soporte específico para VOE (seguir redirección JavaScript si aplica)
-        let (html, effective_url) = if url.contains("voe.sx") {
-            let resp_html = fetch_html(url, server.referer.as_deref()).await
-                .map_err(AppError::Network)?;
-            static VOE_REDIR_RE: Lazy<Regex> = Lazy::new(|| {
-                Regex::new(r#"window\.location\.href\s*=\s*['"](https?://[^'"]+)['"]"#).unwrap()
-            });
-            if let Some(cap) = VOE_REDIR_RE.captures(&resp_html) {
-                let redir_url = cap[1].to_string();
-                let redir_html = fetch_html(&redir_url, Some(url)).await.unwrap_or_default();
-                (redir_html, redir_url)
-            } else {
-                (resp_html, url.clone())
-            }
-        } else {
-            let h = fetch_html(url, server.referer.as_deref()).await
-                .map_err(AppError::Network)?;
-            (h, url.clone())
-        };
-
-        if html.is_empty() {
-            return Err(AppError::Resolver("Página del servidor vacía o inaccesible".to_string()));
-        }
-
-        // 3. Soporte específico para Uqload
-        if url.contains("uqload") {
-            static UQLOAD_SRC_RE: Lazy<Regex> = Lazy::new(|| {
-                Regex::new(r#"sources\s*:\s*\[\s*['"](https?://[^'"]+)['"]"#).unwrap()
-            });
-            if let Some(cap) = UQLOAD_SRC_RE.captures(&html) {
-                let stream_url = cap[1].to_string();
-                let media_type = detect_media_type(&stream_url);
-                return Ok(ResolvedMedia {
-                    direct_url: stream_url,
-                    media_type,
-                    referer: Some(effective_url),
-                    user_agent: None,
-                    qualities: vec![],
-                });
-            }
-        }
-
-        // 4. Soporte específico para Mp4upload (video.mp4 directo)
-        if url.contains("mp4upload") {
-            static MP4UPLOAD_SRC_RE: Lazy<Regex> = Lazy::new(|| {
-                Regex::new(r#"(?i)src\s*:\s*["'](https?://[^"']+\.mp4[^"']*)["']"#).unwrap()
-            });
-            if let Some(cap) = MP4UPLOAD_SRC_RE.captures(&html) {
-                let stream_url = cap[1].to_string();
-                return Ok(ResolvedMedia {
-                    direct_url: stream_url,
-                    media_type: MediaType::Mp4,
-                    referer: Some("https://www.mp4upload.com/".to_string()),
-                    user_agent: None,
-                    qualities: vec![],
-                });
-            }
-        }
-
-        // 5. Soporte específico para Lulustream (HLS directo con unpacker)
-        if url.contains("luluvdo") || url.contains("lulustream") {
-            if let Some(stream_url) = JsUnpacker::extract_stream_url(&html) {
-                return Ok(ResolvedMedia {
-                    direct_url: stream_url,
-                    media_type: MediaType::Hls,
-                    referer: Some("https://luluvdo.com/".to_string()),
-                    user_agent: None,
-                    qualities: vec![],
-                });
-            }
-        }
-
-        // 6. Extracción genérica con JsUnpacker
-        if let Some(stream_url) = JsUnpacker::extract_stream_url(&html) {
-            let media_type = detect_media_type(&stream_url);
-            return Ok(ResolvedMedia {
-                direct_url: stream_url,
-                media_type,
-                referer: Some(effective_url),
-                user_agent: None,
-                qualities: vec![],
-            });
-        }
-
-        // 7. Si no se pudo extraer un stream directo reproducible, devolver error para permitir fallback automático
-        Err(AppError::Resolver(format!(
-            "El servidor {} no contiene un flujo de video reproducible directamente",
-            server.name
-        )))
+        crate::extractors::resolve_server(server).await
     }
 
     // Lista de géneros disponibles

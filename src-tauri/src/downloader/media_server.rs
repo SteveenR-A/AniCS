@@ -6,6 +6,7 @@ use tauri::{AppHandle, Manager};
 use subtle::ConstantTimeEq;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+use futures::StreamExt;
 
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
@@ -91,6 +92,26 @@ pub fn get_media_stream_url(file_path: &str) -> String {
         format!("http://127.0.0.1:{}/video?path={}&token={}", port, encoded_path, get_media_token())
     } else {
         file_path.to_string()
+    }
+}
+
+/// Genera una URL de proxy de stream remoto compatible con HTML5 <video> y headers personalizados (Referer, User-Agent)
+pub fn get_proxied_stream_url(target_url: &str, referer: Option<&str>) -> String {
+    let port = get_server_port();
+    if port > 0 {
+        let mut u = format!(
+            "http://127.0.0.1:{}/proxy_stream?url={}&token={}",
+            port,
+            urlencoding::encode(target_url),
+            get_media_token()
+        );
+        if let Some(ref_str) = referer {
+            u.push_str("&referer=");
+            u.push_str(&urlencoding::encode(ref_str));
+        }
+        u
+    } else {
+        target_url.to_string()
     }
 }
 
@@ -365,6 +386,12 @@ Access-Control-Max-Age: 86400\r\n\
         return;
     }
 
+    // Interceptar proxy de streaming remoto (Mp4upload, etc. con headers Referer/Range)
+    if uri.starts_with("/proxy_stream") {
+        handle_proxy_stream(&mut stream, method, uri, range_header, &origin).await;
+        return;
+    }
+
     if method != "GET" && method != "HEAD" {
         let response = "HTTP/1.1 405 Method Not Allowed\r\n\r\n";
         let _ = stream.write_all(response.as_bytes()).await;
@@ -565,6 +592,161 @@ pub fn get_mime_type(path: &PathBuf) -> &'static str {
         Some("png") => "image/png",
         Some("webp") => "image/webp",
         _ => "application/octet-stream",
+    }
+}
+
+async fn handle_proxy_stream(
+    stream: &mut TcpStream,
+    method: &str,
+    uri: &str,
+    range_header: Option<&str>,
+    origin: &str,
+) {
+    if method != "GET" && method != "HEAD" {
+        let _ = stream.write_all(b"HTTP/1.1 405 Method Not Allowed\r\n\r\n").await;
+        return;
+    }
+
+    let parsed = match url::Url::parse(&format!("http://localhost{uri}")) {
+        Ok(u) => u,
+        Err(_) => {
+            let _ = stream.write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n").await;
+            return;
+        }
+    };
+
+    let token = parsed.query_pairs().find(|(k, _)| k == "token").map(|(_, v)| v.into_owned());
+    let Some(token) = token else {
+        let _ = stream.write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await;
+        return;
+    };
+
+    if !verify_token_constant_time(get_media_token().as_bytes(), token.as_bytes()) {
+        let _ = stream.write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await;
+        return;
+    }
+
+    let target_url = match parsed.query_pairs().find(|(k, _)| k == "url").map(|(_, v)| v.into_owned()) {
+        Some(u) => u,
+        None => {
+            let _ = stream.write_all(b"HTTP/1.1 400 Bad Request\r\n\r\nMissing url param").await;
+            return;
+        }
+    };
+
+    if !target_url.starts_with("http://") && !target_url.starts_with("https://") {
+        let _ = stream.write_all(b"HTTP/1.1 400 Bad Request\r\n\r\nInvalid url scheme").await;
+        return;
+    }
+
+    if let Ok(parsed_target) = url::Url::parse(&target_url) {
+        if let Some(host_str) = parsed_target.host_str() {
+            if let Ok(ip) = host_str.parse::<std::net::IpAddr>() {
+                if anics_core::url_security::is_ip_private_or_reserved(&ip) {
+                    let _ = stream.write_all(b"HTTP/1.1 403 Forbidden\r\n\r\nBlocked private target").await;
+                    return;
+                }
+            }
+        }
+    }
+
+    let referer = parsed.query_pairs().find(|(k, _)| k == "referer").map(|(_, v)| v.into_owned());
+
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(45))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => {
+            let _ = stream.write_all(b"HTTP/1.1 500 Internal Server Error\r\n\r\n").await;
+            return;
+        }
+    };
+
+    let mut req = if method == "HEAD" {
+        client.head(&target_url)
+    } else {
+        client.get(&target_url)
+    };
+
+    req = req.header(
+        reqwest::header::USER_AGENT,
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    );
+
+    if let Some(ref_str) = referer.as_deref().filter(|s| !s.trim().is_empty()) {
+        req = req.header(reqwest::header::REFERER, ref_str);
+    }
+
+    if let Some(range) = range_header {
+        req = req.header(reqwest::header::RANGE, range);
+    }
+
+    let resp = match req.send().await {
+        Ok(r) => r,
+        Err(err) => {
+            log::warn!("Proxy stream upstream error for {}: {}", target_url, err);
+            let _ = stream.write_all(b"HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n").await;
+            return;
+        }
+    };
+
+    let status = resp.status();
+    let status_code = status.as_u16();
+    let status_line = if status_code == 206 {
+        "206 Partial Content"
+    } else if status_code == 200 {
+        "200 OK"
+    } else {
+        &format!("{} {}", status_code, status.canonical_reason().unwrap_or("OK"))
+    };
+
+    let mut header_str = format!(
+        "HTTP/1.1 {}\r\n\
+Access-Control-Allow-Origin: {}\r\n\
+Access-Control-Allow-Methods: GET, HEAD, OPTIONS\r\n\
+Access-Control-Allow-Headers: Range, Content-Type, Accept\r\n\
+Accept-Ranges: bytes\r\n\
+Connection: close\r\n",
+        status_line, origin
+    );
+
+    if let Some(ct) = resp.headers().get(reqwest::header::CONTENT_TYPE) {
+        if let Ok(ct_val) = ct.to_str() {
+            header_str.push_str(&format!("Content-Type: {}\r\n", ct_val));
+        }
+    } else {
+        header_str.push_str("Content-Type: video/mp4\r\n");
+    }
+
+    if let Some(cl) = resp.headers().get(reqwest::header::CONTENT_LENGTH) {
+        if let Ok(cl_val) = cl.to_str() {
+            header_str.push_str(&format!("Content-Length: {}\r\n", cl_val));
+        }
+    }
+
+    if let Some(cr) = resp.headers().get(reqwest::header::CONTENT_RANGE) {
+        if let Ok(cr_val) = cr.to_str() {
+            header_str.push_str(&format!("Content-Range: {}\r\n", cr_val));
+        }
+    }
+
+    header_str.push_str("\r\n");
+
+    if stream.write_all(header_str.as_bytes()).await.is_err() || method == "HEAD" {
+        return;
+    }
+
+    let mut body_stream = resp.bytes_stream();
+    while let Some(chunk_result) = body_stream.next().await {
+        match chunk_result {
+            Ok(chunk) => {
+                if stream.write_all(&chunk).await.is_err() {
+                    break;
+                }
+            }
+            Err(_) => break,
+        }
     }
 }
 

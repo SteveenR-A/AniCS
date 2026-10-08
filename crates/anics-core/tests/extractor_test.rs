@@ -119,3 +119,35 @@ fn test_models_serde_roundtrip() {
     let deserialized: AnimeResult = serde_json::from_str(&serialized).unwrap();
     assert_eq!(deserialized, anime);
 }
+
+#[tokio::test]
+#[ignore = "Live network test"]
+async fn test_live_otakustv_servers() {
+    let ot = anics_core::scrapers::OtakusTVExtractor::new();
+    let servers = ot.get_servers("https://www.otakustv.net/ver/dogulwang-9").await.unwrap_or_default();
+    println!("=== OtakusTV Servers for dogulwang-9 ===");
+    for s in &servers {
+        println!("Server: '{}', URL: '{}', Direct: {}", s.name, s.url, s.is_direct);
+        let res = ot.resolve_stream(s).await;
+        match res {
+            Ok(media) => println!("   -> SUCCESS: url='{}', type={:?}, referer={:?}", media.direct_url, media.media_type, media.referer),
+            Err(e) => println!("   -> FAILED: {:?}", e),
+        }
+    }
+}
+
+#[tokio::test]
+#[ignore = "Live network test"]
+async fn test_live_jkanime_servers() {
+    let jk = anics_core::scrapers::JKAnimeExtractor::new();
+    let servers = jk.get_servers("https://jkanime.net/naruto/1/").await.unwrap_or_default();
+    println!("=== JKAnime Servers ===");
+    for s in &servers {
+        println!("Server: '{}', URL: '{}', Direct: {}", s.name, s.url, s.is_direct);
+        let res = jk.resolve_stream(s).await;
+        match res {
+            Ok(media) => println!("   -> SUCCESS: url='{}', type={:?}, referer={:?}", media.direct_url, media.media_type, media.referer),
+            Err(e) => println!("   -> FAILED: {:?}", e),
+        }
+    }
+}

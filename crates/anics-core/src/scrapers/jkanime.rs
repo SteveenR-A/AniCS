@@ -10,7 +10,6 @@ use crate::error::*;
 use crate::http::{fetch_html, HTTP_CLIENT};
 use crate::models::*;
 use crate::scrapers::AnimeExtractor;
-use crate::unpacker::JsUnpacker;
 
 pub const JKANIME_DOMAINS: &[&str] = &[
     "https://jkanime.org",
@@ -54,14 +53,6 @@ static TOTAL_EP_RE: Lazy<Regex> = Lazy::new(|| {
 
 static CSRF_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r#"name="csrf-token"\s+content="([^"]+)""#).unwrap()
-});
-
-static M3U8_DIRECT_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"(https?://[^\s"'\\<>]+\.m3u8[^\s"'\\<>]*)"#).unwrap()
-});
-
-static MEDIAFIRE_DL_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"href=["'](https?://download\d+\.mediafire\.com/[^"']+)["']"#).unwrap()
 });
 
 pub struct JKAnimeExtractor {
@@ -887,178 +878,7 @@ impl AnimeExtractor for JKAnimeExtractor {
 
     // Resolver de URL de video (HLS / MP4 directo)
     async fn resolve_stream(&self, server: &VideoServer) -> AppResult<ResolvedMedia> {
-        let url = &server.url;
-
-        // 1. Direct Streams (.mp4 / .m3u8)
-        if url.ends_with(".mp4") {
-            return Ok(ResolvedMedia {
-                direct_url: url.clone(),
-                media_type: MediaType::Mp4,
-                referer: server.referer.clone(),
-                user_agent: None,
-                qualities: vec![],
-            });
-        }
-        if url.contains(".m3u8") {
-            return Ok(ResolvedMedia {
-                direct_url: url.clone(),
-                media_type: MediaType::Hls,
-                referer: server.referer.clone(),
-                user_agent: None,
-                qualities: vec![],
-            });
-        }
-
-        // 2. Mediafire Direct Resolver
-        if url.contains("mediafire.com") {
-            if let Some(dl_url) = resolve_mediafire(url).await {
-                return Ok(ResolvedMedia {
-                    direct_url: dl_url,
-                    media_type: MediaType::Mp4,
-                    referer: None,
-                    user_agent: None,
-                    qualities: vec![],
-                });
-            }
-        }
-
-        // 3. Mp4upload (extraer video.mp4 directo)
-        if url.contains("mp4upload") {
-            static MP4UPLOAD_SRC_RE: Lazy<Regex> = Lazy::new(|| {
-                Regex::new(r#"(?i)src\s*:\s*["'](https?://[^"']+\.mp4[^"']*)["']"#).unwrap()
-            });
-            if let Ok(html) = fetch_html(url, server.referer.as_deref().or(Some("https://jkanime.net/"))).await {
-                if let Some(cap) = MP4UPLOAD_SRC_RE.captures(&html) {
-                    let stream_url = cap[1].to_string();
-                    return Ok(ResolvedMedia {
-                        direct_url: stream_url,
-                        media_type: MediaType::Mp4,
-                        referer: Some("https://www.mp4upload.com/".to_string()),
-                        user_agent: None,
-                        qualities: vec![],
-                    });
-                }
-            }
-        }
-
-        // 4. JKPlayer Embebed (Magi / Desu / c1 / c2)
-        if url.contains("/jkplayer") || url.contains("desu.php") || url.contains("magi")
-            || url.contains("c1.php") || url.contains("c2.php") || url.contains("jkanime.")
-        {
-            let html = fetch_html(url, server.referer.as_deref()).await
-                .map_err(AppError::Network)?;
-            if html.is_empty() {
-                return Err(AppError::Resolver("Empty player page".to_string()));
-            }
-
-            // A) Buscar stream directo .m3u8 en el HTML (Magi / Desu)
-            if let Some(m) = M3U8_DIRECT_RE.find(&html) {
-                let stream_url = m.as_str().replace('\\', "").replace('\'', "").replace('"', "");
-                return Ok(ResolvedMedia {
-                    direct_url: stream_url,
-                    media_type: MediaType::Hls,
-                    referer: Some(self.base_url.clone()),
-                    user_agent: None,
-                    qualities: vec![],
-                });
-            }
-
-            // B) JsUnpacker si estuviera ofuscado
-            if let Some(stream_url) = JsUnpacker::extract_stream_url(&html) {
-                let media_type = detect_media_type(&stream_url);
-                return Ok(ResolvedMedia {
-                    direct_url: stream_url,
-                    media_type,
-                    referer: Some(self.base_url.clone()),
-                    user_agent: None,
-                    qualities: vec![],
-                });
-            }
-
-            // C) Iframe anidado
-            if let Some(nested) = IFRAME_RE.captures(&html).and_then(|c| c.get(1)) {
-                let nested_url = nested.as_str().replace(r#"\"#, "");
-                let nested_html = fetch_html(&nested_url, Some(url)).await
-                    .map_err(AppError::Network)?;
-
-                if let Some(m) = M3U8_DIRECT_RE.find(&nested_html) {
-                    let stream_url = m.as_str().replace('\\', "").replace('\'', "").replace('"', "");
-                    return Ok(ResolvedMedia {
-                        direct_url: stream_url,
-                        media_type: MediaType::Hls,
-                        referer: Some(nested_url),
-                        user_agent: None,
-                        qualities: vec![],
-                    });
-                }
-
-                if let Some(stream_url) = JsUnpacker::extract_stream_url(&nested_html) {
-                    let media_type = detect_media_type(&stream_url);
-                    return Ok(ResolvedMedia {
-                        direct_url: stream_url,
-                        media_type,
-                        referer: Some(nested_url),
-                        user_agent: None,
-                        qualities: vec![],
-                    });
-                }
-            }
-        }
-
-        // 5. Servidores embebidos externos (Streamwish, Vidhide, Uqload, Lulustream, Fmoon, etc.)
-        if let Ok(html) = fetch_html(url, server.referer.as_deref().or(Some("https://jkanime.net/"))).await {
-            if url.contains("uqload") {
-                static UQLOAD_SRC_RE: Lazy<Regex> = Lazy::new(|| {
-                    Regex::new(r#"sources\s*:\s*\[\s*['"](https?://[^'"]+)['"]"#).unwrap()
-                });
-                if let Some(cap) = UQLOAD_SRC_RE.captures(&html) {
-                    let stream_url = cap[1].to_string();
-                    let media_type = detect_media_type(&stream_url);
-                    return Ok(ResolvedMedia {
-                        direct_url: stream_url,
-                        media_type,
-                        referer: Some(url.clone()),
-                        user_agent: None,
-                        qualities: vec![],
-                    });
-                }
-            }
-
-            if let Some(stream_url) = JsUnpacker::extract_stream_url(&html) {
-                let media_type = detect_media_type(&stream_url);
-                let stream_referer = if url.contains("vidhide") {
-                    Some("https://vidhidepro.com/".to_string())
-                } else if url.contains("streamwish") || url.contains("embedwish") || url.contains("sfastwish") {
-                    Some("https://embedwish.com/".to_string())
-                } else if url.contains("fmoon") || url.contains("bysekoze") {
-                    Some("https://bysekoze.com/".to_string())
-                } else {
-                    Some(url.clone())
-                };
-                return Ok(ResolvedMedia {
-                    direct_url: stream_url,
-                    media_type,
-                    referer: stream_referer,
-                    user_agent: None,
-                    qualities: vec![],
-                });
-            }
-        }
-
-        let media_type = detect_media_type(url);
-        if media_type == MediaType::Unknown && !url.ends_with(".mp4") && !url.contains(".m3u8") {
-            return Err(AppError::Resolver(format!(
-                "El servidor {} no contiene un stream de video directo reproducible",
-                server.name
-            )));
-        }
-        Ok(ResolvedMedia {
-            direct_url: url.clone(),
-            media_type,
-            referer: server.referer.clone(),
-            user_agent: None,
-            qualities: vec![],
-        })
+        crate::extractors::resolve_server(server).await
     }
 
     // Lista dinámica de géneros
@@ -1186,16 +1006,6 @@ fn normalize_series_url(url: &str) -> String {
     format!("{}/", parts.join("/"))
 }
 
-async fn resolve_mediafire(url: &str) -> Option<String> {
-    let html = fetch_html(url, None).await.ok()?;
-    if let Some(cap) = MEDIAFIRE_DL_RE.captures(&html) {
-        return cap.get(1).map(|m| m.as_str().to_string());
-    }
-    let doc = Html::parse_document(&html);
-    let sel = Selector::parse("a#downloadButton, a[aria-label*='Download file'], a.input").ok()?;
-    doc.select(&sel).next().map(|a| attr(&a, "href")).filter(|h| !h.is_empty() && h.starts_with("http"))
-}
-
 fn attr(element: &scraper::ElementRef, name: &str) -> String {
     element.value().attr(name).unwrap_or_default().trim().to_string()
 }
@@ -1209,17 +1019,6 @@ fn normalize_url(href: &str, base_url: &str) -> String {
         href.to_string()
     } else {
         format!("{}{}", base_url.trim_end_matches('/'), if href.starts_with('/') { href.to_string() } else { format!("/{}", href) })
-    }
-}
-
-fn detect_media_type(url: &str) -> MediaType {
-    let lower = url.to_lowercase();
-    if lower.contains(".m3u8") || lower.contains("hls") {
-        MediaType::Hls
-    } else if lower.contains(".mp4") {
-        MediaType::Mp4
-    } else {
-        MediaType::Unknown
     }
 }
 

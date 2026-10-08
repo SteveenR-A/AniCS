@@ -252,17 +252,12 @@ describe('Player interactions', () => {
     expect(mocks.getProgress).not.toHaveBeenCalled();
   });
 
-  it('keeps the server menu visible, exposes saved entries and registers an episode server', async () => {
+  it('keeps the server menu visible and exposes available entries', async () => {
     mocks.settings.custom_sources = JSON.stringify([{ name: 'Mi catálogo', url: 'https://catalog.example.com', type: 'Anime' }]);
     await mountPlayer();
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Seleccionar servidor de video' })); });
     act(() => { vi.advanceTimersByTime(10000); });
     expect(screen.getByRole('button', { name: /Mi catálogo/ })).toBeDisabled();
-    fireEvent.change(screen.getByLabelText('Nombre del servidor'), { target: { value: 'Mi HLS' } });
-    fireEvent.change(screen.getByLabelText('URL del servidor'), { target: { value: 'https://example.com/custom.m3u8' } });
-    await act(async () => { fireEvent.submit(screen.getByLabelText('Nombre del servidor').closest('form')!); });
-    expect(screen.getByRole('button', { name: 'Mi HLS' })).toBeEnabled();
-    expect(JSON.parse(mocks.settings.custom_video_servers)[0]).toMatchObject({ name: 'Mi HLS', episodeUrl: 'https://example.com/episode', source: 'jkanime', isDirect: true });
     expect(screen.getByRole('button', { name: 'Pausar video' })).toHaveStyle({ opacity: 1 });
   });
 

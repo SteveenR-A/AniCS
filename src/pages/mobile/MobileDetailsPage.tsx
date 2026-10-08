@@ -33,9 +33,15 @@ export function MobileDetailsPage() {
   const { getCachedDetails, cacheDetails } = useAnimeStore();
   const cached = getCachedDetails(decodedUrl);
   const passedAnime = location.state?.anime;
+  const isCachedValid = Boolean(
+    cached &&
+    cached.title &&
+    cached.url === decodedUrl &&
+    !(cached.thumbnailUrl && cached.thumbnailUrl.includes('episodes_tumbl'))
+  );
 
   const [details, setDetails] = useState<AnimeDetails | null>(() => {
-    if (cached) return cached;
+    if (isCachedValid && cached) return cached;
     if (passedAnime) {
       const isUnreleased = passedAnime.status?.toLowerCase().includes('estren') || passedAnime.status?.toLowerCase() === 'notyet';
       return {
@@ -53,7 +59,7 @@ export function MobileDetailsPage() {
     return null;
   });
 
-  const [isLoading, setIsLoading] = useState(!cached && !passedAnime);
+  const [isLoading, setIsLoading] = useState(!isCachedValid);
   const [isFavorite, setIsFavorite] = useState(false);
   const [favoriteStatus, setFavoriteStatus] = useState<FavoriteStatus>('favorite');
   const [showBatchModal, setShowBatchModal] = useState(false);
@@ -85,29 +91,39 @@ export function MobileDetailsPage() {
 
     const load = async () => {
       // Si tenemos una entrada completa en caché para esta URL, usarla de inmediato
-      if (cached && cached.title && cached.url === decodedUrl) {
-        const hasTempThumbnail = cached.thumbnailUrl && cached.thumbnailUrl.includes('episodes_tumbl');
-        if (!hasTempThumbnail) {
-          setDetails(cached);
-          setIsLoading(false);
-          checkFavorite(decodedUrl, activeProfile?.id).then(fav => {
-            if (isCancelled) return;
-            setIsFavorite(fav);
-            if (fav) {
-              getFavorites(activeProfile?.id).then(list => {
-                if (isCancelled) return;
-                const found = list.find(f => f.url === decodedUrl);
-                if (found?.status) setFavoriteStatus(found.status as FavoriteStatus);
-              }).catch(() => {});
-            }
-          }).catch(() => {});
-          return;
-        }
+      if (isCachedValid && cached) {
+        setDetails(cached);
+        setIsLoading(false);
+        checkFavorite(decodedUrl, activeProfile?.id).then(fav => {
+          if (isCancelled) return;
+          setIsFavorite(fav);
+          if (fav) {
+            getFavorites(activeProfile?.id).then(list => {
+              if (isCancelled) return;
+              const found = list.find(f => f.url === decodedUrl);
+              if (found?.status) setFavoriteStatus(found.status as FavoriteStatus);
+            }).catch(() => {});
+          }
+        }).catch(() => {});
+        return;
       }
 
-      if (!cached && !passedAnime) {
-        setIsLoading(true);
+      setIsLoading(true);
+      if (passedAnime && passedAnime.url === decodedUrl) {
+        const isUn = passedAnime.status?.toLowerCase().includes('estren') || passedAnime.status?.toLowerCase() === 'notyet';
+        setDetails({
+          title: passedAnime.title,
+          url: passedAnime.url,
+          thumbnailUrl: passedAnime.thumbnailUrl,
+          synopsis: passedAnime.synopsis || (isUn ? 'Esta producción está anunciada para su estreno. Los episodios estarán disponibles al comenzar su emisión oficial.' : 'Cargando información del anime...'),
+          genres: passedAnime.genres || [],
+          status: isUn ? 'Por estrenar' : (passedAnime.status || undefined),
+          animeType: passedAnime.animeType,
+          episodes: passedAnime.episodes || [],
+          source: passedAnime.source || source,
+        });
       }
+
       try {
         const timeoutPromise = new Promise<AnimeDetails>((_, reject) =>
           setTimeout(() => reject(new Error('Timeout loading details')), 8000)
@@ -136,21 +152,27 @@ export function MobileDetailsPage() {
         if (!isCancelled) {
           setDetails(prev => {
             if (prev) {
+              const isUn = prev.status?.toLowerCase().includes('estren') || prev.status?.toLowerCase() === 'notyet';
               return {
                 ...prev,
                 synopsis: prev.synopsis === 'Cargando información del anime...'
-                  ? 'Esta producción está anunciada para su estreno. Los episodios se publicarán automáticamente cuando comience su emisión oficial.'
+                  ? (isUn
+                      ? 'Esta producción está anunciada para su estreno. Los episodios se publicarán automáticamente cuando comience su emisión oficial.'
+                      : 'No se pudo cargar la descripción completa del anime.')
                   : prev.synopsis,
               };
             }
             if (passedAnime) {
+              const isUn = passedAnime.status?.toLowerCase().includes('estren') || passedAnime.status?.toLowerCase() === 'notyet';
               return {
                 title: passedAnime.title,
                 url: passedAnime.url,
                 thumbnailUrl: passedAnime.thumbnailUrl,
-                synopsis: 'Esta producción está anunciada para su estreno. Los episodios se publicarán automáticamente cuando comience su emisión oficial.',
+                synopsis: isUn
+                  ? 'Esta producción está anunciada para su estreno. Los episodios se publicarán automáticamente cuando comience su emisión oficial.'
+                  : 'No se pudo cargar la descripción completa del anime.',
                 genres: passedAnime.genres || [],
-                status: 'Por estrenar',
+                status: isUn ? 'Por estrenar' : passedAnime.status,
                 animeType: passedAnime.animeType,
                 episodes: [],
                 source: passedAnime.source || source,
@@ -483,6 +505,12 @@ export function MobileDetailsPage() {
     ? filteredEps
     : filteredEps.slice(0, 36);
 
+  const isDetailsUnreleased = Boolean(
+    details?.status?.toLowerCase().includes('estren') ||
+    details?.status?.toLowerCase() === 'notyet' ||
+    (details?.totalEpisodes === '0' && (details?.episodes?.length ?? 0) === 0)
+  );
+
   if (isLoading && !details) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '70vh' }}>
@@ -772,11 +800,33 @@ export function MobileDetailsPage() {
             display: 'flex', alignItems: 'center',
             justifyContent: 'space-between', marginBottom: 12,
           }}>
-            <h3 style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-primary)', margin: 0 }}>
-              {details.episodes.length > 0 ? `Episodios (${details.episodes.length})` : 'Próximo Estreno'}
+            <h3 style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-primary)', margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+              {isLoading ? (
+                <>
+                  <span>Episodios</span>
+                  <span style={{
+                    fontSize: 11, fontWeight: 600, color: 'var(--text-muted)',
+                    background: 'var(--bg-surface-2)', padding: '2px 8px', borderRadius: 'var(--radius-full)',
+                    border: '1px solid var(--border-subtle)', display: 'inline-flex', alignItems: 'center', gap: 5,
+                  }}>
+                    <div style={{
+                      width: 8, height: 8, borderRadius: '50%',
+                      border: '2px solid var(--text-muted)', borderTopColor: 'var(--accent-primary)',
+                      animation: 'spin-slow 0.8s linear infinite',
+                    }} />
+                    Cargando...
+                  </span>
+                </>
+              ) : details.episodes.length > 0 ? (
+                `Episodios (${details.episodes.length})`
+              ) : isDetailsUnreleased ? (
+                'Próximo Estreno'
+              ) : (
+                'Sin Episodios'
+              )}
             </h3>
 
-            {details.episodes.length > 12 && (
+            {!isLoading && details.episodes.length > 12 && (
               <input
                 type="text"
                 placeholder="Buscar cap..."
@@ -791,7 +841,25 @@ export function MobileDetailsPage() {
             )}
           </div>
 
-          {visibleEps.length === 0 ? (
+          {isLoading ? (
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(3, 1fr)',
+              gap: 8,
+            }}>
+              {Array.from({ length: 9 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="skeleton"
+                  style={{
+                    borderRadius: 'var(--radius-md)',
+                    height: 52,
+                    border: '1px solid var(--border-subtle)',
+                  }}
+                />
+              ))}
+            </div>
+          ) : visibleEps.length === 0 ? (
             <div style={{
               textAlign: 'center', padding: '24px 16px',
               background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
@@ -799,10 +867,14 @@ export function MobileDetailsPage() {
             }}>
               <Calendar size={28} color="#fbbf24" style={{ margin: '0 auto 8px' }} />
               <h4 style={{ fontSize: 14, fontWeight: 800, margin: '0 0 4px', color: 'var(--text-primary)' }}>
-                {details.season ? `Estreno · ${details.season}` : 'Próximamente'}
+                {isDetailsUnreleased
+                  ? (details.season ? `Estreno · ${details.season}` : 'Próximamente')
+                  : 'Sin episodios disponibles'}
               </h4>
               <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: 0 }}>
-                Episodios disponibles cuando comience la emisión oficial.
+                {isDetailsUnreleased
+                  ? 'Episodios disponibles cuando comience la emisión oficial.'
+                  : 'No se encontraron episodios disponibles para esta producción en el catálogo actual.'}
               </p>
             </div>
           ) : (

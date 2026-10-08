@@ -52,6 +52,11 @@ pub static HTTP_CLIENT: Lazy<Client> = Lazy::new(|| {
 /// Descarga el HTML de una URL con rotación automática de User-Agent y
 /// lógica de reintento con backoff exponencial para errores 429/5xx.
 pub async fn fetch_html(url: &str, referer: Option<&str>) -> Result<String, reqwest::Error> {
+    fetch_html_with_url(url, referer).await.map(|(html, _)| html)
+}
+
+/// Descarga el HTML y retorna la tupla (html, url_final) tras seguir redirecciones.
+pub async fn fetch_html_with_url(url: &str, referer: Option<&str>) -> Result<(String, String), reqwest::Error> {
     const MAX_ATTEMPTS: u32 = 3;
     let mut last_err = None;
 
@@ -75,12 +80,15 @@ pub async fn fetch_html(url: &str, referer: Option<&str>) -> Result<String, reqw
                     continue;
                 }
 
+                let final_url = resp.url().to_string();
+
                 if !status.is_success() {
                     eprintln!("HTTP warning: status {} for {}", status, url);
-                    return Ok(String::new());
+                    return Ok((String::new(), final_url));
                 }
 
-                return resp.text().await;
+                let text = resp.text().await?;
+                return Ok((text, final_url));
             }
             Err(e) if attempt < MAX_ATTEMPTS - 1 => {
                 last_err = Some(e);
