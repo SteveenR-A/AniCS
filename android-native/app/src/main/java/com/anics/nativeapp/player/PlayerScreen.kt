@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
@@ -33,6 +34,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.Lifecycle
@@ -61,6 +64,7 @@ fun PlayerScreen(controller: PlayerController, viewModel: PlaybackSessionViewMod
     var scrubbing by remember { mutableStateOf(false) }
     var scrub by remember { mutableFloatStateOf(0f) }
     val player = remember(controller) { controller.initializePlayer() }
+    PlayerScreenAwake(playback.keepScreenOn)
     val lifecycleOwner = LocalLifecycleOwner.current
     val leave by rememberUpdatedState(onBack)
     BackHandler { if (panel != null) panel = null else leave() }
@@ -89,7 +93,6 @@ fun PlayerScreen(controller: PlayerController, viewModel: PlaybackSessionViewMod
             activity?.window?.attributes?.layoutInDisplayCutoutMode
         } else null
         var resumeAfterBackground = false
-        activity?.window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         activity?.window?.let { window ->
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
                 window.attributes.layoutInDisplayCutoutMode =
@@ -111,7 +114,6 @@ fun PlayerScreen(controller: PlayerController, viewModel: PlaybackSessionViewMod
             viewModel.saveProgress()
             controller.resetPlayback()
             lifecycleOwner.lifecycle.removeObserver(observer)
-            activity?.window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             activity?.window?.let { window ->
                 WindowCompat.getInsetsController(window, window.decorView).show(WindowInsetsCompat.Type.systemBars())
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P && originalCutoutMode != null) {
@@ -122,7 +124,7 @@ fun PlayerScreen(controller: PlayerController, viewModel: PlaybackSessionViewMod
         }
     }
     Box(modifier.fillMaxSize().background(Color.Black)) {
-        AndroidView(factory = { PlayerView(it).apply { this.player = player; useController = false; keepScreenOn = true } },
+        AndroidView(factory = { PlayerView(it).apply { this.player = player; useController = false } },
             update = { it.resizeMode = fit }, modifier = Modifier.fillMaxSize())
         Box(Modifier.fillMaxSize().pointerInput(locked) {
             detectTapGestures(onTap = { hud = !hud }, onDoubleTap = { offset ->
@@ -169,6 +171,30 @@ fun PlayerScreen(controller: PlayerController, viewModel: PlaybackSessionViewMod
         onEpisode = { viewModel.selectEpisode(it); panel = null }, onQuality = { viewModel.selectQuality(it, playback.isPlaying); panel = null },
         onSpeed = controller::setSpeed, onAutoNext = { viewModel.setAutoNext(it); onAutoNext(it) },
         fit = fit, onFit = { fit = it })
+}
+
+/** Scope screen-on to this UI and foreground lifecycle, including modal windows. */
+@Composable
+internal fun PlayerScreenAwake(enabled: Boolean) {
+    val view = LocalView.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val requested by rememberUpdatedState(enabled)
+    DisposableEffect(view, lifecycleOwner) {
+        val original = view.keepScreenOn
+        fun update() {
+            view.keepScreenOn = requested && lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+        }
+        val observer = LifecycleEventObserver { _, _ -> update() }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        update()
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            view.keepScreenOn = original
+        }
+    }
+    SideEffect {
+        view.keepScreenOn = enabled && lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+    }
 }
 
 @kotlin.OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -373,15 +399,14 @@ fun VideoProgressBar(
 internal fun PlayerPanel(panel: String, session: PlaybackSessionState, playback: PlaybackState, onDismiss: () -> Unit,
     onServer: (com.anics.nativeapp.ffi.NativeVideoServer) -> Unit, onEpisode: (com.anics.nativeapp.ffi.NativeEpisode) -> Unit,
     onQuality: (String) -> Unit, onSpeed: (Float) -> Unit, onAutoNext: (Boolean) -> Unit, fit: Int, onFit: (Int) -> Unit) {
+    if (panel == "episodes") {
+        PlayerEpisodePanel(session, playback.keepScreenOn, onDismiss, onEpisode)
+        return
+    }
     var unsupported by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
-    LaunchedEffect(panel, session.entry?.episodeNumber) {
-        if (panel == "episodes") {
-            val index = session.episodes.indexOfFirst { it.number.toInt() == session.entry?.episodeNumber }
-            if (index >= 0) listState.scrollToItem(index)
-        }
-    }
     ModalBottomSheet(onDismissRequest = onDismiss, sheetMaxWidth = 520.dp, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        PlayerScreenAwake(playback.keepScreenOn)
         // Bound the whole sheet content, including its heading and bottom inset.
         // Bounding only the list allows its last rows to extend below a landscape window.
         Column(Modifier.fillMaxWidth().heightIn(max = (LocalConfiguration.current.screenHeightDp * .8f).dp).navigationBarsPadding()) {
@@ -401,11 +426,6 @@ internal fun PlayerPanel(panel: String, session: PlaybackSessionState, playback:
                             }
                         }
                     }
-                    "episodes" -> {
-                        items(session.episodes, key = { it.url }) { episode ->
-                            AniPill("Episodio ${episode.number}" + (episode.title?.let { " · $it" } ?: ""), episode.number.toInt() == session.entry?.episodeNumber, { onEpisode(episode) }, Modifier.fillMaxWidth(), if (episode.watched) AniIcons.CheckCheck else AniIcons.Play)
-                        }
-                    }
                     else -> {
                         item { Text("Velocidad", fontWeight = FontWeight.SemiBold); FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) { listOf(.5f,.75f,1f,1.25f,1.5f,2f).forEach { speed -> AniPill("${speed}x", playback.speed == speed, { onSpeed(speed) }) } } }
                         if (session.media?.qualities?.isNotEmpty() == true || playback.availableQualities.size > 1) item {
@@ -422,6 +442,82 @@ internal fun PlayerPanel(panel: String, session: PlaybackSessionState, playback:
                         } }
                         item { com.anics.nativeapp.ui.screens.SettingSwitch("Siguiente episodio automático", "Al terminar el capítulo actual", session.autoNext, onAutoNext) }
                         item { Text("Un toque muestra los controles. Doble toque al centro pausa; a los lados salta 10 segundos.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@kotlin.OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PlayerEpisodePanel(session: PlaybackSessionState, keepScreenOn: Boolean, onDismiss: () -> Unit,
+    onEpisode: (com.anics.nativeapp.ffi.NativeEpisode) -> Unit) {
+    val landscape = LocalConfiguration.current.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+    if (landscape) {
+        Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+            PlayerScreenAwake(keepScreenOn)
+            Box(Modifier.fillMaxSize().safeDrawingPadding().padding(12.dp), contentAlignment = Alignment.CenterEnd) {
+                Box(Modifier.matchParentSize().clickable(onClick = onDismiss))
+                Surface(Modifier.fillMaxHeight().widthIn(max = 360.dp).fillMaxWidth().testTag("player-episode-panel"),
+                    shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface) {
+                    PlayerEpisodeList(session, onDismiss, onEpisode)
+                }
+            }
+        }
+    } else {
+        ModalBottomSheet(onDismissRequest = onDismiss, sheetMaxWidth = 520.dp,
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), dragHandle = null) {
+            PlayerScreenAwake(keepScreenOn)
+            Box(Modifier.fillMaxWidth().heightIn(max = (LocalConfiguration.current.screenHeightDp * .75f).dp)
+                .navigationBarsPadding().testTag("player-episode-panel")) {
+                PlayerEpisodeList(session, onDismiss, onEpisode)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlayerEpisodeList(session: PlaybackSessionState, onDismiss: () -> Unit,
+    onEpisode: (com.anics.nativeapp.ffi.NativeEpisode) -> Unit) {
+    val activeIndex = session.episodes.indexOfFirst { it.number.toInt() == session.entry?.episodeNumber }
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = (activeIndex - 1).coerceAtLeast(0))
+    LaunchedEffect(session.episodes, session.entry?.episodeNumber) {
+        if (activeIndex >= 0) listState.scrollToItem((activeIndex - 1).coerceAtLeast(0))
+    }
+    Column(Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Episodios", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text("${session.episodes.size} episodios · Actual: ${session.entry?.episodeNumber ?: "—"}",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            IconButton(onClick = onDismiss) { Icon(AniIcons.X, "Cerrar episodios") }
+        }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        LazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false).testTag("player-panel-list"), state = listState,
+            contentPadding = PaddingValues(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            if (session.episodes.isEmpty()) item { Text("No hay episodios disponibles.", Modifier.padding(12.dp)) }
+            items(session.episodes, key = { it.url }) { episode ->
+                val selected = episode.number.toInt() == session.entry?.episodeNumber
+                val color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
+                val contentColor = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                Surface(onClick = { onEpisode(episode) }, color = color, contentColor = contentColor, shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()) {
+                    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Icon(if (episode.watched) AniIcons.CheckCheck else AniIcons.Play,
+                            if (episode.watched) "Episodio visto" else null, Modifier.size(20.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Episodio ${episode.number}", style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium)
+                            episode.title?.takeIf { it.isNotBlank() }?.let {
+                                Text(it, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                        if (selected) Icon(AniIcons.Check, "Episodio actual", Modifier.size(18.dp))
                     }
                 }
             }

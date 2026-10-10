@@ -28,8 +28,12 @@ data class PlaybackState(
     val speed: Float = 1f,
     val muted: Boolean = false,
     val ended: Boolean = false,
-    val availableQualities: List<String> = emptyList()
-)
+    val availableQualities: List<String> = emptyList(),
+    val playWhenReady: Boolean = false
+) {
+    // Buffering keeps the display awake only while playback is requested.
+    val keepScreenOn: Boolean get() = playWhenReady && (isPlaying || isLoading) && !ended && error == null
+}
 
 @OptIn(UnstableApi::class)
 class PlayerController(private val context: Context) : PlaybackEngine {
@@ -54,7 +58,11 @@ class PlayerController(private val context: Context) : PlaybackEngine {
                         _playbackState.value = _playbackState.value.copy(availableQualities = heights)
                     }
                     override fun onIsPlayingChanged(isPlaying: Boolean) {
-                        _playbackState.value = _playbackState.value.copy(isPlaying = isPlaying)
+                        _playbackState.value = _playbackState.value.copy(isPlaying = isPlaying, playWhenReady = playWhenReady)
+                    }
+
+                    override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                        _playbackState.value = _playbackState.value.copy(playWhenReady = playWhenReady)
                     }
 
                     override fun onPlaybackStateChanged(playbackState: Int) {
@@ -64,6 +72,7 @@ class PlayerController(private val context: Context) : PlaybackEngine {
                         val isLoading = playbackState == Player.STATE_BUFFERING
                         _playbackState.value = _playbackState.value.copy(
                             isLoading = isLoading,
+                            playWhenReady = playWhenReady,
                             ended = playbackState == Player.STATE_ENDED,
                             durationMs = duration.coerceAtLeast(0L),
                             currentPositionMs = currentPosition.coerceAtLeast(0L),

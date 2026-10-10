@@ -9,6 +9,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
 import com.anics.nativeapp.data.repository.AppSettings
 import com.anics.nativeapp.data.local.ProfileEntity
 import com.anics.nativeapp.ffi.NativeSourceConfig
@@ -125,9 +126,29 @@ class NativeUiRegressionTest {
         } }
         compose.onNodeWithText("Episodios").assertIsDisplayed()
         compose.onNodeWithText("Episodio 6").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Episodio actual").assertIsDisplayed()
+        compose.onNodeWithTag("player-episode-panel").assertWidthIsEqualTo(360.dp)
         compose.onNodeWithTag("player-panel-list").performScrollToNode(hasText("Episodio 12"))
         compose.onNodeWithText("Episodio 12").assertIsDisplayed().performClick()
         compose.runOnIdle { org.junit.Assert.assertEquals(12, selected) }
         screenshot("episode-sheet-landscape", dialog = true)
+    }
+
+    @Test
+    @Config(qualifiers = "w320dp-h640dp-port")
+    fun portraitEpisodePanelShowsActiveEpisodeAndCloses() {
+        val state = com.anics.nativeapp.player.PlaybackSessionState(
+            entry = com.anics.nativeapp.data.local.HistoryEntity(animeTitle = "Anime", animeUrl = "anime", episodeNumber = 11, episodeUrl = "ep11"),
+            episodes = (1..12).map { PlaybackSessionTest.episode(it) })
+        var closed = false
+        compose.setContent { AniCSTheme {
+            com.anics.nativeapp.player.PlayerPanel("episodes", state, com.anics.nativeapp.player.PlaybackState(), { closed = true },
+                onServer = {}, onEpisode = {}, onQuality = {}, onSpeed = {}, onAutoNext = {},
+                fit = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT, onFit = {})
+        } }
+        compose.onNodeWithText("Episodio 11").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Episodio actual").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Cerrar episodios").performClick()
+        compose.runOnIdle { org.junit.Assert.assertTrue(closed) }
     }
 }
