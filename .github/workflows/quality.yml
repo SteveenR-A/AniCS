@@ -1,4 +1,4 @@
-name: Windows & frontend checks
+name: Desktop & frontend checks
 
 on:
   pull_request:
@@ -10,6 +10,8 @@ on:
       - 'package*.json'
       - '*config.*'
       - 'index.html'
+      - 'scripts/install-linux.sh'
+      - 'packaging/arch/**'
       - '.github/workflows/quality.yml'
   push:
     branches: [main]
@@ -21,6 +23,8 @@ on:
       - 'package*.json'
       - '*config.*'
       - 'index.html'
+      - 'scripts/install-linux.sh'
+      - 'packaging/arch/**'
       - '.github/workflows/quality.yml'
   workflow_dispatch:
 
@@ -55,3 +59,33 @@ jobs:
         working-directory: src-tauri
         # Live scraper tests depend on third-party availability; this gate is deterministic.
         run: cargo test --locked --lib --test folder_security --test catalog_contract --test sync_contract
+
+  linux:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libwebkit2gtk-4.1-dev \
+            libssl-dev libdbus-1-dev librsvg2-dev
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - name: Linux Rust check
+        working-directory: src-tauri
+        run: cargo check --locked
+      - name: Rust unit and contract tests
+        working-directory: src-tauri
+        run: cargo test --locked --lib --test folder_security --test catalog_contract --test sync_contract
+      - name: Linux installer syntax
+        run: bash -n scripts/install-linux.sh

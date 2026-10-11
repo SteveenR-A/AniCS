@@ -2,7 +2,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { waitFor } from '@testing-library/react';
 import type { DownloadTask, DownloadProgress } from '@/types';
 import { useDownloadStore } from '../useDownloadStore';
-import { getAllDownloads, notifyServiceStop, onDownloadCreated, onDownloadProgress } from '@/services/downloadService';
+import { deleteDownloadRecord, getAllDownloads, notifyServiceStop, onDownloadCreated, onDownloadProgress } from '@/services/downloadService';
 
 const events = vi.hoisted(() => ({
   created: undefined as ((task: DownloadTask) => void) | undefined,
@@ -35,6 +35,44 @@ beforeEach(() => {
 afterEach(() => useDownloadStore.getState().cleanup());
 
 describe('download queue store', () => {
+  it('keeps progress received before the initial database snapshot completes', async () => {
+    let hydrate!: (tasks: DownloadTask[]) => void;
+    let refresh!: (tasks: DownloadTask[]) => void;
+    vi.mocked(getAllDownloads)
+      .mockReturnValueOnce(new Promise(resolve => { hydrate = resolve; }))
+      .mockReturnValueOnce(new Promise(resolve => { refresh = resolve; }));
+    const initializing = useDownloadStore.getState().init();
+    await waitFor(() => expect(getAllDownloads).toHaveBeenCalledOnce());
+    events.progress!({ id: 'batch2', status: 'downloading', progress: 17, speedKbps: 90, downloadedBytes: 17, totalBytes: 100 });
+    hydrate([task('batch2', 2)]);
+    await initializing;
+    const hydrated = useDownloadStore.getState().tasks.get('batch2');
+    refresh([task('batch2', 2)]);
+    await waitFor(() => expect(getAllDownloads).toHaveBeenCalledTimes(2));
+    expect(hydrated).toMatchObject({ status: 'downloading', progress: 17, downloadedBytes: 17 });
+  });
+
+  it('keeps completed records whose deletion failed so the user can retry', async () => {
+    const removed = { ...task('removed', 1), status: 'completed' as const };
+    const failed = { ...task('failed', 2), status: 'completed' as const };
+    useDownloadStore.setState({ tasks: new Map([[removed.id, removed], [failed.id, failed]]) });
+    vi.mocked(deleteDownloadRecord).mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('SQLite busy'));
+    await useDownloadStore.getState().clearCompletedTasks();
+    expect([...useDownloadStore.getState().tasks.keys()]).toEqual(['failed']);
+  });
+
+  it('does not clear a canceled task that becomes active while records are deleted', async () => {
+    const canceled = { ...task('retry', 1), status: 'canceled' as const };
+    useDownloadStore.setState({ tasks: new Map([[canceled.id, canceled]]) });
+    let finish!: () => void;
+    vi.mocked(deleteDownloadRecord).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    const clearing = useDownloadStore.getState().clearCompletedTasks();
+    useDownloadStore.getState().updateProgress({ id: canceled.id, status: 'downloading', progress: 5, downloadedBytes: 5, speedKbps: 1 });
+    finish();
+    await clearing;
+    expect(useDownloadStore.getState().tasks.get(canceled.id)?.status).toBe('downloading');
+  });
+
   it('disposes a subscription that finishes after cleanup during a StrictMode remount', async () => {
     let finish!: (stop: () => void) => void;
     vi.mocked(onDownloadCreated).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));

@@ -13,6 +13,7 @@ import { startDownload, scanLocalDownloads, saveLocalAnimeCover, getLocalMediaUr
 import { usePlayerStore } from '@/stores/usePlayerStore';
 import { useAnimeStore } from '@/stores/useAnimeStore';
 import { useDownloadStore } from '@/stores/useDownloadStore';
+import { localAnimeTitlesMatch as strictTitlesMatch } from '@/utils/localAnimeTitles';
 import { useProfileStore } from '@/stores/useProfileStore';
 import { useSyncStore } from '@/stores/useSyncStore';
 import { useSubscriptionStore } from '@/stores/useSubscriptionStore';
@@ -214,64 +215,52 @@ export function DesktopDetailsPage() {
     };
   }, [decodedUrl, source, activeProfile?.id]);
 
-  // Normalizador de títulos ultra-tolerante (ignora tildes, guiones, espacios y puntuación)
-  const normalizeTitle = (str: string): string => {
-    if (!str) return '';
-    return str
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '') // Eliminar tildes/acentos (é -> e)
-      .replace(/[^a-z0-9]/g, ' ')     // Convertir cualquier símbolo o guión bajo a espacio
-      .replace(/\s+/g, ' ')           // Espacios simples
-      .trim();
-  };
-
-  const strictTitlesMatch = (a: string, b: string): boolean => {
-    const normA = normalizeTitle(a);
-    const normB = normalizeTitle(b);
-    if (!normA || !normB) return false;
-    if (normA === normB) return true;
-
-    // Normalizar sufijos de temporadas comunes
-    const cleanSeasonTokens = (str: string) => {
-      return str
-        .replace(/\b(1st|first|primer[ao]?)\s+season\b/g, 'season 1')
-        .replace(/\b(2nd|second|segund[ao]?)\s+season\b/g, 'season 2')
-        .replace(/\b(3rd|third|tercer[ao]?)\s+season\b/g, 'season 3')
-        .replace(/\b(4th|fourth|cuart[ao]?)\s+season\b/g, 'season 4')
-        .replace(/\b(5th|fifth|quint[ao]?)\s+season\b/g, 'season 5')
-        .replace(/\btemporada\s+(\d+)\b/g, 'season $1')
-        .replace(/\btemp\s+(\d+)\b/g, 'season $1')
-        .replace(/\bs(\d+)\b/g, 'season $1')
-        .trim();
-    };
-
-    return cleanSeasonTokens(normA) === cleanSeasonTokens(normB);
-  };
-
   // Sincronizar descargas locales e historial cada vez que cambien los detalles del anime
   useEffect(() => {
     if (!details?.title) return;
+    let disposed = false;
+    let request = 0;
+    let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+    setLocalEpisodesMap(new Map());
 
     // 1. Sincronizar episodios descargados en disco con validación estricta de temporada
-    scanLocalDownloads().then((folders) => {
-      const match = folders.find(f => strictTitlesMatch(f.animeTitle, details.title));
+    const refreshDownloads = () => {
+      const current = ++request;
+      scanLocalDownloads().then((folders) => {
+        if (disposed || current !== request) return;
+        const matches = folders.filter(f => strictTitlesMatch(f.animeTitle, details.title));
 
-      const map = new Map<number, LocalEpisodeItem>();
-      if (match) {
-        for (const ep of match.episodes) {
-          map.set(ep.episodeNumber, ep);
+        const map = new Map<number, LocalEpisodeItem>();
+        for (const match of matches) {
+          for (const ep of match.episodes) {
+            map.set(ep.episodeNumber, ep);
+          }
+          // Reparar la portada offline con la imagen oficial del catálogo.
+          if (details.thumbnailUrl && details.thumbnailUrl.startsWith('http')) {
+            saveLocalAnimeCover(match.folderPath, details.thumbnailUrl).catch(console.error);
+          }
         }
-        // Si el anime está descargado y tenemos la portada oficial online, repararla/guardarla en disco
-        if (details.thumbnailUrl && details.thumbnailUrl.startsWith('http')) {
-          saveLocalAnimeCover(match.folderPath, details.thumbnailUrl).catch(console.error);
-        }
+        setLocalEpisodesMap(map);
+      }).catch(console.error);
+    };
+    refreshDownloads();
+    let previous = useDownloadStore.getState().tasks;
+    const stop = useDownloadStore.subscribe(state => {
+      const changed = [...state.tasks.values()].some(task => task.status === 'completed'
+        && previous.get(task.id)?.status !== 'completed' && strictTitlesMatch(task.animeTitle, details.title))
+        || [...previous.values()].some(task => task.status === 'completed' && !state.tasks.has(task.id)
+          && strictTitlesMatch(task.animeTitle, details.title));
+      previous = state.tasks;
+      if (changed) {
+        clearTimeout(refreshTimer);
+        refreshTimer = setTimeout(refreshDownloads, 200);
       }
-      setLocalEpisodesMap(map);
-    }).catch(console.error);
+    });
+    window.addEventListener('focus', refreshDownloads);
 
     // 2. Sincronizar progreso de visualización de SQLite priorizando URL única de anime
     getHistory(500, 0, activeProfile?.id).then((history) => {
+      if (disposed) return;
       const map = new Map<number, number>();
       for (const h of history) {
         const isUrlMatch = Boolean(h.animeUrl && details.url && h.animeUrl === details.url);
@@ -285,7 +274,14 @@ export function DesktopDetailsPage() {
       }
       setHistoryMap(map);
     }).catch(console.error);
-  }, [details?.title, details?.url, activeProfile?.id]);
+    return () => {
+      disposed = true;
+      ++request;
+      clearTimeout(refreshTimer);
+      stop();
+      window.removeEventListener('focus', refreshDownloads);
+    };
+  }, [details?.title, details?.url, details?.thumbnailUrl, activeProfile?.id]);
 
   const handlePlayEpisode = async (ep: Episode) => {
     if (!details) return;
@@ -1136,7 +1132,7 @@ export function DesktopDetailsPage() {
                         }}
                       >
                         <HardDrive size={10} />
-                        <span>{localEp.fileSizeFormatted}</span>
+                        <span>Descargado</span>
                       </div>
                     )}
 

@@ -547,3 +547,23 @@ nav, header, [data-tauri-drag-region] {
   will-change: transform, opacity;
 }
 
+
+/* Keep Linux's compatibility renderer responsive without changing Android/Windows themes. */
+html[data-graphics="compatible"] [class*="backdrop-blur"],
+html[data-graphics="compatible"] [style*="backdrop-filter"],
+html[data-graphics="compatible"] .glass,
+html[data-graphics="compatible"] .glass-strong {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+html[data-graphics="compatible"] .animate-pulse,
+html[data-graphics="compatible"] .animate-ping {
+  animation: none;
+}
+
+/* Home cards clip their own contents and do not contain menus or dialogs. */
+html[data-graphics="compatible"] .desktop-anime-card {
+  contain: layout style paint;
+  box-shadow: none !important;
+  transition-property: background-color, border-color !important;
+}

@@ -8,11 +8,12 @@ const mocks = vi.hoisted(() => ({
   settings: {} as Record<string, string>,
   mobile: false,
   hlsSupported: false,
-  hlsInstances: [] as { emit: (event: string, data?: unknown) => void }[],
+  hlsInstances: [] as { emit: (event: string, data?: unknown) => void; recoverMediaError: ReturnType<typeof vi.fn> }[],
   resolve: vi.fn(),
   getServers: vi.fn(),
   getDetails: vi.fn(),
   getProgress: vi.fn().mockResolvedValue(null),
+  invoke: vi.fn().mockResolvedValue(null),
 }));
 vi.mock('@/hooks/useResponsive', () => ({ useResponsive: () => ({ isMobile: mocks.mobile }) }));
 vi.mock('@/stores/useAnimeStore', () => ({ useAnimeStore: () => ({ getCachedDetails: vi.fn(), cacheDetails: vi.fn() }) }));
@@ -26,7 +27,7 @@ vi.mock('@/services/storageService', () => ({
   getEpisodeProgress: mocks.getProgress,
   upsertHistory: () => Promise.resolve(),
 }));
-vi.mock('@tauri-apps/api/core', () => ({ invoke: () => Promise.resolve() }));
+vi.mock('@tauri-apps/api/core', () => ({ invoke: mocks.invoke }));
 vi.mock('@/services/downloadService', () => ({
   getLocalMediaUrl: vi.fn(), setKeepScreenOn: vi.fn(),
   setNativeFullscreen: vi.fn(), setNativeScreenOrientation: vi.fn(),
@@ -36,7 +37,8 @@ vi.mock('hls.js', () => {
   class FakeHls {
     static isSupported = () => mocks.hlsSupported;
     static Events = { LEVEL_LOADED: 'level', FRAG_BUFFERED: 'fragment', MANIFEST_PARSED: 'manifest', ERROR: 'error' };
-    static ErrorTypes = {};
+    static ErrorTypes = { MEDIA_ERROR: 'media', NETWORK_ERROR: 'network' };
+    recoverMediaError = vi.fn();
     listeners = new Map<string, ((event: string, data: unknown) => void)[]>();
     constructor() { mocks.hlsInstances.push(this); }
     on(event: string, handler: (event: string, data: unknown) => void) { this.listeners.set(event, [...(this.listeners.get(event) || []), handler]); }
@@ -69,6 +71,7 @@ beforeEach(() => {
   mocks.mobile = false;
   mocks.hlsSupported = false;
   mocks.hlsInstances = [];
+  mocks.invoke.mockReset().mockResolvedValue(null);
   mocks.resolve.mockReset().mockResolvedValue({ directUrl: second.url, mediaType: 'mp4', qualities: [] });
   vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(function (this: HTMLMediaElement) {
     this.currentTime = 0;
@@ -96,6 +99,45 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); });
 
 describe('Player interactions', () => {
+  it('shows missing Linux plugins even when changing the stream clears playback errors', async () => {
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (X11; Linux x86_64)');
+    mocks.invoke.mockResolvedValue('Faltan componentes de video de Linux: qtdemux. Instala gst-plugins-good y reinicia AniCS.');
+    await mountPlayer();
+    act(() => usePlayerStore.setState({ resolvedMedia: { directUrl: second.url, mediaType: 'mp4', qualities: [] } }));
+    expect(screen.getByRole('alert')).toHaveTextContent('qtdemux');
+    mocks.invoke.mockResolvedValue(null);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Reintentar' })); });
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('does not probe Linux plugins on Android', async () => {
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Linux; Android 14)');
+    await mountPlayer();
+    expect(mocks.invoke).not.toHaveBeenCalledWith('get_playback_dependency_error');
+  });
+
+  it('reports local video errors instead of silently waiting for a nonexistent fallback', async () => {
+    usePlayerStore.setState({ servers: [], selectedServer: null });
+    const { video } = await mountPlayer();
+    fireEvent.error(video);
+    expect(screen.getByRole('alert')).toHaveTextContent('No se pudo reproducir el video local');
+    expect(screen.getByRole('button', { name: 'Reintentar' })).toBeInTheDocument();
+  });
+
+  it('limits repeated fatal HLS decoding recovery before reporting the failure', async () => {
+    mocks.hlsSupported = true;
+    usePlayerStore.setState({ servers: [], selectedServer: null,
+      resolvedMedia: { directUrl: 'https://example.com/video.m3u8', mediaType: 'hls', qualities: [] } });
+    await mountPlayer();
+    const hls = mocks.hlsInstances[mocks.hlsInstances.length - 1];
+    act(() => {
+      hls.emit('error', { fatal: true, type: 'media' });
+      hls.emit('error', { fatal: true, type: 'media' });
+      hls.emit('error', { fatal: true, type: 'media' });
+    });
+    expect(hls.recoverMediaError).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole('alert')).toHaveTextContent('No se pudo reproducir');
+  });
   it('does not replace a newer episode with a late automatic resolution', async () => {
     const pending = new Map<string, (value: any) => void>();
     mocks.getDetails.mockResolvedValue(usePlayerStore.getState().currentAnime);

@@ -85,6 +85,19 @@ export function PlayerPage() {
 
   const [isLoadingInitial, setIsLoadingInitial] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [dependencyError, setDependencyError] = useState<string | null>(null);
+
+  const checkPlaybackDependencies = useCallback(async () => {
+    return await invoke<string | null>('get_playback_dependency_error');
+  }, []);
+  useEffect(() => {
+    if (isAndroid || !/linux/i.test(navigator.userAgent)) return;
+    let disposed = false;
+    checkPlaybackDependencies().then(error => {
+      if (!disposed) setDependencyError(error);
+    }).catch(error => console.warn('[AniCS Player] No se pudo comprobar GStreamer:', error));
+    return () => { disposed = true; };
+  }, [isAndroid, checkPlaybackDependencies]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [showControls, setShowControls] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -440,7 +453,10 @@ export function PlayerPage() {
   }, [querySource, isVip, openVipModal, setSelectedServer, setResolvedMedia, setIsResolving]);
 
   const tryFallbackServer = useCallback((manualRetry = false) => {
-    if (!servers.length || !selectedServer) return;
+    if (!servers.length || !selectedServer) {
+      setLoadError('No se pudo reproducir el video local. Comprueba que el archivo esté completo y que el sistema tenga los códecs de video necesarios.');
+      return;
+    }
     const isUserVip = !FEATURE_FLAGS.SHOW_SUBSCRIPTION || isVip;
     const playable = servers.filter(server => !server.unavailableReason);
     const allowed = isUserVip ? playable : playable.filter(s => !isVipServer(s.name));
@@ -467,6 +483,7 @@ export function PlayerPage() {
         icon: 'server',
         text: 'Ningún servidor disponible para este episodio',
       });
+      setLoadError('No se pudo reproducir el video con los servidores disponibles. Puedes reintentar o elegir otro servidor.');
       return;
     }
 
@@ -662,6 +679,7 @@ export function PlayerPage() {
     let disposed = false;
     let restored = !switchState;
     let playStarted = false;
+    setLoadError(null);
     const sourceTimers: ReturnType<typeof setTimeout>[] = [];
     const restorePosition = () => {
       if (disposed || restored || video.readyState < 1 || !switchState) return;
@@ -727,6 +745,7 @@ export function PlayerPage() {
         lowLatencyMode: false,
       });
       hlsRef.current = hls;
+      let mediaRecoveries = 0;
 
       let playTriggered = false;
       const attemptAutoPlay = () => {
@@ -795,6 +814,7 @@ export function PlayerPage() {
       hls.attachMedia(video);
 
       hls.on(Hls.Events.ERROR, (_, data) => {
+        if (disposed) return;
         if (data.fatal) {
           switch (data.type) {
             case Hls.ErrorTypes.NETWORK_ERROR:
@@ -802,8 +822,14 @@ export function PlayerPage() {
               tryFallbackServerRef.current();
               break;
             case Hls.ErrorTypes.MEDIA_ERROR:
-              console.warn('[AniCS Stream] Error de decodificación en HLS, intentando recuperar...', data);
-              hls.recoverMediaError();
+              if (mediaRecoveries++ < 2) {
+                console.warn('[AniCS Stream] Error de decodificación en HLS, intentando recuperar...', data);
+                hls.recoverMediaError();
+              } else {
+                hls.destroy();
+                if (hlsRef.current === hls) hlsRef.current = null;
+                tryFallbackServerRef.current();
+              }
               break;
             default:
               console.warn('[AniCS Stream] Error irrecuperable en HLS, cambiando a servidor alternativo...', data);
@@ -1358,6 +1384,22 @@ export function PlayerPage() {
           <p style={{ color: 'var(--text-muted)', fontSize: 14, fontWeight: 600 }}>Cargando anime...</p>
         </div>
       )}
+      {(dependencyError || loadError) && !isLoadingInitial && <div data-interactive style={{ position: 'absolute', zIndex: 65, maxWidth: 580, padding: 24,
+        borderRadius: 16, background: 'rgba(0,0,0,.9)', color: 'white', textAlign: 'center' }} role="alert">
+        <p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', userSelect: 'text' }}>{dependencyError || loadError}</p>
+        <button type="button" onClick={async () => {
+          if (dependencyError) {
+            try {
+              const error = await checkPlaybackDependencies();
+              setDependencyError(error);
+              if (error) return;
+            } catch { return; }
+          }
+          setLoadError(null);
+          if (servers.length) tryFallbackServer(true);
+          else if (resolvedMedia) setResolvedMedia({ ...resolvedMedia });
+        }} style={{ padding: '10px 18px', borderRadius: 10, border: 0, background: 'var(--accent-primary)', color: 'white', cursor: 'pointer' }}>Reintentar</button>
+      </div>}
       {/* ── Capa de Video con Brillo Real ── */}
       <div
         style={{

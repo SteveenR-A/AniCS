@@ -45,6 +45,7 @@
   "bundle": {
     "active": false,
     "icon": [
+      "../../../../src-tauri/icons/icon.png",
       "../../../../src-tauri/icons/icon.ico"
     ]
   }

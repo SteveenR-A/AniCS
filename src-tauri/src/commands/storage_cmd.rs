@@ -284,7 +284,8 @@ pub async fn get_database_stats(app_handle: tauri::AppHandle) -> Result<storage:
 /// Optimiza y compacta SQLite (VACUUM) recuperando espacio sin borrar datos
 #[tauri::command]
 pub async fn optimize_database() -> Result<(), String> {
-    storage::optimize_database().map_err(|e| e.to_string())
+    tokio::task::spawn_blocking(|| storage::optimize_database().map_err(|e| e.to_string()))
+        .await.map_err(|e| e.to_string())?
 }
 
 /// Restablece de forma segura las tablas de SQLite sin romper la aplicación
@@ -304,19 +305,21 @@ pub struct StorageLocations {
 
 /// Obtiene las ubicaciones físicas en disco de descargas, caché de imágenes y base de datos SQLite
 #[tauri::command]
-pub fn get_storage_locations(app_handle: tauri::AppHandle) -> Result<StorageLocations, String> {
-    use tauri::Manager;
-    let app_data = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
-    let db_path = app_data.join("anics.db");
-    let img_cache = crate::storage::get_image_cache_dir(&app_handle).map_err(|e| e.to_string())?;
-    let dl_dir = crate::commands::download_cmd::get_default_download_dir(app_handle)?;
+pub async fn get_storage_locations(app_handle: tauri::AppHandle) -> Result<StorageLocations, String> {
+    tokio::task::spawn_blocking(move || {
+        use tauri::Manager;
+        let app_data = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
+        let db_path = app_data.join("anics.db");
+        let img_cache = crate::storage::get_image_cache_dir(&app_handle).map_err(|e| e.to_string())?;
+        let dl_dir = crate::commands::download_cmd::get_default_download_dir(app_handle)?;
 
-    Ok(StorageLocations {
-        download_dir: dl_dir,
-        image_cache_dir: img_cache.to_string_lossy().to_string(),
-        database_path: db_path.to_string_lossy().to_string(),
-        app_data_dir: app_data.to_string_lossy().to_string(),
-    })
+        Ok(StorageLocations {
+            download_dir: dl_dir,
+            image_cache_dir: img_cache.to_string_lossy().to_string(),
+            database_path: db_path.to_string_lossy().to_string(),
+            app_data_dir: app_data.to_string_lossy().to_string(),
+        })
+    }).await.map_err(|e| e.to_string())?
 }
 
 /// Permite reubicar la carpeta de caché de imágenes en disco

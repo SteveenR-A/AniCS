@@ -1,0 +1,27 @@
+.desktop-profile-backdrop { position: fixed; inset: 0; z-index: 10000; background: rgb(0 0 0 / .7); display: grid; place-items: center; padding: 24px; }
+.desktop-profile-manager { width: min(560px, 100%); max-height: calc(100vh - 48px); overflow-y: auto; padding: 24px; border-radius: 20px; background: var(--bg-elevated); color: var(--text-primary); border: 1px solid var(--border-moderate); box-shadow: var(--shadow-lg); }
+.desktop-profile-manager header, .desktop-profile-manager footer, .desktop-profile-image-actions, .desktop-profile-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.desktop-profile-manager h2 { margin: 0; font-size: 20px; }
+.desktop-profile-manager button, .desktop-profile-upload { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--border-moderate); background: var(--bg-surface); color: inherit; font-size: 12px; cursor: pointer; }
+.desktop-profile-manager button:focus-visible, .desktop-profile-manager input:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 3px; }
+.desktop-profile-manager button:disabled { opacity: .6; cursor: wait; }
+.desktop-profile-manager button[aria-pressed="true"] { outline: 2px solid var(--accent-primary); outline-offset: 2px; }
+.desktop-profile-hint, .desktop-profile-manager small { font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
+.desktop-profile-error { color: #f87171; }
+.desktop-profile-manager form { display: grid; gap: 16px; }
+.desktop-profile-manager form > label { display: grid; gap: 6px; font-size: 13px; }
+.desktop-profile-manager input:not([type="file"]) { width: 100%; padding: 10px; background: var(--bg-surface); border: 1px solid var(--border-moderate); border-radius: 10px; color: inherit; }
+.desktop-profile-preview { width: 80px; height: 80px; border-radius: 50%; display: grid; place-items: center; color: white; justify-self: center; overflow: hidden; }
+.desktop-profile-upload { position: relative; overflow: hidden; }
+.desktop-profile-upload input { position: absolute; inset: 0; width: 100%; opacity: 0; cursor: pointer; }
+.desktop-profile-avatar-options { display: grid; grid-template-columns: repeat(8, 1fr); gap: 8px; }
+.desktop-profile-avatar-options button { padding: 8px 4px; }
+.desktop-profile-colors { display: flex; gap: 12px; flex-wrap: wrap; }
+.desktop-profile-colors button { width: 30px; height: 30px; padding: 0; border-radius: 50%; }
+.desktop-profile-list { display: grid; gap: 12px; }
+.desktop-profile-list article { border: 1px solid var(--border-subtle); border-radius: 14px; padding: 12px; }
+.desktop-profile-manager .desktop-profile-select { width: 100%; text-align: left; border: 0; background: transparent; justify-content: start; padding: 0; gap: 12px; }
+.desktop-profile-select > span:nth-child(2) { display: grid; flex: 1; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
+.desktop-profile-avatar { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; color: white; flex-shrink: 0; overflow: hidden; }
+.desktop-profile-actions { justify-content: end; margin-top: 10px; }
+.desktop-profile-create { width: 100%; margin-top: 16px; }

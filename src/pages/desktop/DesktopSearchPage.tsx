@@ -239,6 +239,13 @@ export function DesktopSearchPage() {
 
   const lastExecutedKey = useRef<string>('');
 
+  useEffect(() => () => {
+    cancelSearch();
+    clearTimeout(debounceRef.current);
+    lastExecutedKey.current = '';
+    setIsSearching(false);
+  }, [cancelSearch, setIsSearching]);
+
   // Restaurar o ejecutar búsqueda inicial al cambiar fuente, filtros o URL
   useEffect(() => {
     const currentKey = `${activeSource}:${urlQ}:${urlGenre}:${urlStatus}:${urlType}:${urlYear}:${urlOrder}:${urlPage}`;

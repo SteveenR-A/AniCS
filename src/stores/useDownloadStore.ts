@@ -322,7 +322,11 @@ export const useDownloadStore = create<DownloadStore>((set, get) => ({
         const saved = await getAllDownloads();
         if (generation !== listenerGeneration) return;
         set(state => {
-          const taskMap = new Map(saved.map(task => [task.id, task]));
+          const taskMap = new Map(saved.map(task => {
+            const pending = pendingProgress.get(task.id);
+            pendingProgress.delete(task.id);
+            return [task.id, pending ? { ...task, ...pending, totalBytes: pending.totalBytes ?? task.totalBytes } : task];
+          }));
           for (const [id, task] of state.tasks) {
             if (task !== initialTasks.get(id)) taskMap.set(id, task);
           }
@@ -516,17 +520,20 @@ export const useDownloadStore = create<DownloadStore>((set, get) => ({
     const completedOrCanceled = tasks.filter(
       (t) => t.status === 'completed' || t.status === 'canceled'
     );
+    const deletedIds: string[] = [];
     for (const task of completedOrCanceled) {
       try {
         await deleteDownloadRecord(task.id, false);
+        deletedIds.push(task.id);
       } catch (e) {
         console.warn('Error removing completed task record:', task.id, e);
       }
     }
     set((state) => {
       const next = new Map(state.tasks);
-      for (const task of completedOrCanceled) {
-        next.delete(task.id);
+      for (const id of deletedIds) {
+        const current = next.get(id);
+        if (current?.status === 'completed' || current?.status === 'canceled') next.delete(id);
       }
       return { tasks: next };
     });

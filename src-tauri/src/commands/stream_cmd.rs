@@ -4,6 +4,37 @@ use crate::core::*;
 use crate::scrapers::create_extractor;
 use crate::AppState;
 
+/// Report missing Linux media plugins before starting a pipeline that cannot decode MP4/MSE.
+/// Other platforms use their native media stack and need no GStreamer checks.
+#[tauri::command]
+pub async fn get_playback_dependency_error() -> Result<Option<String>, String> {
+    #[cfg(target_os = "linux")]
+    {
+        tauri::async_runtime::spawn_blocking(|| {
+            let mut missing = Vec::new();
+            for plugin in ["qtdemux", "h264parse", "aacparse"] {
+                let output = match std::process::Command::new("gst-inspect-1.0").arg(plugin).output() {
+                    Ok(output) => output,
+                    // An absent diagnostic tool does not prove playback is unavailable.
+                    Err(_) => return None,
+                };
+                if !output.status.success() { missing.push(plugin); }
+            }
+            if missing.is_empty() { return None; }
+            let installation = if std::path::Path::new("/usr/bin/pacman").exists() {
+                "sudo pacman -S --needed gst-plugins-base gst-plugins-good gst-plugins-bad gst-libav"
+            } else if std::path::Path::new("/usr/bin/apt-get").exists() {
+                "sudo apt-get install gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-libav"
+            } else {
+                "Instala los plugins base, good, bad y libav de GStreamer con el gestor de paquetes de tu distribución."
+            };
+            Some(format!("Faltan componentes de video de Linux: {}. Instala las dependencias y reinicia AniCS.\n{}", missing.join(", "), installation))
+        }).await.map_err(|error| error.to_string())
+    }
+    #[cfg(not(target_os = "linux"))]
+    { Ok(None) }
+}
+
 /// Obtener servidores de video disponibles para un episodio
 #[tauri::command]
 pub async fn get_servers(

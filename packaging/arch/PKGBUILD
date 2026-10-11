@@ -6,7 +6,7 @@ pkgrel=1
 pkgdesc="Cliente de streaming y descarga de anime multiplataforma de alto rendimiento"
 arch=('x86_64')
 url="https://github.com/SteveenR-A/AniCS"
-license=('MIT')
+license=('GPL-3.0-only')
 depends=(
     'webkit2gtk-4.1'
     'gtk3'
@@ -17,9 +17,10 @@ depends=(
     'gst-plugins-ugly'
     'gst-libav'
     'openssl'
+    'dbus'
     'hicolor-icon-theme'
 )
-makedepends=('git' 'nodejs' 'npm' 'rust' 'cargo')
+makedepends=('git' 'nodejs' 'npm' 'rust' 'cargo' 'pkgconf')
 optdepends=('mpv: reproducción externa de alto rendimiento')
 provides=('anics')
 conflicts=('anics' 'anics-bin')
@@ -69,7 +70,7 @@ Exec=/usr/bin/anics %u
 Icon=anics
 Terminal=false
 Type=Application
-Categories=AudioVideo;Video;Player;Network;
+Categories=AudioVideo;Video;Player;
 StartupWMClass=anics
 Keywords=anime;streaming;player;video;
 EOF

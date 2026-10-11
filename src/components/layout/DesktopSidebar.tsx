@@ -3,13 +3,14 @@ import { NavLink } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Home, Search, Calendar, Flame, Download, Clock,
-  Heart, Settings, ChevronLeft, ChevronRight, Tv2, User, Crown
+  Heart, Settings, ChevronLeft, ChevronRight, Tv2, Crown
 } from 'lucide-react';
 import { useAnimeStore } from '@/stores/useAnimeStore';
 import { useProfileStore } from '@/stores/useProfileStore';
 import { useSubscriptionStore } from '@/stores/useSubscriptionStore';
 import { FEATURE_FLAGS } from '@/config/features';
-import { ProfileSelectorModal, getProfileAvatarIcon } from '@/components/ProfileSelectorModal';
+import { DesktopProfileManager } from '@/components/desktop/DesktopProfileManager';
+import { DesktopProfileAvatar } from '@/components/desktop/DesktopProfileAvatar';
 
 
 const navItems = [
@@ -57,7 +58,6 @@ export function DesktopSidebar() {
   const { isVip, openModal: openVipModal } = useSubscriptionStore();
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
 
-  const ProfileIcon = activeProfile ? getProfileAvatarIcon(activeProfile.avatar) : User;
 
   return (
     <>
@@ -264,7 +264,7 @@ export function DesktopSidebar() {
                 boxShadow: `0 2px 6px ${(activeProfile?.color || '#3b82f6')}55`,
               }}
             >
-              <ProfileIcon size={14} />
+              <DesktopProfileAvatar avatar={activeProfile?.avatar ?? 'user'} size={14} />
             </div>
             {!collapsed && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, overflow: 'hidden' }}>
@@ -319,10 +319,7 @@ export function DesktopSidebar() {
         </div>
       </motion.nav>
 
-      <ProfileSelectorModal
-        isOpen={isProfileModalOpen}
-        onClose={() => setIsProfileModalOpen(false)}
-      />
+      {isProfileModalOpen && <DesktopProfileManager onClose={() => setIsProfileModalOpen(false)} />}
       
     </>
   );

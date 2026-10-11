@@ -1,6 +1,8 @@
 import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import { useEffect, useState, lazy, Suspense } from 'react';
 import { AppShell } from '@/components/layout/AppShell';
+import { DesktopDownloadIndicator } from '@/components/desktop/DesktopDownloadIndicator';
+import { useResponsive } from '@/hooks/useResponsive';
 import { HomePage } from '@/pages/HomePage';
 import { SearchPage } from '@/pages/SearchPage';
 import { DetailsPage } from '@/pages/DetailsPage';
@@ -43,6 +45,7 @@ function AppRoutes() {
 
 function AppContent() {
   const navigate = useNavigate();
+  const { isDesktop } = useResponsive();
   const { loadSources } = useAnimeStore();
   const { init: initDownloads, cleanup: cleanupDownloads } = useDownloadStore();
   const { loadTheme } = useThemeStore();
@@ -129,6 +132,7 @@ function AppContent() {
   return (
     <>
       <AppRoutes />
+      {isDesktop && <DesktopDownloadIndicator />}
       <Suspense fallback={null}>
         <ChangelogModal isOpen={showPatchNotes} onClose={handleClosePatchNotes} />
         <UpdateAnnouncementModal

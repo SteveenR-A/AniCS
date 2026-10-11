@@ -1034,8 +1034,10 @@ pub async fn delete_download_record(
 
 /// Devuelve todas las descargas registradas en SQLite
 #[tauri::command]
-pub fn get_all_downloads() -> Result<Vec<DownloadTask>, String> {
-    storage::get_all_downloads_db().map_err(|e| e.to_string())
+pub async fn get_all_downloads() -> Result<Vec<DownloadTask>, String> {
+    tokio::task::spawn_blocking(move || {
+        storage::get_all_downloads_db().map_err(|e| e.to_string())
+    }).await.map_err(|e| e.to_string())?
 }
 
 /// Descarga directa MP4 con soporte de Range Requests y señal de cancelación
@@ -1510,7 +1512,7 @@ pub async fn scan_local_downloads(
         // 1. Buscar en almacenamiento interno de portadas de la app
         let mut resolved_cover: Option<String> = None;
         if let Some(ref c_dir) = covers_dir {
-            for ext in &["jpg", "jpeg", "png", "webp"] {
+            for ext in &["jpg", "jpeg", "png", "webp", "gif", "avif"] {
                 let candidate = c_dir.join(format!("{}.{}", safe_title, ext));
                 if candidate.exists() && candidate.metadata().map(|m| m.len() > 100).unwrap_or(false) {
                     resolved_cover = Some(candidate.to_string_lossy().to_string());
@@ -1572,7 +1574,19 @@ pub async fn scan_local_downloads(
             None
         };
 
-        let cover_image = resolved_cover.or(db_cover).or(fallback_cover);
+        let cover_image = resolved_cover.or_else(|| db_cover.clone()).or_else(|| fallback_cover.clone());
+        #[cfg(target_os = "linux")]
+        let cover_image = match cover_image {
+            Some(ref path) if !path.starts_with("http") && !path.starts_with("data:") => {
+                match tokio::fs::read(path).await {
+                    Ok(bytes) => cover_image_format(&bytes)
+                        .map(|(_, mime)| storage::bytes_to_data_uri(&bytes, Some(mime)))
+                        .or(db_cover).or(fallback_cover),
+                    Err(_) => db_cover.or(fallback_cover),
+                }
+            }
+            other => other,
+        };
 
         result.push(LocalAnimeFolder {
             anime_title,
@@ -1716,33 +1730,17 @@ pub async fn save_local_anime_cover(
     let safe_title = sanitize_anime_folder_name(&title);
 
     // 1. Asegurar descarga y presencia en caché interna
-    let _ = crate::storage::get_cached_image(&cover_url, &app_handle)
+    let cached_data = crate::storage::get_cached_image(&cover_url, &app_handle)
         .await
         .map_err(|e| e.to_string())?;
 
-    // 2. Obtener archivo desde el caché de imágenes
-    let cache_dir = crate::storage::get_image_cache_dir(&app_handle)
-        .map_err(|e| e.to_string())?;
-    let filename = crate::storage::hash_image_url(&cover_url);
-    let cached_file = cache_dir.join(&filename);
-
-    if !cached_file.exists() {
-        return Err("No se pudo guardar la imagen en caché".to_string());
-    }
+    // The RAM cache can outlive the disk entry or use a different cache directory.
+    // Persist the returned image itself instead of assuming a cache file exists.
+    let (bytes, ext) = decode_cover_image(&cached_data)?;
 
     // 3. Guardar en carpeta interna de portadas (app_data_dir/covers/{safe_title}.jpg)
     let covers_dir = get_covers_dir(&app_handle).map_err(|e| e.to_string())?;
-    let ext = cached_file
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("jpg");
-    let internal_cover_path = covers_dir.join(format!("{}.{}", safe_title, ext));
-
-    // Copiar a covers interno si no existe o difiere en tamaño
-    if !internal_cover_path.exists() {
-        fs::copy(&cached_file, &internal_cover_path)
-            .map_err(|e| format!("Error guardando portada interna: {}", e))?;
-    }
+    let internal_cover_path = persist_cover_snapshot(&covers_dir, &safe_title, &bytes, ext).await?;
 
     // 4. Si existía un poster.jpg heredado en la carpeta externa del anime, limpiarlo
     if let Some(ref fp) = folder_path {
@@ -1765,7 +1763,7 @@ pub async fn save_local_anime_cover(
             if fs::create_dir_all(&shared_covers).is_ok() {
                 let _ = fs::write(parent_dir.join(".anics").join(".nomedia"), []);
                 let dest = shared_covers.join(format!("{}.{}", safe_title, ext));
-                let _ = fs::copy(&cached_file, dest);
+                let _ = fs::write(dest, &bytes);
             }
         }
         if let Err(error) = scan_local_downloads(None, app_handle.clone()).await {
@@ -1775,17 +1773,55 @@ pub async fn save_local_anime_cover(
     Ok(internal_cover_path.to_string_lossy().to_string())
 }
 
+fn cover_image_format(bytes: &[u8]) -> Option<(&'static str, &'static str)> {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") { Some(("png", "image/png")) }
+    else if bytes.starts_with(&[0xff, 0xd8, 0xff]) { Some(("jpg", "image/jpeg")) }
+    else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") { Some(("gif", "image/gif")) }
+    else if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") { Some(("webp", "image/webp")) }
+    else if bytes.get(4..8) == Some(b"ftyp") && matches!(bytes.get(8..12), Some(b"avif" | b"avis")) { Some(("avif", "image/avif")) }
+    else { None }
+}
+
+fn decode_cover_image(data: &str) -> Result<(Vec<u8>, &'static str), String> {
+    use base64::Engine;
+    let (header, encoded) = data.split_once(',').ok_or("La portada no contiene una imagen válida")?;
+    if !header.starts_with("data:image/") || !header.ends_with(";base64") {
+        return Err("La portada no contiene una imagen válida".into());
+    }
+    let bytes = base64::engine::general_purpose::STANDARD.decode(encoded)
+        .map_err(|_| "No se pudo leer la portada")?;
+    let (ext, _) = cover_image_format(&bytes).ok_or("El servidor devolvió una portada inválida")?;
+    Ok((bytes, ext))
+}
+
+async fn persist_cover_snapshot(dir: &Path, title: &str, bytes: &[u8], ext: &str) -> Result<PathBuf, String> {
+    let target = dir.join(format!("{}.{}", title, ext));
+    let temporary = dir.join(format!(".cover-{}.tmp", Uuid::new_v4()));
+    tokio::fs::write(&temporary, bytes).await.map_err(|e| format!("Error guardando portada: {e}"))?;
+    if let Err(error) = tokio::fs::rename(&temporary, &target).await {
+        let _ = tokio::fs::remove_file(&temporary).await;
+        return Err(format!("Error guardando portada: {error}"));
+    }
+    // A repaired PNG must not stay hidden behind an old/corrupt JPG of the same title.
+    for other in ["jpg", "jpeg", "png", "webp", "gif", "avif"] {
+        if other != ext { let _ = tokio::fs::remove_file(dir.join(format!("{}.{}", title, other))).await; }
+    }
+    Ok(target)
+}
+
 /// Obtiene estadísticas del tamaño de la caché de imágenes
 #[tauri::command]
-pub fn get_cache_stats(app_handle: AppHandle) -> Result<serde_json::Value, String> {
-    let (total_bytes, file_count) = crate::storage::get_cache_stats(&app_handle)
-        .map_err(|e| e.to_string())?;
-    
-    Ok(serde_json::json!({
-        "totalBytes": total_bytes,
-        "totalFormatted": format_bytes(total_bytes),
-        "fileCount": file_count,
-    }))
+pub async fn get_cache_stats(app_handle: AppHandle) -> Result<serde_json::Value, String> {
+    tokio::task::spawn_blocking(move || {
+        let (total_bytes, file_count) = crate::storage::get_cache_stats(&app_handle)
+            .map_err(|e| e.to_string())?;
+
+        Ok(serde_json::json!({
+            "totalBytes": total_bytes,
+            "totalFormatted": format_bytes(total_bytes),
+            "fileCount": file_count,
+        }))
+    }).await.map_err(|e| e.to_string())?
 }
 
 /// Limpia la caché de imágenes en disco y memoria
@@ -2241,6 +2277,35 @@ pub async fn get_storage_space_info(app_handle: AppHandle) -> Result<StorageSpac
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn repaired_cover_replaces_stale_format_and_publishes_complete_bytes() {
+        let dir = std::env::temp_dir().join(format!("anics-cover-{}", uuid::Uuid::new_v4()));
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        tokio::fs::write(dir.join("Serie.jpg"), b"old cover").await.unwrap();
+        let png = b"\x89PNG\r\n\x1a\nnew image";
+        let target = super::persist_cover_snapshot(&dir, "Serie", png, "png").await.unwrap();
+        assert_eq!(tokio::fs::read(target).await.unwrap(), png);
+        assert!(!dir.join("Serie.jpg").exists());
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+        tokio::fs::remove_dir_all(dir).await.unwrap();
+    }
+    #[test]
+    fn cover_snapshot_uses_actual_png_format_even_with_a_jpeg_cache_label() {
+        use base64::Engine;
+        let bytes = b"\x89PNG\r\n\x1a\nimage-bytes";
+        let data = format!("data:image/jpeg;base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes));
+        let (decoded, extension) = super::decode_cover_image(&data).unwrap();
+        assert_eq!(decoded, bytes);
+        assert_eq!(extension, "png");
+    }
+
+    #[test]
+    fn cover_snapshot_rejects_html_and_invalid_base64() {
+        use base64::Engine;
+        let html = format!("data:image/jpeg;base64,{}", base64::engine::general_purpose::STANDARD.encode(b"<html>Access denied</html>"));
+        assert!(super::decode_cover_image(&html).is_err());
+        assert!(super::decode_cover_image("data:image/png;base64,???").is_err());
+    }
     use super::*;
     use std::sync::atomic::Ordering;
 

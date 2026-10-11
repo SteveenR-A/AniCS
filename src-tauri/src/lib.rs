@@ -4,6 +4,8 @@ pub mod core;
 pub mod downloader;
 pub mod scrapers;
 pub mod storage;
+#[cfg(target_os = "linux")]
+mod linux_windowing;
 
 use tauri::Manager;
 #[cfg(desktop)]
@@ -19,7 +21,17 @@ pub struct AppState {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(target_os = "linux")]
+    linux_windowing::prepare_environment();
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
+
+    let context = tauri::generate_context!();
+    #[cfg(target_os = "linux")]
+    let context = {
+        let mut context = context;
+        linux_windowing::configure(context.config_mut());
+        context
+    };
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -30,18 +42,30 @@ pub fn run() {
             download_manager: DownloadManager::new(),
             dlna: casting::dlna::DlnaManager::new(),
         })
+        .on_page_load(|webview, payload| {
+            #[cfg(target_os = "linux")]
+            if webview.label() == "main"
+                && matches!(payload.event(), tauri::webview::PageLoadEvent::Finished)
+                && linux_windowing::compatible_graphics()
+            {
+                let _ = webview.eval("document.documentElement.dataset.graphics = 'compatible';");
+            }
+            #[cfg(not(target_os = "linux"))]
+            let _ = (webview, payload);
+        })
         .setup(|app| {
             // Inicializar base de datos SQLite
             let app_data_dir = app.path().app_data_dir()
                 .expect("Could not resolve app data directory");
-            std::fs::create_dir_all(&app_data_dir).ok();
-            storage::init_database(app_data_dir)
-                .expect("Failed to initialize database");
-
-            // Marcar descargas interrumpidas por cierre abrupto anterior como pausadas
-            if let Err(e) = storage::mark_active_downloads_as_paused_db() {
-                log::warn!("No se pudieron marcar descargas activas como pausadas: {}", e);
-            }
+            tauri::async_runtime::block_on(tauri::async_runtime::spawn_blocking(move || {
+                std::fs::create_dir_all(&app_data_dir).map_err(|e| e.to_string())?;
+                storage::init_database(app_data_dir).map_err(|e| e.to_string())?;
+                // Restore interrupted download state without doing SQLite work on GTK's thread.
+                if let Err(e) = storage::mark_active_downloads_as_paused_db() {
+                    log::warn!("No se pudieron marcar descargas activas como pausadas: {}", e);
+                }
+                Ok::<_, String>(())
+            }))??;
 
             // Iniciar servidor HTTP local para streaming de videos descargados síncronamente en el runtime
             let app_handle_media = app.handle().clone();
@@ -72,7 +96,9 @@ pub fn run() {
                     _ => !is_tiling_wm,
                 };
 
-                let _ = main_win.set_decorations(should_decorate);
+                if main_win.is_decorated().ok() != Some(should_decorate) {
+                    let _ = main_win.set_decorations(should_decorate);
+                }
             }
 
             // En escritorio: Si el usuario cierra la ventana mientras hay descargas activas,
@@ -139,6 +165,7 @@ pub fn run() {
             commands::get_supported_extractor_hosts,
             commands::detect_media_type,
             commands::open_in_external_player,
+            commands::get_playback_dependency_error,
             // Descargas y Archivos Locales
             commands::start_download,
             commands::start_batch_download,
@@ -218,6 +245,6 @@ pub fn run() {
             commands::set_window_decorations,
             commands::get_window_decorations,
         ])
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("Error while running AniCS");
 }

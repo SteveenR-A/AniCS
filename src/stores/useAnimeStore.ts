@@ -97,7 +97,7 @@ function isItemSourceValid(item: AnimeResult, src: string): boolean {
 }
 
 const RECENT_SEARCHES_KEY = 'anics_recent_searches';
-let genreRequestId = 0;
+const genreRequests = new Map<string, Promise<void>>();
 
 function loadInitialRecentSearches(): string[] {
   try {
@@ -371,7 +371,6 @@ export const useAnimeStore = create<AnimeStore>((set, get) => ({
 
   loadGenres: async (source?: string) => {
     const src = source || get().activeSource;
-    const requestId = ++genreRequestId;
     const cached = get().genresBySource[src];
     if (cached) {
       if (get().activeSource === src) set({ genres: cached, isLoadingGenres: false });
@@ -379,18 +378,29 @@ export const useAnimeStore = create<AnimeStore>((set, get) => ({
     }
 
     if (get().activeSource === src) set({ genres: [], isLoadingGenres: true });
-    try {
-      const genres = await getGenres(src);
-      set((state) => ({
-        ...(state.activeSource === src && requestId === genreRequestId ? { genres } : {}),
-        genresBySource: { ...state.genresBySource, [src]: genres },
-      }));
-    } catch (e) {
-      console.error('Failed to load genres for source:', src, e);
-    } finally {
-      if (get().activeSource === src && requestId === genreRequestId) {
-        set({ isLoadingGenres: false });
+    const pending = genreRequests.get(src);
+    if (pending) return pending;
+
+    // Source changes and page mounting can request the same catalog together.
+    // Keep each source independent so background loads cannot block the active one.
+    const request = (async () => {
+      try {
+        const genres = await getGenres(src);
+        set((state) => ({
+          ...(state.activeSource === src ? { genres } : {}),
+          genresBySource: { ...state.genresBySource, [src]: genres },
+        }));
+      } catch (e) {
+        console.error('Failed to load genres for source:', src, e);
+      } finally {
+        if (get().activeSource === src) set({ isLoadingGenres: false });
       }
+    })();
+    genreRequests.set(src, request);
+    try {
+      await request;
+    } finally {
+      genreRequests.delete(src);
     }
   },
 }));

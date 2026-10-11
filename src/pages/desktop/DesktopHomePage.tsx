@@ -10,6 +10,7 @@ import type { AnimeResult } from '@/types';
 function AnimeCard({ anime, onClick }: { anime: AnimeResult; onClick: () => void }) {
   return (
     <motion.div
+      className="desktop-anime-card"
       whileHover={{ y: -5, scale: 1.02 }}
       whileTap={{ scale: 0.98 }}
       onClick={onClick}
@@ -29,6 +30,7 @@ function AnimeCard({ anime, onClick }: { anime: AnimeResult; onClick: () => void
           src={anime.thumbnailUrl}
           alt={anime.title}
           fallbackIconSize={40}
+          loading="lazy"
           style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
         />
 

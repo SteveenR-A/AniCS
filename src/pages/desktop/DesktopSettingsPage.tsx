@@ -11,7 +11,8 @@ import { listen } from '@tauri-apps/api/event';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { ChangelogModal } from '@/components/ChangelogModal';
-import { ProfileSelectorModal, getProfileAvatarIcon } from '@/components/ProfileSelectorModal';
+import { DesktopProfileManager } from '@/components/desktop/DesktopProfileManager';
+import { DesktopProfileAvatar } from '@/components/desktop/DesktopProfileAvatar';
 import { GistSyncModal } from '@/components/GistSyncModal';
 import { useThemeStore, THEMES } from '@/stores/useThemeStore';
 import { useProfileStore } from '@/stores/useProfileStore';
@@ -25,7 +26,7 @@ import { getCacheStats, clearImageCache } from '@/services/downloadService';
 import { getDatabaseStats, optimizeDatabase, resetDatabase, clearHistory, openStorageFolder, type DatabaseStats } from '@/services/storageService';
 import { clearMemoryCache } from '@/components/CachedImage';
 import { DEFAULT_JKANIME, DEFAULT_MUNDODONGHUA, DEFAULT_OTAKUSTV } from '@/services/animeService';
-import { CURRENT_VERSION } from '@/services/updateService';
+import { CURRENT_VERSION, getDesktopUpdatePlatform, getDesktopUpdateAssets } from '@/services/updateService';
 import type { ProfileStats } from '@/types';
 
 declare const __APP_COMMIT_HASH__: string;
@@ -44,6 +45,7 @@ interface GitHubRelease {
 }
 
 export function DesktopSettingsPage() {
+  const updatePlatform = getDesktopUpdatePlatform(typeof navigator === 'undefined' ? '' : navigator.userAgent);
   const { currentTheme, setTheme } = useThemeStore();
   const { isVip, openModal: openVipModal, activePlan } = useSubscriptionStore();
   const { quickLoginVipDemo, quickLoginFreeDemo, isSwitching: isAccountSwitching } = useAccountStore();
@@ -330,7 +332,6 @@ export function DesktopSettingsPage() {
     return () => window.removeEventListener('anics:sync-completed', handleSync);
   }, [activeProfile?.id]);
 
-  const ActiveProfileIcon = activeProfile ? getProfileAvatarIcon(activeProfile.avatar) : User;
 
   return (
     <div style={{ padding: '28px 36px', maxWidth: 1000, margin: '0 auto' }}>
@@ -419,7 +420,7 @@ export function DesktopSettingsPage() {
                     boxShadow: `0 4px 12px ${(activeProfile?.color || '#3b82f6')}55`,
                   }}
                 >
-                  <ActiveProfileIcon size={22} />
+                  <DesktopProfileAvatar avatar={activeProfile?.avatar ?? 'user'} size={22} />
                 </div>
                 <div>
                   <div style={{ fontSize: 14, fontWeight: 700, color: 'white' }}>
@@ -1982,16 +1983,33 @@ export function DesktopSettingsPage() {
                 </div>
               )}
 
-              {/* Solo mostrar el instalador de Windows (.exe) */}
-              {updateInfo.assets.length > 0 && (
+              {updatePlatform === 'linux' && (
+                <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 12 }}>
+                  Descarga el paquete para tu distribución e instálalo manualmente. Para AppImage,
+                  dale permiso de ejecución y ábrelo. Si instalaste desde el código fuente, vuelve a ejecutar el instalador de Linux después de actualizar el código.
+                </p>
+              )}
+              {getDesktopUpdateAssets(updateInfo.assets, updatePlatform).length === 0 && (
+                <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                  Esta versión no incluye paquetes para tu sistema. Consulta el release en GitHub.
+                </p>
+              )}
+              {getDesktopUpdateAssets(updateInfo.assets, updatePlatform).length > 0 && (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-                  {updateInfo.assets
-                    .filter(asset => asset.name.toLowerCase().endsWith('.exe'))
+                  {getDesktopUpdateAssets(updateInfo.assets, updatePlatform)
                     .map((asset) => (
                       <button
                         key={asset.name}
                         disabled={Boolean(downloadingAsset)}
                         onClick={async () => {
+                          if (updatePlatform === 'linux') {
+                            try {
+                              await openUrl(asset.browser_download_url);
+                            } catch (err) {
+                              setUpdateError(`No se pudo abrir la descarga: ${String(err)}`);
+                            }
+                            return;
+                          }
                           setDownloadingAsset(asset.name);
                           setDownloadProgress(0);
                           setDownloadStatusText('Iniciando descarga interna...');
@@ -2017,7 +2035,7 @@ export function DesktopSettingsPage() {
                         }}
                       >
                         <Download size={16} />
-                        <span>{downloadingAsset === asset.name ? 'Descargando e Instalando...' : 'Descargar e Instalar Actualización'}</span>
+                        <span>{updatePlatform === 'linux' ? `Descargar ${asset.name}` : downloadingAsset === asset.name ? 'Descargando e Instalando...' : 'Descargar e Instalar Actualización'}</span>
                         <span style={{ fontSize: 11, opacity: 0.85 }}>
                           ({(asset.size / (1024 * 1024)).toFixed(1)} MB)
                         </span>
@@ -2086,7 +2104,7 @@ export function DesktopSettingsPage() {
       </div>
 
       <ChangelogModal isOpen={showChangelog} onClose={() => setShowChangelog(false)} />
-      <ProfileSelectorModal isOpen={isProfileModalOpen} onClose={() => setIsProfileModalOpen(false)} />
+      {isProfileModalOpen && <DesktopProfileManager onClose={() => setIsProfileModalOpen(false)} />}
       <GistSyncModal isOpen={isSyncModalOpen} onClose={() => setIsSyncModalOpen(false)} />
       
       {/* Modal para agregar fuente o catálogo personalizado */}

@@ -125,7 +125,9 @@ jobs:
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
           echo "Esperando que el release $TAG esté disponible para adjuntar AniCS-native.apk..."
-          for i in {1..20}; do
+          # Linux AppImage packaging can finish later than the native APK build.
+          # Leave enough time for the unified release and make failed uploads retryable.
+          for i in {1..120}; do
             if gh release view "$TAG" > /dev/null 2>&1; then
               echo "Adjuntando AniCS-native.apk a release $TAG..."
               gh release upload "$TAG" output/AniCS-native.apk --clobber && exit 0
@@ -133,4 +135,5 @@ jobs:
             echo "Intento $i: esperando release..."
             sleep 15
           done
-          echo "Advertencia: El release $TAG no estuvo disponible tras el tiempo límite. El APK queda disponible en los artefactos del workflow."
+          echo "::error::El release $TAG no estuvo disponible tras el tiempo límite. Reejecuta este job cuando termine el release unificado."
+          exit 1

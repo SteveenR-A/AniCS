@@ -1,7 +1,7 @@
 {
   "name": "anics",
   "private": true,
-  "version": "0.3.13",
+  "version": "0.3.14",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -14,7 +14,7 @@
     "test:coverage": "vitest run --coverage",
     "install:linux": "bash scripts/install-linux.sh",
     "uninstall:linux": "bash scripts/install-linux.sh --uninstall",
-    "bundle:appimage": "tauri build -- --bundles appimage"
+    "bundle:appimage": "tauri build --bundles appimage"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",

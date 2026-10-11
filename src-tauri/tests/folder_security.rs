@@ -37,7 +37,11 @@ fn rejected_paths(context: tauri::Context<tauri::test::MockRuntime>) -> Vec<Stri
                     cmd: "plugin:opener|open_path".into(),
                     callback: tauri::ipc::CallbackFn(0),
                     error: tauri::ipc::CallbackFn(1),
-                    url: "http://tauri.localhost".parse().unwrap(),
+                    url: if cfg!(windows) {
+                        "http://tauri.localhost"
+                    } else {
+                        "tauri://localhost"
+                    }.parse().unwrap(),
                     body: tauri::ipc::InvokeBody::Json(
                         serde_json::json!({ "path": path, "with": null }),
                     ),

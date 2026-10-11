@@ -1,4 +1,4 @@
-name: Release & Build (EXE & APK)
+name: Release & Build (Windows, Linux & Android)
 
 on:
   push:
@@ -288,11 +288,65 @@ jobs:
           overwrite: true
 
   # ──────────────────────────────────────────────────────────
-  # 3. Publish Unified GitHub Release
+  # 3. Build Linux (AppImage & DEB, x86_64)
+  # Ubuntu 22.04 evita exigir la glibc de distribuciones más recientes.
+  # ──────────────────────────────────────────────────────────
+  build-linux:
+    name: Build Linux (AppImage & DEB)
+    needs: prepare-release
+    runs-on: ubuntu-22.04
+    outputs:
+      artifact-id: ${{ steps.linux-artifact.outputs.artifact-id }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+      - name: Install Linux build and multimedia dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libwebkit2gtk-4.1-dev \
+            libssl-dev libdbus-1-dev librsvg2-dev patchelf file desktop-file-utils \
+            gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+            gstreamer1.0-plugins-bad gstreamer1.0-libav
+      - run: npm ci
+      - name: Build Linux packages
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+        run: npm run tauri -- build --bundles appimage deb -- --locked
+      - name: Verify local installer integration
+        run: |
+          bash scripts/install-linux.sh --no-build --prefix "$RUNNER_TEMP/anics-install"
+          desktop-file-validate "$RUNNER_TEMP/anics-install/share/applications/anics.desktop"
+          cmp src-tauri/target/release/anics "$RUNNER_TEMP/anics-install/bin/anics"
+          bash scripts/install-linux.sh --uninstall --prefix "$RUNNER_TEMP/anics-install"
+          test ! -e "$RUNNER_TEMP/anics-install/bin/anics"
+      - name: Upload Linux artifacts
+        id: linux-artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-binaries
+          path: |
+            src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/deb/*.deb
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+          overwrite: true
+
+  # ──────────────────────────────────────────────────────────
+  # 4. Publish Unified GitHub Release
   # ──────────────────────────────────────────────────────────
   publish-release:
     name: Publish Release Assets
-    needs: [prepare-release, build-windows, build-android]
+    needs: [prepare-release, build-windows, build-android, build-linux]
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
@@ -319,13 +373,23 @@ jobs:
           name: android-apk
           path: android-release
 
+      - name: Download Linux artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-binaries
+          path: linux-release
+
       - name: Prepare release files
         run: |
           mkdir -p final-assets
           find windows-release -name "*.exe" -exec cp {} final-assets/AniCS-setup.exe \;
           find android-release -name "*.apk" -exec cp {} final-assets/AniCS.apk \;
+          find linux-release -name "*.AppImage" -exec cp {} final-assets/AniCS_x86_64.AppImage \;
+          find linux-release -name "*.deb" -exec cp {} final-assets/AniCS_amd64.deb \;
           test -s final-assets/AniCS-setup.exe
           test -s final-assets/AniCS.apk
+          test -s final-assets/AniCS_x86_64.AppImage
+          test -s final-assets/AniCS_amd64.deb
           ls -la final-assets/
 
       - name: Publish GitHub Release
@@ -372,9 +436,10 @@ jobs:
         env:
           WINDOWS_ARTIFACT_ID: ${{ needs.build-windows.outputs.artifact-id }}
           ANDROID_ARTIFACT_ID: ${{ needs.build-android.outputs.artifact-id }}
+          LINUX_ARTIFACT_ID: ${{ needs.build-linux.outputs.artifact-id }}
         with:
           script: |
-            for (const rawId of [process.env.WINDOWS_ARTIFACT_ID, process.env.ANDROID_ARTIFACT_ID]) {
+            for (const rawId of [process.env.WINDOWS_ARTIFACT_ID, process.env.ANDROID_ARTIFACT_ID, process.env.LINUX_ARTIFACT_ID]) {
               const artifactId = Number(rawId);
               if (!Number.isSafeInteger(artifactId) || artifactId <= 0) {
                 throw new Error(`Identificador de artefacto inválido: ${rawId}`);
@@ -389,4 +454,3 @@ jobs:
                 if (error.status !== 404) throw error;
               }
             }
-

@@ -1,6 +1,6 @@
 import { showUpdateNotification } from '@/services/downloadService';
 
-export const CURRENT_VERSION = '0.3.13';
+export const CURRENT_VERSION = '0.3.14';
 export const DEFAULT_REPO = 'SteveenR-A/AniCS';
 
 export interface GitHubRelease {
@@ -14,6 +14,26 @@ export interface GitHubRelease {
     browser_download_url: string;
     size: number;
   }>;
+}
+
+export type DesktopUpdatePlatform = 'windows' | 'linux' | 'unsupported';
+
+export function getDesktopUpdatePlatform(userAgent: string): DesktopUpdatePlatform {
+  if (/android/i.test(userAgent)) return 'unsupported';
+  if (/windows/i.test(userAgent)) return 'windows';
+  if (/linux/i.test(userAgent)) return 'linux';
+  return 'unsupported';
+}
+
+export function getDesktopUpdateAssets(
+  assets: GitHubRelease['assets'],
+  platform: DesktopUpdatePlatform,
+): GitHubRelease['assets'] {
+  return assets.filter(({ name }) => {
+    if (platform === 'windows') return /\.exe$/i.test(name);
+    if (platform === 'linux') return /\.(appimage|deb|rpm)$/i.test(name);
+    return false;
+  });
 }
 
 /**

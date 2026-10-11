@@ -1,0 +1,33 @@
+.desktop-download-indicator {
+  position: fixed; right: 24px; bottom: 24px; z-index: 100;
+  width: min(320px, calc(100vw - 48px)); display: grid; gap: 10px;
+  color: var(--text-primary);
+}
+.desktop-download-card, .desktop-download-notice {
+  display: flex; align-items: center; gap: 12px; padding: 14px;
+  border: 1px solid var(--border-accent); border-radius: var(--radius-lg);
+  background: var(--bg-elevated); box-shadow: var(--shadow-lg);
+  color: inherit; text-decoration: none;
+}
+.desktop-download-card:hover { border-color: var(--accent-primary); }
+.desktop-download-card:focus-visible, .desktop-download-notice button:focus-visible {
+  outline: 2px solid var(--accent-primary); outline-offset: 3px;
+}
+.desktop-download-ring { width: 56px; height: 56px; flex-shrink: 0; position: relative; color: var(--accent-primary); }
+.desktop-download-ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.desktop-download-ring circle { fill: none; stroke: var(--border-subtle); stroke-width: 4; }
+.desktop-download-ring circle + circle { stroke: var(--accent-primary); stroke-linecap: round; transition: stroke-dasharray .2s; }
+.desktop-download-ring .is-indeterminate { transform-origin: 28px 28px; animation: desktop-download-spin 1.5s linear infinite; }
+.desktop-download-ring > span { position: absolute; inset: 0; display: grid; place-items: center; font-size: 12px; font-weight: 700; }
+.desktop-download-info, .desktop-download-notice > div { display: grid; gap: 4px; min-width: 0; flex: 1; }
+.desktop-download-info strong, .desktop-download-notice strong { font-size: 13px; }
+.desktop-download-info span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.desktop-download-info small, .desktop-download-notice span { font-size: 11px; color: var(--text-secondary); }
+.desktop-download-notice span { overflow-wrap: anywhere; }
+.desktop-download-notice > svg { color: var(--accent-primary); flex-shrink: 0; }
+.desktop-download-notice button { border: 0; background: transparent; color: var(--text-secondary); padding: 4px; cursor: pointer; }
+@keyframes desktop-download-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .desktop-download-ring .is-indeterminate { animation: none; }
+  .desktop-download-ring circle + circle { transition: none; }
+}
