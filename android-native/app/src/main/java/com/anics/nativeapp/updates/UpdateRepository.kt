@@ -157,7 +157,20 @@ class UpdateRepository(
         if (pending.exists()) pending.delete()
     }
 
-    suspend fun download(update: NativeUpdate, onProgress: (UpdateDownloadProgress) -> Unit = {}): File = withContext(Dispatchers.IO) {
+    suspend fun download(update: NativeUpdate, onProgress: (UpdateDownloadProgress) -> Unit = {}): File {
+        // Start while the user's download action is in the foreground, before network IO.
+        val session = UpdateDownloadService.start(context, update.version)
+        try {
+            return downloadApk(update) { progress ->
+                session.progress(progress)
+                onProgress(progress)
+            }
+        } finally {
+            session.close()
+        }
+    }
+
+    private suspend fun downloadApk(update: NativeUpdate, onProgress: (UpdateDownloadProgress) -> Unit): File = withContext(Dispatchers.IO) {
         val url = update.apkUrl ?: error("El APK nativo todavía no está adjunto a este release. Intenta más tarde.")
         require(
             url.startsWith("https://github.com/$repo/releases/download/") ||

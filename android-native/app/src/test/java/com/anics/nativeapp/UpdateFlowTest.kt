@@ -97,6 +97,23 @@ class UpdateFlowTest {
             assertFalse(File(directory, "native.apk.part").exists())
             assertEquals("previous verified APK", existing.readText())
         }
+        val commands = generateSequence { shadowOf(context as android.app.Application).nextStartedService }.toList()
+        assertEquals(2, commands.count { it.action == UpdateDownloadService.ACTION_START })
+        assertEquals(2, commands.count { it.action == UpdateDownloadService.ACTION_FINISH })
+    }
+    @Test fun pausingPreservesPartialApkAndReleasesDownloadProtection() = runBlocking {
+        val bytes = ByteArray(800000) { it.toByte() }
+        val repository = UpdateRepository(context) { url -> Connection(url, bytes) }
+        try {
+            repository.download(release(bytes)) { progress ->
+                if (progress.bytes > 0) throw kotlinx.coroutines.CancellationException("Pausada")
+            }
+            fail("Download was not paused")
+        } catch (_: kotlinx.coroutines.CancellationException) {}
+        assertTrue(repository.getPartialDownloadSize() in 1 until bytes.size.toLong())
+        val commands = generateSequence { shadowOf(context as android.app.Application).nextStartedService }.toList()
+        assertEquals(UpdateDownloadService.ACTION_START, commands.first().action)
+        assertEquals(UpdateDownloadService.ACTION_FINISH, commands.last().action)
     }
     @Test fun githubCheckKeepsCompleteNotesAndSameVersionOnManualCheck() = runBlocking {
         val notes = "Notas completas ".repeat(400)

@@ -11,6 +11,7 @@
 - Carga de géneros por proveedor sin solicitudes duplicadas y mayor consistencia del historial de descargas.
 - Distribución Linux con AppImage y DEB, instalador local y selección de actualizaciones según plataforma.
 - Android nativo: permitir apagar la pantalla al pausar y selector de episodios más compacto.
+- Android nativo: descarga de actualizaciones protegida en segundo plano al apagar la pantalla, con notificación de progreso.
 
 ---
 *Para ver el historial acumulativo completo de todas las versiones, consulta [CHANGELOG.md](./CHANGELOG.md).*

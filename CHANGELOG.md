@@ -15,6 +15,7 @@ El formato está basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1
 - Carga de géneros por proveedor sin solicitudes duplicadas y mayor consistencia del historial de descargas.
 - Distribución Linux con AppImage y DEB, instalador local y selección de actualizaciones según plataforma.
 - Android nativo: permitir apagar la pantalla al pausar y selector de episodios más compacto.
+- Android nativo: descarga de actualizaciones protegida en segundo plano al apagar la pantalla, con notificación de progreso.
 
 ---
 
