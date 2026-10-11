@@ -57,6 +57,9 @@ getrandom = "0.3"
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }
 
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+glib = "0.18"
+
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
@@ -67,3 +70,7 @@ codegen-units = 1
 lto = true
 opt-level = "s"
 strip = true
+
+# GTK 3 requires glib 0.18. Backport upstream PR #1343 without changing its API.
+[patch.crates-io]
+glib = { path = "../vendor/glib" }

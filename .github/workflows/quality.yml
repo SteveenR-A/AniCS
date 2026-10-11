@@ -12,6 +12,7 @@ on:
       - 'index.html'
       - 'scripts/install-linux.sh'
       - 'packaging/arch/**'
+      - 'vendor/glib/**'
       - '.github/workflows/quality.yml'
   push:
     branches: [main]
@@ -25,6 +26,7 @@ on:
       - 'index.html'
       - 'scripts/install-linux.sh'
       - 'packaging/arch/**'
+      - 'vendor/glib/**'
       - '.github/workflows/quality.yml'
   workflow_dispatch:
 
@@ -89,3 +91,6 @@ jobs:
         run: cargo test --locked --lib --test folder_security --test catalog_contract --test sync_contract
       - name: Linux installer syntax
         run: bash -n scripts/install-linux.sh
+      - name: GLib security regression with optimizations
+        working-directory: src-tauri
+        run: cargo test --locked --release --test glib_variant_contract

@@ -12,6 +12,7 @@
 - Distribución Linux con AppImage y DEB, instalador local y selección de actualizaciones según plataforma.
 - Android nativo: permitir apagar la pantalla al pausar y selector de episodios más compacto.
 - Android nativo: descarga de actualizaciones protegida en segundo plano al apagar la pantalla, con notificación de progreso.
+- Seguridad: actualización de Rustls y source-map-js y parche compatible de GLib para los tres avisos de Dependabot.
 
 ---
 *Para ver el historial acumulativo completo de todas las versiones, consulta [CHANGELOG.md](./CHANGELOG.md).*
