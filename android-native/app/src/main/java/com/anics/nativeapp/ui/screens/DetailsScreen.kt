@@ -47,14 +47,15 @@ fun DetailsScreen(url: String, source: String, viewModel: DetailsViewModel, onBa
                 }
                 item {
                     Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        val resume = state.resumeEpisode ?: details.episodes.minByOrNull { it.number }
+                        val resume = state.resumeEpisode
                         AnimeDetailActions(
-                            playLabel = resume?.let { if ((it.watchProgress ?: 0.0) in .01.. .89) "Reanudar ep. ${it.number}" else "Ver ep. ${it.number}" } ?: "Sin episodios",
+                            playLabel = state.resumeLabel,
                             isFavorite = state.isFavorite,
                             onPlay = resume?.let { episode -> { viewModel.selectEpisode(episode); servers = true } },
                             onFavorite = viewModel::toggleFavorite,
                             onBatch = if (details.episodes.isNotEmpty()) ({ batch = true }) else null
                         )
+                        AnimeTechnicalDetails(details)
                         AnimeSynopsis(details.synopsis)
                         Row(
                             modifier = Modifier.fillMaxWidth().padding(top = 4.dp),

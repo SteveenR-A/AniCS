@@ -1,3 +1,5 @@
+import { PageLoading } from '@/components/PageLoading';
+import { RouteErrorBoundary } from '@/components/ErrorBoundary';
 import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import { useEffect, useState, lazy, Suspense } from 'react';
 import { AppShell } from '@/components/layout/AppShell';
@@ -38,7 +40,7 @@ function AppRoutes() {
         <Route path="/settings" element={<SettingsPage />} />
       </Route>
       {/* El reproductor ocupa pantalla completa, fuera del AppShell */}
-      <Route path="/player" element={<Suspense fallback={null}><PlayerPage /></Suspense>} />
+      <Route path="/player" element={<RouteErrorBoundary><Suspense fallback={<PageLoading label="Cargando reproductor…" />}><PlayerPage /></Suspense></RouteErrorBoundary>} />
     </Routes>
   );
 }

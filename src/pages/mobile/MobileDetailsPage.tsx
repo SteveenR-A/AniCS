@@ -1,3 +1,4 @@
+import { useAnimeHistory } from '@/hooks/useAnimeHistory';
 import { useEffect, useState } from 'react';
 import { useParams, useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -7,7 +8,7 @@ import {
   ChevronDown, ChevronUp, Check, HardDrive, CheckCircle2, Loader2, Calendar, DownloadCloud, Crown, Lock
 } from 'lucide-react';
 import { getDetails, getServers, resolveStream } from '@/services/animeService';
-import { addFavorite, removeFavorite, isFavorite as checkFavorite, getHistory, getFavorites, updateFavoriteStatus } from '@/services/storageService';
+import { addFavorite, removeFavorite, isFavorite as checkFavorite, getFavorites, updateFavoriteStatus } from '@/services/storageService';
 import { startDownload, scanLocalDownloads, saveLocalAnimeCover, getLocalMediaUrl } from '@/services/downloadService';
 import { usePlayerStore } from '@/stores/usePlayerStore';
 import { useAnimeStore } from '@/stores/useAnimeStore';
@@ -71,7 +72,6 @@ export function MobileDetailsPage() {
 
   // Sincronización con Descargas Locales e Historial de Visualización en Móvil
   const [localEpisodesMap, setLocalEpisodesMap] = useState<Map<number, LocalEpisodeItem>>(new Map());
-  const [historyMap, setHistoryMap] = useState<Map<number, number>>(new Map());
 
   // Modal de selección de servidor para descarga en móvil
   const [downloadModalEp, setDownloadModalEp] = useState<Episode | null>(null);
@@ -85,6 +85,8 @@ export function MobileDetailsPage() {
     openPlayer, setCurrentEpisode, setCurrentAnime, setServers, setResolvedMedia, resetPlayback
   } = usePlayerStore();
   const { activeProfile } = useProfileStore();
+  const { progress: historyMap, action: playbackAction, isLoading: isLoadingHistory,
+    error: historyError, refresh: refreshHistory } = useAnimeHistory(details, activeProfile?.id || 'default');
 
   useEffect(() => {
     let isCancelled = false;
@@ -230,11 +232,11 @@ export function MobileDetailsPage() {
     return cleanSeasonTokens(normA) === cleanSeasonTokens(normB);
   };
 
-  // Sincronizar descargas locales e historial cada vez que cambien los detalles del anime
+  // Sincronizar descargas locales cada vez que cambien los detalles del anime
   useEffect(() => {
     if (!details?.title) return;
 
-    // 1. Sincronizar episodios descargados en disco con validación estricta de temporada
+    // Sincronizar episodios descargados en disco con validación estricta de temporada
     scanLocalDownloads().then((folders) => {
       const match = folders.find(f => strictTitlesMatch(f.animeTitle, details.title));
 
@@ -249,22 +251,6 @@ export function MobileDetailsPage() {
         }
       }
       setLocalEpisodesMap(map);
-    }).catch(console.error);
-
-    // 2. Sincronizar progreso de visualización de SQLite priorizando URL única de anime
-    getHistory(500, 0, activeProfile?.id).then((history) => {
-      const map = new Map<number, number>();
-      for (const h of history) {
-        const isUrlMatch = Boolean(h.animeUrl && details.url && h.animeUrl === details.url);
-        const isTitleMatch = strictTitlesMatch(h.animeTitle, details.title);
-
-        if (isUrlMatch || isTitleMatch) {
-          if (!map.has(h.episodeNumber)) {
-            map.set(h.episodeNumber, h.watchProgress);
-          }
-        }
-      }
-      setHistoryMap(map);
     }).catch(console.error);
   }, [details?.title, details?.url, activeProfile?.id]);
 
@@ -700,7 +686,9 @@ export function MobileDetailsPage() {
           {details.episodes.length > 0 && (
             <motion.button
               whileTap={{ scale: 0.95 }}
-              onClick={() => handlePlayEpisode(details.episodes[0])}
+              disabled={isLoadingHistory || loadingEpisode !== null}
+              aria-busy={isLoadingHistory}
+              onClick={() => historyError ? refreshHistory() : playbackAction && handlePlayEpisode(playbackAction.episode)}
               style={{
                 flex: 1, minWidth: 120,
                 background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))',
@@ -710,7 +698,7 @@ export function MobileDetailsPage() {
                 boxShadow: 'var(--shadow-glow)',
               }}
             >
-              <Play size={15} fill="white" /> Ep. {details.episodes[0].number}
+              <Play size={15} fill="white" /> {isLoadingHistory ? 'Cargando historial…' : historyError ? 'Reintentar historial' : playbackAction?.label}
             </motion.button>
           )}
 

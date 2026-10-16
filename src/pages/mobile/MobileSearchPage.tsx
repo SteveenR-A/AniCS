@@ -1,3 +1,4 @@
+import { SearchError } from '@/components/SearchError';
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -14,11 +15,14 @@ import type { AnimeResult, SearchFilters } from '@/types';
 
 function MobileResultCard({ anime, onClick }: { anime: AnimeResult; onClick: () => void }) {
   return (
-    <motion.div
+    <motion.button
+      type="button"
+      aria-label={`Ver detalles de ${anime.title}`}
       layout
       whileTap={{ scale: 0.96 }}
       onClick={onClick}
       style={{
+        padding: 0, textAlign: 'left', font: 'inherit', width: '100%',
         background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)',
         overflow: 'hidden', cursor: 'pointer',
         border: '1px solid var(--border-subtle)',
@@ -26,14 +30,14 @@ function MobileResultCard({ anime, onClick }: { anime: AnimeResult; onClick: () 
         position: 'relative',
       }}
     >
-      <div style={{ position: 'relative', paddingBottom: '140%', background: 'var(--bg-elevated)' }}>
+      <span style={{ display: 'block', position: 'relative', paddingBottom: '140%', background: 'var(--bg-elevated)' }}>
         <CachedImage
           src={anime.thumbnailUrl}
           alt={anime.title}
           fallbackIconSize={30}
           style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
         />
-        <div style={{
+        <span style={{
           position: 'absolute', inset: 0,
           background: 'linear-gradient(to top, rgba(10,11,15,0.9) 0%, transparent 60%)',
         }} />
@@ -48,19 +52,19 @@ function MobileResultCard({ anime, onClick }: { anime: AnimeResult; onClick: () 
             Ep. {anime.episode}
           </span>
         )}
-      </div>
+      </span>
 
-      <div style={{ padding: '8px 10px 10px' }}>
-        <h4 style={{
+      <span style={{ display: 'block', padding: '8px 10px 10px' }}>
+        <span style={{
           fontSize: 12, fontWeight: 700, lineHeight: 1.25,
           overflow: 'hidden', textOverflow: 'ellipsis',
           display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
           margin: 0, color: 'var(--text-primary)',
         }}>
           {anime.title}
-        </h4>
-      </div>
-    </motion.div>
+        </span>
+      </span>
+    </motion.button>
   );
 }
 
@@ -100,6 +104,7 @@ export function MobileSearchPage() {
   const urlYear = searchParams.get('year') ?? '';
   const urlOrder = searchParams.get('order') ?? '';
 
+  const [searchFailed, setSearchFailed] = useState(false);
   const [query, setQuery] = useState(urlQ);
   const [selectedGenre, setSelectedGenre] = useState<string>(urlGenre);
   const [selectedStatus, setSelectedStatus] = useState<string>(urlStatus);
@@ -162,6 +167,7 @@ export function MobileSearchPage() {
   ) => {
     const currentSource = activeSource;
     const currentRequestId = ++searchRequestIdRef.current;
+    setSearchFailed(false);
     setIsSearching(true);
     try {
       const filters: SearchFilters = {
@@ -207,7 +213,7 @@ export function MobileSearchPage() {
     } catch (e) {
       console.error('Mobile search execution failed', e);
       if (useAnimeStore.getState().activeSource === currentSource && currentRequestId === searchRequestIdRef.current) {
-        setSearchResults([], q, currentSource);
+        setSearchFailed(true);
         setTotalPages(undefined);
         setHasNextPage(false);
       }
@@ -262,6 +268,7 @@ export function MobileSearchPage() {
     // Si no hay parámetros ni búsqueda, no disparar consultas pesadas innecesarias
     if (!urlQ && !urlGenre && !urlStatus && !urlType && !urlYear && !urlOrder) {
       ++searchRequestIdRef.current;
+      setSearchFailed(false);
       setIsSearching(false);
       setSearchResults([], '', activeSource);
       setTotalPages(undefined);
@@ -273,6 +280,7 @@ export function MobileSearchPage() {
   }, [activeSource, urlQ, urlGenre, urlStatus, urlType, urlYear, urlOrder, urlPage, getSearchSession, setSearchResults, syncUrlParams, executeSearch, query]);
 
   const handleInput = (val: string) => {
+    setSearchFailed(false);
     setQuery(val);
     ++searchRequestIdRef.current;
     setIsSearching(false);
@@ -317,6 +325,7 @@ export function MobileSearchPage() {
   };
 
   const handleClearQuery = () => {
+    setSearchFailed(false);
     ++searchRequestIdRef.current;
     setIsSearching(false);
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -355,6 +364,7 @@ export function MobileSearchPage() {
   };
 
   const handleResetFilters = () => {
+    setSearchFailed(false);
     if (debounceRef.current) clearTimeout(debounceRef.current);
     setQuery('');
     setSelectedGenre('');
@@ -415,6 +425,7 @@ export function MobileSearchPage() {
           </button>
           <input
             type="text"
+            aria-label="Buscar anime por título"
             enterKeyHint="search"
             autoComplete="off"
             autoCorrect="off"
@@ -443,6 +454,8 @@ export function MobileSearchPage() {
 
         {/* Botón Filtros Móvil */}
         <button
+          aria-label="Filtros de búsqueda"
+          aria-expanded={showFilters}
           onClick={() => setShowFilters(!showFilters)}
           style={{
             background: activeFilterCount > 0
@@ -625,17 +638,19 @@ export function MobileSearchPage() {
                 fontSize: 11, color: 'var(--text-secondary)', flexShrink: 0,
               }}
             >
-              <span
+              <button
+                type="button"
                 onClick={() => {
                   setQuery(term);
                   syncUrlParams(term, selectedGenre, selectedStatus, selectedType, selectedYear, selectedOrder, 1);
                   executeSearch(term, selectedGenre, selectedStatus, selectedType, selectedYear, selectedOrder, 1);
                 }}
-                style={{ cursor: 'pointer', fontWeight: 600 }}
+                style={{ cursor: 'pointer', fontWeight: 600, background: 'none', border: 0, color: 'inherit', font: 'inherit' }}
               >
                 {term}
-              </span>
+              </button>
               <button
+                aria-label={`Eliminar búsqueda ${term}`}
                 onClick={(e) => { e.stopPropagation(); removeRecentSearch(term); }}
                 style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 0, display: 'flex' }}
               >
@@ -901,9 +916,14 @@ export function MobileSearchPage() {
         )}
       </AnimatePresence>
 
+      <p className="sr-only" role="status" aria-live="polite">
+        {isSearching ? 'Buscando…' : searchFailed ? '' : `${searchResults.length} resultados cargados.`}
+      </p>
       {/* Resultados 2 Columnas Móvil */}
-      {isSearching && searchResults.length === 0 ? (
-        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '60px 0', flexDirection: 'column', gap: 10 }}>
+      {searchFailed ? (
+        <SearchError onRetry={() => executeSearch(query, selectedGenre, selectedStatus, selectedType, selectedYear, selectedOrder, urlPage)} />
+      ) : isSearching && searchResults.length === 0 ? (
+        <div role="status" aria-live="polite" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '60px 0', flexDirection: 'column', gap: 10 }}>
           <Loader2 size={30} className="animate-spin" color="var(--accent-primary)" />
           <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Buscando...</p>
         </div>

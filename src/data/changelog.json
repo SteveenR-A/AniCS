@@ -1,5 +1,20 @@
 [
   {
+    "version": "0.3.15",
+    "date": "2026-10-16",
+    "title": "Continuación por historial y mejoras de experiencia",
+    "type": "patch",
+    "highlights": [
+      "Continuación inteligente por historial y perfil activo en PC, Android Tauri y Android Kotlin.",
+      "Ficha técnica en Android Kotlin con episodios, estudio, duración, emisión y audio.",
+      "Búsquedas con errores diferenciados, reintentos y protección frente a respuestas antiguas.",
+      "Indicadores de carga y recuperación de errores por pantalla sin reiniciar toda la aplicación.",
+      "Portadas bajo demanda, caché limitada por tamaño y fuentes locales para uso sin conexión.",
+      "Mejoras de accesibilidad, navegación por teclado y movimiento reducido.",
+      "Separación de las pantallas de biblioteca y controles del reproductor para facilitar su mantenimiento."
+    ]
+  },
+  {
     "version": "0.3.14",
     "date": "2026-10-11",
     "title": "Descargas, perfiles y compatibilidad Linux",

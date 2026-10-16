@@ -1,0 +1,605 @@
+import { useEffect, useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Clock, Trash2, Film, ArrowDownCircle, Play, Folder, RefreshCw, ChevronDown, ChevronUp, Check, Eye, EyeOff, Pause, RotateCcw, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { convertFileSrc } from '@tauri-apps/api/core';
+import { scanLocalDownloads, deleteLocalDownload, deleteLocalAnimeFolder, getDefaultDownloadDir, getLocalMediaUrl } from '@/services/downloadService';
+import { useDownloadStore } from '@/stores/useDownloadStore';
+import { usePlayerStore } from '@/stores/usePlayerStore';
+import { CachedImage } from '@/components/CachedImage';
+import { StorageSpaceBar } from '@/components/StorageSpaceBar';
+import type { LocalAnimeFolder, LocalEpisodeItem } from '@/types';
+
+function formatSpeed(kbps: number) {
+  if (kbps <= 0) return '0 KB/s';
+  if (kbps >= 1024) {
+    return `${(kbps / 1024).toFixed(1)} MB/s`;
+  }
+  return `${Math.round(kbps)} KB/s`;
+}
+
+export function MobileDownloadsPage() {
+  const navigate = useNavigate();
+  const {
+    tasks, pauseTask, resumeTask, retryTask, cancelTask, removeTask, clearCompletedTasks,
+    expandedFolders, toggleFolder
+  } = useDownloadStore();
+  const {
+    openPlayer, setCurrentEpisode, setCurrentAnime, setServers, setResolvedMedia, resetPlayback
+  } = usePlayerStore();
+
+  const [activeTab, setActiveTab] = useState<'local' | 'active'>('local');
+  const [downloadFolder, setDownloadFolder] = useState<string>('');
+  const [animeFolders, setAnimeFolders] = useState<LocalAnimeFolder[]>([]);
+  const [isScanning, setIsScanning] = useState(false);
+
+  const loadLocalFolders = useCallback(async () => {
+    setIsScanning(true);
+    try {
+      const folder = downloadFolder || await getDefaultDownloadDir();
+      setDownloadFolder(folder);
+      const groups = await scanLocalDownloads(folder);
+      setAnimeFolders(groups);
+    } catch (e) {
+      console.error('Error scanning downloads folder in Mobile:', e);
+    } finally {
+      setIsScanning(false);
+    }
+  }, [downloadFolder]);
+
+  useEffect(() => {
+    loadLocalFolders();
+    const handleFocus = () => {
+      loadLocalFolders();
+    };
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [loadLocalFolders]);
+
+  const handleDeleteEpisode = async (filePath: string, animeTitle: string) => {
+    try {
+      await deleteLocalDownload(filePath);
+      setAnimeFolders(prev => prev.map(folder => {
+        if (folder.animeTitle === animeTitle) {
+          const remaining = folder.episodes.filter(e => e.filePath !== filePath);
+          return { ...folder, episodes: remaining, totalEpisodes: remaining.length };
+        }
+        return folder;
+      }).filter(folder => folder.episodes.length > 0));
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleDeleteAnimeFolder = async (folderPath: string) => {
+    if (!window.confirm('¿Eliminar esta serie descargada?')) return;
+    try {
+      await deleteLocalAnimeFolder(folderPath);
+      setAnimeFolders(prev => prev.filter(f => f.folderPath !== folderPath));
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handlePlayEpisode = async (ep: LocalEpisodeItem, anime: LocalAnimeFolder) => {
+    resetPlayback();
+    let streamUrl = '';
+    try {
+      streamUrl = await getLocalMediaUrl(ep.filePath);
+    } catch {
+      streamUrl = convertFileSrc(ep.filePath);
+    }
+    const isTs = ep.filePath.toLowerCase().endsWith('.ts');
+    setCurrentAnime({
+      title: anime.animeTitle,
+      url: ep.filePath,
+      thumbnailUrl: anime.coverImage || '',
+      synopsis: `Archivo local en: ${ep.filePath}`,
+      genres: ['Descarga local'],
+      episodes: anime.episodes.map(e => ({
+        number: e.episodeNumber,
+        title: e.fileName,
+        url: e.filePath,
+        watched: e.watchStatus === 'completed',
+        watchProgress: e.watchProgress,
+      })),
+      source: 'local',
+    });
+    setCurrentEpisode({
+      number: ep.episodeNumber,
+      title: ep.fileName,
+      url: ep.filePath,
+      watched: ep.watchStatus === 'completed',
+      watchProgress: ep.watchProgress,
+    });
+    setResolvedMedia({
+      directUrl: streamUrl,
+      mediaType: isTs ? 'hls' : 'mp4',
+      qualities: [],
+    });
+    setServers([]);
+    openPlayer();
+    navigate('/player');
+  };
+
+  const taskList = Array.from(tasks.values());
+  const activeTasks = taskList.filter(t => t.status === 'downloading' || t.status === 'queued');
+  const completedOrCanceledTasks = taskList.filter(t => t.status === 'completed' || t.status === 'canceled');
+
+  return (
+    <div style={{ padding: '12px 14px 24px' }}>
+      {/* Barra de Almacenamiento */}
+      <div style={{ marginBottom: 12 }}>
+        <StorageSpaceBar />
+      </div>
+
+      {/* Header Móvil Tabs & Refresh */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 14, alignItems: 'center' }}>
+        <button
+          onClick={() => setActiveTab('local')}
+          style={{
+            flex: 1,
+            background: activeTab === 'local' ? 'var(--accent-primary)' : 'var(--bg-surface)',
+            color: activeTab === 'local' ? 'white' : 'var(--text-secondary)',
+            border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-full)', padding: '7px 12px',
+            fontSize: 12, fontWeight: 700, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+          }}
+        >
+          <Folder size={14} /> Animes ({animeFolders.length})
+        </button>
+        <button
+          onClick={() => setActiveTab('active')}
+          style={{
+            flex: 1,
+            background: activeTab === 'active' ? 'var(--accent-secondary)' : 'var(--bg-surface)',
+            color: activeTab === 'active' ? 'white' : 'var(--text-secondary)',
+            border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-full)', padding: '7px 12px',
+            fontSize: 12, fontWeight: 700, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+          }}
+        >
+          <ArrowDownCircle size={14} /> Cola ({activeTasks.length})
+        </button>
+        <button
+          onClick={() => loadLocalFolders()}
+          disabled={isScanning}
+          title="Escanear y actualizar descargas"
+          style={{
+            background: 'var(--bg-surface)',
+            color: 'var(--text-primary)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 'var(--radius-full)',
+            padding: '7px 11px',
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: isScanning ? 'not-allowed' : 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            opacity: isScanning ? 0.7 : 1,
+          }}
+        >
+          <RefreshCw size={14} className={isScanning ? 'animate-spin' : ''} />
+        </button>
+      </div>
+
+      {/* TAB 1: Carpetas en Móvil */}
+      {activeTab === 'local' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {isScanning && animeFolders.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '60px 16px', background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)' }}>
+              <Loader2 size={36} color="var(--accent-primary)" style={{ margin: '0 auto 8px', animation: 'spin-slow 1s linear infinite' }} />
+              <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: 0 }}>Escaneando descargas locales...</p>
+            </div>
+          ) : animeFolders.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '60px 16px', background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)' }}>
+              <Folder size={40} color="var(--text-muted)" style={{ margin: '0 auto 8px', opacity: 0.5 }} />
+              <p style={{ fontSize: 14, fontWeight: 700, margin: '0 0 4px' }}>Sin animes descargados</p>
+              <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: 0 }}>Los episodios descargados se organizarán automáticamente aquí.</p>
+            </div>
+          ) : (
+            animeFolders.map((anime) => {
+              const isExpanded = Boolean(expandedFolders[anime.folderPath]);
+              return (
+                <div
+                  key={anime.folderPath}
+                  style={{
+                    background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
+                    borderRadius: 'var(--radius-lg)', overflow: 'hidden',
+                  }}
+                >
+                  <div
+                    onClick={() => toggleFolder(anime.folderPath)}
+                    style={{
+                      padding: '10px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+                      cursor: 'pointer', background: isExpanded ? 'var(--bg-elevated)' : 'transparent',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 }}>
+                      <div style={{ width: 38, height: 52, borderRadius: 'var(--radius-sm)', overflow: 'hidden', flexShrink: 0, background: 'var(--bg-elevated)' }}>
+                        {anime.coverImage ? (
+                          <CachedImage src={anime.coverImage} alt={anime.animeTitle} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        ) : (
+                          <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent-primary)' }}>
+                            <Film size={18} />
+                          </div>
+                        )}
+                      </div>
+                      <div style={{ minWidth: 0 }}>
+                        <p style={{ fontSize: 13, fontWeight: 700, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {anime.animeTitle}
+                        </p>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
+                          <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--accent-primary)' }}>
+                            {anime.totalEpisodes} ep{anime.totalEpisodes === 1 ? '' : 's'}
+                          </span>
+                          <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>• {anime.totalSizeFormatted}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }} onClick={e => e.stopPropagation()}>
+                      <button
+                        onClick={() => handleDeleteAnimeFolder(anime.folderPath)}
+                        style={{ background: 'none', border: 'none', color: 'var(--text-muted)', padding: 4, cursor: 'pointer' }}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                      {isExpanded ? <ChevronUp size={16} color="var(--text-muted)" /> : <ChevronDown size={16} color="var(--text-muted)" />}
+                    </div>
+                  </div>
+
+                  <AnimatePresence>
+                    {isExpanded && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        style={{ borderTop: '1px solid var(--border-subtle)', background: 'var(--bg-base)' }}
+                      >
+                        {anime.episodes.map((ep) => {
+                          const isCompleted = ep.watchStatus === 'completed';
+                          const isInProgress = ep.watchStatus === 'in_progress';
+                          return (
+                            <div
+                              key={ep.filePath}
+                              style={{
+                                padding: '9px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                borderBottom: '1px solid var(--border-subtle)', gap: 8,
+                              }}
+                            >
+                              <div style={{ minWidth: 0, flex: 1 }}>
+                                <p style={{ fontSize: 12, fontWeight: 600, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  Episodio {ep.episodeNumber}
+                                </p>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                                  <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{ep.fileSizeFormatted}</span>
+                                  {isCompleted ? (
+                                    <span style={{
+                                      fontSize: 10, fontWeight: 800, color: 'var(--accent-success)',
+                                      background: 'rgba(16,185,129,0.15)', padding: '1px 6px', borderRadius: 4,
+                                      display: 'inline-flex', alignItems: 'center', gap: 3,
+                                    }}>
+                                      <Check size={10} /> Visto
+                                    </span>
+                                  ) : isInProgress ? (
+                                    <span style={{
+                                      fontSize: 10, fontWeight: 800, color: 'var(--accent-primary)',
+                                      background: 'rgba(59,130,246,0.15)', padding: '1px 6px', borderRadius: 4,
+                                      display: 'inline-flex', alignItems: 'center', gap: 3,
+                                    }}>
+                                      <Eye size={10} /> En progreso ({Math.round(ep.watchProgress * 100)}%)
+                                    </span>
+                                  ) : (
+                                    <span style={{
+                                      fontSize: 10, fontWeight: 700, color: 'var(--text-muted)',
+                                      background: 'var(--bg-elevated)', padding: '1px 6px', borderRadius: 4,
+                                      display: 'inline-flex', alignItems: 'center', gap: 3,
+                                    }}>
+                                      <EyeOff size={10} /> No visto
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <button
+                                  onClick={() => handlePlayEpisode(ep, anime)}
+                                  style={{
+                                    background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))',
+                                    border: 'none', borderRadius: 'var(--radius-sm)',
+                                    padding: '6px 12px', color: 'white', fontSize: 11, fontWeight: 700,
+                                    display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer',
+                                  }}
+                                >
+                                  <Play size={11} fill="white" /> Ver
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteEpisode(ep.filePath, anime.animeTitle)}
+                                  style={{
+                                    background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
+                                    borderRadius: 'var(--radius-sm)', padding: 6, color: 'var(--text-muted)', cursor: 'pointer',
+                                  }}
+                                >
+                                  <Trash2 size={12} />
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
+
+      {/* TAB 2: Cola en Móvil (Sin Emojis) */}
+      {activeTab === 'active' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {completedOrCanceledTasks.length > 0 && (
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 2 }}>
+              <button
+                onClick={() => clearCompletedTasks()}
+                style={{
+                  background: 'var(--bg-surface)',
+                  color: 'var(--text-secondary)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-full)',
+                  padding: '6px 12px',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 5,
+                }}
+              >
+                <CheckCircle2 size={13} />
+                <span>Limpiar completadas ({completedOrCanceledTasks.length})</span>
+              </button>
+            </div>
+          )}
+          {taskList.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '50px 16px', background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)' }}>
+              <ArrowDownCircle size={36} color="var(--text-muted)" style={{ margin: '0 auto 8px', opacity: 0.5 }} />
+              <p style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>No hay descargas en la cola</p>
+            </div>
+          ) : (
+            taskList.map((task) => {
+              const isDownloading = task.status === 'downloading';
+              const isQueued = task.status === 'queued';
+              const isPaused = task.status === 'paused';
+              const isCompleted = task.status === 'completed';
+              const isCanceled = task.status === 'canceled';
+              const isError = task.status === 'failed';
+
+              return (
+                <div
+                  key={task.id}
+                  style={{
+                    background: 'var(--bg-surface)',
+                    borderRadius: 'var(--radius-md)',
+                    padding: 12,
+                    border: '1px solid var(--border-color)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 8,
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {task.animeTitle} {task.episodeNumber > 0 && `· Ep. ${task.episodeNumber}`}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                        <span style={{
+                          fontSize: 10,
+                          fontWeight: 800,
+                          textTransform: 'uppercase',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 4,
+                          color: isCompleted
+                            ? 'var(--accent-success)'
+                            : isDownloading
+                              ? 'var(--accent-primary)'
+                              : isPaused
+                                ? '#f97316'
+                                : isQueued
+                                  ? '#f59e0b'
+                                  : isCanceled
+                                    ? 'var(--text-muted)'
+                                    : 'var(--accent-error)',
+                        }}>
+                          {isCompleted && <><Check size={11} /> Completado</>}
+                          {isDownloading && <><Loader2 size={11} className="animate-spin" /> Descargando</>}
+                          {isPaused && <><Pause size={11} /> Pausado</>}
+                          {isQueued && <><Clock size={11} /> En Cola</>}
+                          {isCanceled && <>Cancelado</>}
+                          {isError && <><AlertCircle size={11} /> Error</>}
+                        </span>
+                        {isDownloading && (task.speedKbps ?? 0) > 0 && (
+                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                            • {formatSpeed(task.speedKbps ?? 0)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Botones de acción dinámicos */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      {isDownloading && (
+                        <>
+                          <button
+                            onClick={() => pauseTask(task.id)}
+                            style={{
+                              background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
+                              borderRadius: 'var(--radius-sm)', padding: '5px 9px', color: 'var(--text-primary)',
+                              display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                            }}
+                            title="Pausar descarga"
+                          >
+                            <Pause size={11} /> Pausar
+                          </button>
+                          <button
+                            onClick={() => cancelTask(task.id)}
+                            style={{
+                              background: 'rgba(239, 68, 68, 0.15)', border: 'none',
+                              borderRadius: 'var(--radius-sm)', padding: '5px 9px', color: 'var(--accent-error)',
+                              fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                            }}
+                            title="Cancelar descarga"
+                          >
+                            <Trash2 size={11} />
+                          </button>
+                        </>
+                      )}
+
+                      {isQueued && (
+                        <button
+                          onClick={() => cancelTask(task.id)}
+                          style={{
+                            background: 'rgba(239, 68, 68, 0.15)', border: 'none',
+                            borderRadius: 'var(--radius-sm)', padding: '5px 9px', color: 'var(--accent-error)',
+                            fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                          }}
+                          title="Cancelar"
+                        >
+                          <Trash2 size={11} /> Cancelar
+                        </button>
+                      )}
+
+                      {isPaused && (
+                        <>
+                          <button
+                            onClick={() => resumeTask(task.id)}
+                            style={{
+                              background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))',
+                              border: 'none', borderRadius: 'var(--radius-sm)', padding: '5px 10px',
+                              color: 'white', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                            }}
+                            title="Reanudar descarga"
+                          >
+                            <Play size={11} fill="white" /> Reanudar
+                          </button>
+                          <button
+                            onClick={() => removeTask(task.id, false)}
+                            style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 4 }}
+                            title="Eliminar de la lista"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </>
+                      )}
+
+                      {isError && (
+                        <>
+                          <button
+                            onClick={() => retryTask(task.id)}
+                            style={{
+                              background: 'rgba(59, 130, 246, 0.15)', border: '1px solid rgba(59, 130, 246, 0.3)',
+                              borderRadius: 'var(--radius-sm)', padding: '5px 10px', color: 'var(--accent-primary)',
+                              display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                            }}
+                            title="Reintentar descarga"
+                          >
+                            <RotateCcw size={11} /> Reintentar
+                          </button>
+                          <button
+                            onClick={() => removeTask(task.id, false)}
+                            style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 4 }}
+                            title="Eliminar de la lista"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </>
+                      )}
+
+                      {(isCompleted || isCanceled) && (
+                        <button
+                          onClick={() => removeTask(task.id, false)}
+                          style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 4 }}
+                          title="Eliminar de la lista"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {isQueued && (
+                    <div style={{
+                      fontSize: 11, color: '#f59e0b', background: 'rgba(245, 158, 11, 0.1)',
+                      padding: '6px 10px', borderRadius: 'var(--radius-sm)', display: 'flex', alignItems: 'center', gap: 6,
+                    }}>
+                      <Clock size={12} /> En cola (máx. 2 simultáneas)...
+                    </div>
+                  )}
+
+                  {isPaused && (
+                    <div style={{
+                      fontSize: 11, color: '#f97316', background: 'rgba(249, 115, 22, 0.1)',
+                      padding: '6px 10px', borderRadius: 'var(--radius-sm)', display: 'flex', alignItems: 'center', gap: 6,
+                    }}>
+                      <Pause size={12} /> Descarga pausada. Presiona Reanudar para continuar.
+                    </div>
+                  )}
+
+                  {isError && task.error && (
+                    <div style={{
+                      fontSize: 11, color: 'var(--accent-error)', background: 'rgba(239, 68, 68, 0.1)',
+                      padding: '6px 10px', borderRadius: 'var(--radius-sm)', display: 'flex', alignItems: 'center', gap: 6,
+                    }}>
+                      <AlertCircle size={12} /> {task.error}
+                    </div>
+                  )}
+
+                  {(isDownloading || isPaused) && (
+                    <div>
+                      {(() => {
+                        const totalBytes = task.totalBytes;
+                        const downloadedBytes = task.downloadedBytes;
+                        const pct = (totalBytes && totalBytes > 0)
+                          ? Math.min(100, Math.max(0, Math.round((downloadedBytes / totalBytes) * 100)))
+                          : Math.min(100, Math.max(0, Math.round(task.progress)));
+
+                        const dlMB = (downloadedBytes / (1024 * 1024)).toFixed(1);
+                        const totalMB = totalBytes ? (totalBytes / (1024 * 1024)).toFixed(1) : null;
+                        return (
+                          <>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
+                              <span style={{ fontWeight: 600 }}>
+                                {totalMB ? `${dlMB} / ${totalMB} MB` : `${dlMB} MB`}
+                                {isDownloading && (task.speedKbps ?? 0) > 0 && ` · ${formatSpeed(task.speedKbps ?? 0)}`}
+                              </span>
+                              <span style={{ color: isPaused ? '#f97316' : 'var(--accent-primary)', fontWeight: 700 }}>{pct}%</span>
+                            </div>
+                            <div style={{ height: 5, background: 'var(--bg-elevated)', borderRadius: 3, overflow: 'hidden' }}>
+                              <div style={{
+                                width: `${pct}%`,
+                                height: '100%',
+                                background: isPaused
+                                  ? '#f97316'
+                                  : 'linear-gradient(90deg, var(--accent-primary), var(--accent-secondary))',
+                                transition: 'width 0.3s ease',
+                              }} />
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

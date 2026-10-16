@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Film } from 'lucide-react';
 import { convertFileSrc } from '@tauri-apps/api/core';
+import { ImageMemoryCache } from '@/utils/imageMemoryCache';
 import { cacheImage } from '@/services/downloadService';
 
 interface CachedImageProps extends React.ImgHTMLAttributes<HTMLImageElement> {
@@ -9,21 +10,8 @@ interface CachedImageProps extends React.ImgHTMLAttributes<HTMLImageElement> {
   fallbackIconSize?: number;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// L1 JavaScript: mapa en RAM de URLs remotas -> Data URIs base64 completas (0ms)
-// ─────────────────────────────────────────────────────────────────────────────
-const MAX_RAM_IMAGES = 150;
-const MEMORY_CACHE = new Map<string, string>();
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Cache de Bitmaps decodificados en RAM del navegador: mantiene los objetos Image
-// en memoria para que el WebView tenga los píxeles decodificados en GPU/RAM listos
-// ─────────────────────────────────────────────────────────────────────────────
-const BITMAP_REFS = new Map<string, HTMLImageElement>();
-
-// ─────────────────────────────────────────────────────────────────────────────
-// SingleFlight en frontend: evita múltiples llamadas IPC concurrentes para la misma URL.
-// ─────────────────────────────────────────────────────────────────────────────
+// Strings have a byte budget; let the WebView release decoded bitmaps itself.
+const MEMORY_CACHE = new ImageMemoryCache();
 const IN_FLIGHT = new Map<string, Promise<string>>();
 let cacheGeneration = 0;
 
@@ -44,18 +32,7 @@ function normalizeSrc(rawSrc: string): string {
 export function clearMemoryCache(): void {
   ++cacheGeneration;
   MEMORY_CACHE.clear();
-  BITMAP_REFS.clear();
   IN_FLIGHT.clear();
-}
-
-/** Guarda en MEMORY_CACHE con límite LRU estricto para no sobre-saturar la RAM */
-function setMemoryCache(url: string, dataUri: string): void {
-  MEMORY_CACHE.delete(url);
-  if (MEMORY_CACHE.size >= MAX_RAM_IMAGES) {
-    const oldestKey = MEMORY_CACHE.keys().next().value;
-    if (oldestKey) MEMORY_CACHE.delete(oldestKey);
-  }
-  MEMORY_CACHE.set(url, dataUri);
 }
 
 /** Obtiene el Data URI en RAM si ya está en caché (0ms, sin IPC ni disco) */
@@ -67,26 +44,8 @@ export function getCachedImageUrl(url: string): string {
 export function setMemoryCacheBatch(batch: Record<string, string>): void {
   for (const [url, dataUri] of Object.entries(batch)) {
     if (url && dataUri && dataUri.startsWith('data:')) {
-      setMemoryCache(url, dataUri);
-      keepInRam(dataUri);
+      MEMORY_CACHE.set(url, dataUri);
     }
-  }
-}
-
-/** Predecodifica una imagen en RAM del WebView para pintura a 0ms */
-function keepInRam(dataUri: string) {
-  if (!dataUri || BITMAP_REFS.has(dataUri)) return;
-  try {
-    const img = new Image();
-    img.src = dataUri;
-    img.decode().catch(() => {/* best-effort */});
-    if (BITMAP_REFS.size >= MAX_RAM_IMAGES) {
-      const firstKey = BITMAP_REFS.keys().next().value;
-      if (firstKey) BITMAP_REFS.delete(firstKey);
-    }
-    BITMAP_REFS.set(dataUri, img);
-  } catch {
-    // Ignorar si el navegador no soporta decode
   }
 }
 
@@ -114,7 +73,6 @@ export function resolveImageUrl(url: string): Promise<string> {
   // Hit en L1 RAM: 0ms, sin IPC ni disco
   const cached = MEMORY_CACHE.get(url);
   if (cached) {
-    keepInRam(cached);
     return Promise.resolve(cached);
   }
 
@@ -130,8 +88,7 @@ export function resolveImageUrl(url: string): Promise<string> {
       if (dataUri && dataUri.startsWith('data:')) {
         resolved = dataUri;
         if (generation === cacheGeneration) {
-          setMemoryCache(url, resolved);
-          keepInRam(resolved);
+          MEMORY_CACHE.set(url, resolved);
         }
       } else {
         resolved = normalizeSrc(url);
@@ -150,100 +107,70 @@ export function resolveImageUrl(url: string): Promise<string> {
 }
 
 export function CachedImage({
-  src,
-  alt,
-  fallbackIconSize = 32,
-  style,
-  className,
-  ...props
+  src, alt, fallbackIconSize = 32, style, className,
+  loading = 'lazy', onLoad, onError, ...props
 }: CachedImageProps) {
-  const normalizedInitial = normalizeSrc(src);
-  const cachedInitial = src ? MEMORY_CACHE.get(src) : undefined;
-  const [imgSrc, setImgSrc] = useState<string>(() => cachedInitial ?? normalizedInitial);
-  const [hasError, setHasError] = useState(false);
-  const [isLoaded, setIsLoaded] = useState<boolean>(Boolean(cachedInitial));
-  const hasLoadedRef = useRef(Boolean(cachedInitial));
+  const imageRef = useRef<HTMLImageElement>(null);
+  const [image, setImage] = useState(() => ({
+    source: src, url: MEMORY_CACHE.get(src), loaded: false, error: false,
+  }));
+  // Never paint the old source or retain its error while a recycled card changes.
+  const current = image.source === src ? image : { source: src, url: undefined, loaded: false, error: false };
 
   useEffect(() => {
-    if (!src) return;
-
-    const normalized = normalizeSrc(src);
+    let disposed = false;
     const cached = MEMORY_CACHE.get(src);
-    if (cached) {
-      setImgSrc(cached);
-      setIsLoaded(true);
-      hasLoadedRef.current = true;
-      setHasError(false);
-      return;
-    }
+    const local = src && !/^https?:\/\//.test(src);
+    setImage({ source: src, url: cached ?? (local ? normalizeSrc(src) : undefined), loaded: Boolean(cached), error: false });
+    if (!src || cached || local) return;
 
-    // Si es un asset local directo
-    if (normalized.startsWith('asset:') || !src.startsWith('http')) {
-      setImgSrc(normalized);
-      setHasError(false);
-      return;
-    }
-
-    let isMounted = true;
-    setHasError(false);
-    setImgSrc(normalized);
-
-    resolveImageUrl(src).then((resolvedUrl) => {
-      if (!isMounted) return;
-      if (resolvedUrl && resolvedUrl !== normalized) {
-        setImgSrc(resolvedUrl);
-      }
-    });
-
-    return () => {
-      isMounted = false;
+    const load = () => {
+      if (disposed) return;
+      // Resolve before assigning src so the browser and IPC do not fetch twice.
+      void resolveImageUrl(src).then(url => {
+        if (!disposed) setImage({ source: src, url, loaded: false, error: false });
+      });
     };
-  }, [src]);
+    let observer: IntersectionObserver | undefined;
+    if (loading === 'eager' || typeof IntersectionObserver === 'undefined') {
+      load();
+    } else if (imageRef.current) {
+      observer = new IntersectionObserver(entries => {
+        if (entries.some(entry => entry.isIntersecting)) {
+          observer?.disconnect();
+          load();
+        }
+      }, { rootMargin: '300px' });
+      observer.observe(imageRef.current);
+    }
+    return () => { disposed = true; observer?.disconnect(); };
+  }, [src, loading]);
 
-  if (!src || hasError) {
+  if (!src || current.error) {
     return (
-      <div
-        style={{
-          width: '100%',
-          height: '100%',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: 'linear-gradient(135deg, var(--bg-elevated), var(--bg-surface-2))',
-          color: 'var(--text-muted)',
-          ...(style as React.CSSProperties),
-        }}
-        className={className}
-      >
-        <Film size={fallbackIconSize} />
-      </div>
+      <span role="img" aria-label={alt} className={className} style={{
+        width: '100%', height: '100%', display: 'flex', alignItems: 'center',
+        justifyContent: 'center', background: 'var(--bg-elevated)',
+        color: 'var(--text-muted)', ...style,
+      }}>
+        <Film size={fallbackIconSize} aria-hidden="true" />
+      </span>
     );
   }
 
   return (
-    <img
-      src={imgSrc}
-      alt={alt}
-      loading="eager"
-      decoding="async"
-      style={{
-        ...style,
-        opacity: isLoaded ? 1 : 0.85,
-        transition: isLoaded ? 'none' : 'opacity 0.15s ease',
+    <img {...props} ref={imageRef} src={current.url} alt={alt} loading={loading} decoding="async"
+      style={{ ...style, opacity: current.loaded ? 1 : 0.85 }} className={className}
+      onLoad={event => {
+        setImage(previous => previous.source === src ? { ...previous, loaded: true } : previous);
+        onLoad?.(event);
       }}
-      className={className}
-      onLoad={() => {
-        setIsLoaded(true);
-        hasLoadedRef.current = true;
+      onError={event => {
+        setImage(previous => previous.source !== src ? previous : previous.url !== src
+          ? { ...previous, url: src, loaded: false }
+          : { ...previous, error: true });
+        onError?.(event);
       }}
-      onError={() => {
-        if (imgSrc !== src) {
-          setImgSrc(src);
-        } else {
-          setHasError(true);
-        }
-      }}
-      {...props}
     />
   );
 }

@@ -28,7 +28,8 @@ data class DetailsUiState(
     val isResolvingStream: Boolean = false,
     val selectedServer: NativeVideoServer? = null,
     val error: String? = null,
-    val resumeEpisode: NativeEpisode? = null
+    val resumeEpisode: NativeEpisode? = null,
+    val resumeLabel: String = "Sin episodios"
 )
 
 class DetailsViewModel(
@@ -50,23 +51,16 @@ class DetailsViewModel(
     @OptIn(ExperimentalCoroutinesApi::class)
     private fun observeProgress() { viewModelScope.launch {
         profileRepository.getActiveProfile()
-        profileRepository.activeProfile.filterNotNull().flatMapLatest { historyRepository.getHistoryForProfile(it.id) }.collect { rows ->
+        profileRepository.activeProfile.filterNotNull().flatMapLatest { profile ->
+            historyRepository.getHistoryForProfile(profile.id).map { profile.id to it }
+        }.collect { (profileId, rows) ->
             val details = _uiState.value.details ?: return@collect
-            val enriched = details.copy(episodes = enrich(details, rows))
-            _uiState.update { it.copy(details = enriched, resumeEpisode = resumeEpisode(enriched, rows)) }
+            val enriched = details.copy(episodes = enrichDetailsEpisodes(details, rows, profileId))
+            val action = detailsPlaybackAction(enriched, rows, profileId)
+            _uiState.update { it.copy(details = enriched, resumeEpisode = action?.episode, resumeLabel = action?.label ?: "Sin episodios") }
         }
     } }
     init { observeProgress() }
-    private fun enrich(details: NativeAnimeDetails, rows: List<com.anics.nativeapp.data.local.HistoryEntity>): List<NativeEpisode> = details.episodes.map { ep ->
-        val saved = rows.firstOrNull { it.episodeUrl == ep.url } ?: rows.firstOrNull { it.episodeNumber == ep.number.toInt() && com.anics.nativeapp.sync.SyncContract.titleKey(it.animeTitle) == com.anics.nativeapp.sync.SyncContract.titleKey(details.title) }
-        ep.copy(watched = saved?.completed ?: false, watchProgress = saved?.watchProgress ?: saved?.let { if (it.durationSeconds > 0) it.progressSeconds.toDouble() / it.durationSeconds else null })
-    }
-    private fun resumeEpisode(details: NativeAnimeDetails, rows: List<com.anics.nativeapp.data.local.HistoryEntity>): NativeEpisode? {
-        val last = rows.filter { com.anics.nativeapp.sync.SyncContract.titleKey(it.animeTitle) == com.anics.nativeapp.sync.SyncContract.titleKey(details.title) }.maxByOrNull { it.lastWatchedAt }
-        if (last == null) return details.episodes.minByOrNull { it.number }
-        if (last.completed) details.episodes.filter { it.number.toInt() > last.episodeNumber && !it.watched }.minByOrNull { it.number }?.let { return it }
-        return details.episodes.firstOrNull { it.number.toInt() == last.episodeNumber } ?: details.episodes.minByOrNull { it.number }
-    }
 
     fun loadAnimeDetails(url: String, source: String) {
         currentUrl = url
@@ -86,12 +80,18 @@ class DetailsViewModel(
 
                 // Enriquecer episodios con progreso del historial local
                 val rows = historyRepository.getHistoryForProfile(activeProfile.id).first()
-                val enrichedEpisodes = enrich(details, rows)
+                val enrichedEpisodes = enrichDetailsEpisodes(details, rows, activeProfile.id)
+                val action = detailsPlaybackAction(details, rows, activeProfile.id)
+                if (profileRepository.getActiveProfile().id != activeProfile.id) {
+                    loadAnimeDetails(url, source)
+                    return@launch
+                }
 
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
                     details = details.copy(episodes = enrichedEpisodes),
-                    resumeEpisode = resumeEpisode(details.copy(episodes = enrichedEpisodes), rows),
+                    resumeEpisode = action?.episode,
+                    resumeLabel = action?.label ?: "Sin episodios",
                     isFavorite = isFav,
                     error = null
                 )

@@ -1,3 +1,4 @@
+import { RouteErrorBoundary } from '@/components/ErrorBoundary';
 import { Outlet } from 'react-router-dom';
 import { useResponsive } from '@/hooks/useResponsive';
 import { DesktopSidebar } from './DesktopSidebar';
@@ -36,7 +37,7 @@ export function AppShell() {
           overflowX: 'hidden',
           WebkitOverflowScrolling: 'touch' as any,
         }}>
-          <Outlet />
+          <RouteErrorBoundary><Outlet /></RouteErrorBoundary>
         </div>
       </main>
 

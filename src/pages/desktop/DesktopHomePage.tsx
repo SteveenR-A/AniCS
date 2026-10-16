@@ -9,12 +9,15 @@ import type { AnimeResult } from '@/types';
 
 function AnimeCard({ anime, onClick }: { anime: AnimeResult; onClick: () => void }) {
   return (
-    <motion.div
+    <motion.button
       className="desktop-anime-card"
       whileHover={{ y: -5, scale: 1.02 }}
       whileTap={{ scale: 0.98 }}
+      type="button"
+      aria-label={`Ver detalles de ${anime.title}`}
       onClick={onClick}
       style={{
+        padding: 0, textAlign: 'left', font: 'inherit', width: '100%', display: 'block',
         background: 'var(--bg-surface)',
         borderRadius: 'var(--radius-lg)',
         overflow: 'hidden',
@@ -25,7 +28,7 @@ function AnimeCard({ anime, onClick }: { anime: AnimeResult; onClick: () => void
         boxShadow: 'var(--shadow-card)',
       }}
     >
-      <div style={{ position: 'relative', paddingBottom: '140%', background: 'var(--bg-elevated)' }}>
+      <span style={{ display: 'block', position: 'relative', paddingBottom: '140%', background: 'var(--bg-elevated)' }}>
         <CachedImage
           src={anime.thumbnailUrl}
           alt={anime.title}
@@ -34,13 +37,13 @@ function AnimeCard({ anime, onClick }: { anime: AnimeResult; onClick: () => void
           style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
         />
 
-        <div style={{
+        <span style={{
           position: 'absolute', bottom: 0, left: 0, right: 0, height: '50%',
           background: 'linear-gradient(to top, rgba(10,11,15,0.95), transparent)',
         }} />
 
         {anime.episode && anime.episode.toLowerCase().trim() !== 'donghua' && (
-          <div style={{
+          <span style={{
             position: 'absolute', top: 10, right: 10,
             background: 'var(--accent-primary)',
             color: 'white', fontSize: 11, fontWeight: 700,
@@ -48,11 +51,11 @@ function AnimeCard({ anime, onClick }: { anime: AnimeResult; onClick: () => void
             boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
           }}>
             {anime.episode.toLowerCase().startsWith('ep') ? anime.episode : `Ep ${anime.episode}`}
-          </div>
+          </span>
         )}
 
         {anime.animeType && (
-          <div style={{
+          <span style={{
             position: 'absolute', top: 10, left: 10,
             background: anime.animeType === 'Donghua' ? 'var(--accent-secondary)' : 'rgba(10,11,15,0.75)',
             color: 'white', fontSize: 10, fontWeight: 600,
@@ -61,21 +64,21 @@ function AnimeCard({ anime, onClick }: { anime: AnimeResult; onClick: () => void
             border: '1px solid rgba(255,255,255,0.15)',
           }}>
             {anime.animeType}
-          </div>
+          </span>
         )}
-      </div>
+      </span>
 
-      <div style={{ padding: '12px 14px 14px' }}>
-        <p style={{
+      <span style={{ display: 'block', padding: '12px 14px 14px' }}>
+        <span style={{
           fontSize: 13, fontWeight: 700, color: 'var(--text-primary)',
           lineHeight: 1.35, overflow: 'hidden',
           display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
           margin: 0,
         }}>
           {anime.title}
-        </p>
-      </div>
-    </motion.div>
+        </span>
+      </span>
+    </motion.button>
   );
 }
 

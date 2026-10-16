@@ -1,3 +1,4 @@
+import { PageLoading } from '@/components/PageLoading';
 import { lazy, Suspense } from "react";
 import { useResponsive } from "@/hooks/useResponsive";
 
@@ -7,7 +8,7 @@ const MobileSearchPage = lazy(() => import("./mobile/MobileSearchPage").then(m =
 export function SearchPage() {
   const { isMobile } = useResponsive();
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={<PageLoading />}>
       {isMobile ? <MobileSearchPage /> : <DesktopSearchPage />}
     </Suspense>
   );

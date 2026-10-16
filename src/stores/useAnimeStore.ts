@@ -341,7 +341,8 @@ export const useAnimeStore = create<AnimeStore>((set, get) => ({
   },
 
   preloadImages: (animes) => {
-    const urls = animes.map((a) => a.thumbnailUrl).filter(Boolean) as string[];
+    // Warm only the first visible row; CachedImage resolves the rest on approach.
+    const urls = [...new Set(animes.map(a => a.thumbnailUrl).filter(Boolean))].slice(0, 6) as string[];
     if (urls.length > 0) {
       preloadImagesBatch(urls)
         .then((batch) => {

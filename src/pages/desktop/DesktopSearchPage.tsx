@@ -1,3 +1,4 @@
+import { SearchError } from '@/components/SearchError';
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -15,7 +16,9 @@ import type { AnimeResult, SearchFilters } from '@/types';
 
 function ResultCard({ anime, onClick }: { anime: AnimeResult; onClick: () => void }) {
   return (
-    <motion.div
+    <motion.button
+      type="button"
+      aria-label={`Ver detalles de ${anime.title}`}
       layout
       initial={{ opacity: 0, scale: 0.95 }}
       animate={{ opacity: 1, scale: 1 }}
@@ -24,6 +27,7 @@ function ResultCard({ anime, onClick }: { anime: AnimeResult; onClick: () => voi
       whileTap={{ scale: 0.98 }}
       onClick={onClick}
       style={{
+        padding: 0, textAlign: 'left', font: 'inherit', width: '100%',
         background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)',
         overflow: 'hidden', cursor: 'pointer',
         border: '1px solid var(--border-subtle)',
@@ -33,14 +37,14 @@ function ResultCard({ anime, onClick }: { anime: AnimeResult; onClick: () => voi
         transition: 'border-color var(--transition-fast)',
       }}
     >
-      <div style={{ position: 'relative', paddingBottom: '140%', background: 'var(--bg-elevated)' }}>
+      <span style={{ display: 'block', position: 'relative', paddingBottom: '140%', background: 'var(--bg-elevated)' }}>
         <CachedImage
           src={anime.thumbnailUrl}
           alt={anime.title}
           fallbackIconSize={36}
           style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
         />
-        <div style={{
+        <span style={{
           position: 'absolute', inset: 0,
           background: 'linear-gradient(to top, rgba(10,11,15,0.95) 0%, transparent 60%)',
         }} />
@@ -80,19 +84,19 @@ function ResultCard({ anime, onClick }: { anime: AnimeResult; onClick: () => voi
             Ep. {anime.episode}
           </span>
         )}
-      </div>
+      </span>
 
-      <div style={{ padding: '12px 14px 14px' }}>
-        <h4 style={{
+      <span style={{ display: 'block', padding: '12px 14px 14px' }}>
+        <span style={{
           fontSize: 13, fontWeight: 700, lineHeight: 1.35,
           overflow: 'hidden', textOverflow: 'ellipsis',
           display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
           margin: 0, color: 'var(--text-primary)',
         }}>
           {anime.title}
-        </h4>
-      </div>
-    </motion.div>
+        </span>
+      </span>
+    </motion.button>
   );
 }
 
@@ -118,6 +122,7 @@ export function DesktopSearchPage() {
   const urlYear = searchParams.get('year') ?? '';
   const urlOrder = searchParams.get('order') ?? '';
 
+  const [searchFailed, setSearchFailed] = useState(false);
   const [query, setQuery] = useState(urlQ);
   const [selectedGenre, setSelectedGenre] = useState<string>(urlGenre);
   const [selectedStatus, setSelectedStatus] = useState<string>(urlStatus);
@@ -180,6 +185,7 @@ export function DesktopSearchPage() {
   ) => {
     const currentSource = activeSource;
     const request = startRequest();
+    setSearchFailed(false);
     setIsSearching(true);
 
     try {
@@ -226,7 +232,7 @@ export function DesktopSearchPage() {
       if (!request.isLatest()) return;
       console.error('Search execution failed', e);
       if (useAnimeStore.getState().activeSource === currentSource) {
-        setSearchResults([], q, currentSource);
+        setSearchFailed(true);
         setTotalPages(undefined);
         setHasNextPage(false);
       }
@@ -288,6 +294,9 @@ export function DesktopSearchPage() {
   }, [activeSource, urlQ, urlGenre, urlStatus, urlType, urlYear, urlOrder, urlPage, getSearchSession, setSearchResults, syncUrlParams, executeSearch]);
 
   const handleInput = (val: string) => {
+    cancelSearch();
+    setIsSearching(false);
+    setSearchFailed(false);
     setQuery(val);
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
@@ -347,6 +356,7 @@ export function DesktopSearchPage() {
   };
 
   const handleResetFilters = () => {
+    setSearchFailed(false);
     if (debounceRef.current) clearTimeout(debounceRef.current);
     setQuery('');
     setSelectedGenre('');
@@ -397,6 +407,7 @@ export function DesktopSearchPage() {
           <Search size={18} color="var(--text-muted)" />
           <input
             type="text"
+            aria-label="Buscar anime por título"
             value={query}
             onChange={(e) => handleInput(e.target.value)}
             placeholder="Buscar anime por título (ej. Naruto, Solo Leveling, Jujutsu Kaisen)..."
@@ -407,7 +418,9 @@ export function DesktopSearchPage() {
           />
           {query && (
             <button
+              aria-label="Borrar texto"
               onClick={() => {
+                clearTimeout(debounceRef.current);
                 setQuery('');
                 syncUrlParams('', selectedGenre, selectedStatus, selectedType, selectedYear, selectedOrder, 1);
                 executeSearch('', selectedGenre, selectedStatus, selectedType, selectedYear, selectedOrder, 1);
@@ -453,6 +466,8 @@ export function DesktopSearchPage() {
 
         {/* Botón Filtros Desktop */}
         <button
+          aria-label="Filtros de búsqueda"
+          aria-expanded={showFilters}
           onClick={() => setShowFilters(!showFilters)}
           style={{
             background: activeFilterCount > 0
@@ -615,17 +630,19 @@ export function DesktopSearchPage() {
                 fontSize: 12, color: 'var(--text-secondary)',
               }}
             >
-              <span
+              <button
+                type="button"
                 onClick={() => {
                   setQuery(term);
                   syncUrlParams(term, selectedGenre, selectedStatus, selectedType, selectedYear, selectedOrder, 1);
                   executeSearch(term, selectedGenre, selectedStatus, selectedType, selectedYear, selectedOrder, 1);
                 }}
-                style={{ cursor: 'pointer', fontWeight: 600 }}
+                style={{ cursor: 'pointer', fontWeight: 600, background: 'none', border: 0, color: 'inherit', font: 'inherit' }}
               >
                 {term}
-              </span>
+              </button>
               <button
+                aria-label={`Eliminar búsqueda ${term}`}
                 onClick={(e) => { e.stopPropagation(); removeRecentSearch(term); }}
                 style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 0, display: 'flex' }}
               >
@@ -859,6 +876,7 @@ export function DesktopSearchPage() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>Año:</span>
                 <select
+                  aria-label="Año de estreno"
                   value={selectedYear}
                   onChange={(e) => handleYearChange(e.target.value)}
                   style={{
@@ -878,6 +896,7 @@ export function DesktopSearchPage() {
               <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>Orden:</span>
                 <select
+                  aria-label="Orden de resultados"
                   value={selectedOrder}
                   onChange={(e) => handleOrderChange(e.target.value)}
                   style={{
@@ -897,9 +916,14 @@ export function DesktopSearchPage() {
         )}
       </AnimatePresence>
 
+      <p className="sr-only" role="status" aria-live="polite">
+        {isSearching ? 'Buscando…' : searchFailed ? '' : `${searchResults.length} resultados cargados.`}
+      </p>
       {/* Resultados Desktop */}
-      {isSearching && searchResults.length === 0 ? (
-        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '100px 0', flexDirection: 'column', gap: 14 }}>
+      {searchFailed ? (
+        <SearchError onRetry={() => executeSearch(query, selectedGenre, selectedStatus, selectedType, selectedYear, selectedOrder, urlPage)} />
+      ) : isSearching && searchResults.length === 0 ? (
+        <div role="status" aria-live="polite" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '100px 0', flexDirection: 'column', gap: 14 }}>
           <Loader2 size={40} className="animate-spin" color="var(--accent-primary)" />
           <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>Explorando catálogo...</p>
         </div>

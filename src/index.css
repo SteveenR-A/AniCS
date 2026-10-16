@@ -1,5 +1,20 @@
 @import "tailwindcss";
 
+@font-face {
+  font-family: 'Inter';
+  src: url('/fonts/Inter-Variable.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Outfit';
+  src: url('/fonts/Outfit-Variable.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+}
+
 /* ─── Base / Default Dark Theme (Neon Slate) ───────── */
 :root, [data-theme="dark"] {
   --bg-base: #0a0b0f;
@@ -566,4 +581,36 @@ html[data-graphics="compatible"] .desktop-anime-card {
   contain: layout style paint;
   box-shadow: none !important;
   transition-property: background-color, border-color !important;
+}
+
+/* Keyboard focus must remain visible even on controls with inline outlines. */
+:where(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent-primary) !important;
+  outline-offset: 3px;
+}
+
+.page-loading { padding: 24px; width: 100%; }
+.page-loading-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 16px; margin-top: 18px;
+}
+.page-loading-grid > div { height: 180px; }
+.screen-error {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 16px; padding: 48px 24px; text-align: center; min-height: 240px;
+  color: var(--text-primary); background: var(--bg-base);
+}
+.screen-error-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; }
+.screen-error button {
+  padding: 10px 16px; border: 1px solid var(--border-moderate);
+  border-radius: var(--radius-md); background: var(--bg-elevated);
+  color: var(--text-primary); font: inherit; cursor: pointer;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important; animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

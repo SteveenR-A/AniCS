@@ -12,7 +12,7 @@ vi.mock('@/stores/useAnimeStore', () => ({ useAnimeStore: () => ({ getCachedDeta
 }), cacheDetails: vi.fn() }) }));
 vi.mock('@/stores/useProfileStore', () => ({ useProfileStore: () => ({ activeProfile: { id: 'default' } }) }));
 vi.mock('@/stores/useSubscriptionStore', () => ({ useSubscriptionStore: () => ({ isVip: true, openModal: vi.fn() }) }));
-vi.mock('@/services/storageService', () => ({ isFavorite: async () => false, getHistory: async () => [],
+vi.mock('@/services/storageService', () => ({ isFavorite: async () => false, getHistory: async () => [], getAllHistory: async () => [],
   getFavorites: async () => [], addFavorite: vi.fn(), removeFavorite: vi.fn(), updateFavoriteStatus: vi.fn() }));
 vi.mock('@/services/downloadService', async importOriginal => ({
   ...await importOriginal<typeof import('@/services/downloadService')>(), scanLocalDownloads: vi.fn(), saveLocalAnimeCover: async () => '',

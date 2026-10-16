@@ -1,3 +1,4 @@
+import { useAnimeHistory } from '@/hooks/useAnimeHistory';
 import { useEffect, useState } from 'react';
 import { useParams, useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -8,7 +9,7 @@ import {
   Calendar, Layers, Tag, Tv, Globe, Sparkles, Clock, DownloadCloud, Crown, Lock
 } from 'lucide-react';
 import { getDetails, getServers, resolveStream } from '@/services/animeService';
-import { addFavorite, removeFavorite, isFavorite as checkFavorite, getHistory, getFavorites, updateFavoriteStatus } from '@/services/storageService';
+import { addFavorite, removeFavorite, isFavorite as checkFavorite, getFavorites, updateFavoriteStatus } from '@/services/storageService';
 import { startDownload, scanLocalDownloads, saveLocalAnimeCover, getLocalMediaUrl } from '@/services/downloadService';
 import { usePlayerStore } from '@/stores/usePlayerStore';
 import { useAnimeStore } from '@/stores/useAnimeStore';
@@ -80,7 +81,6 @@ export function DesktopDetailsPage() {
 
   // Sincronización con Descargas Locales e Historial de Visualización
   const [localEpisodesMap, setLocalEpisodesMap] = useState<Map<number, LocalEpisodeItem>>(new Map());
-  const [historyMap, setHistoryMap] = useState<Map<number, number>>(new Map());
 
   // Modal de descarga
   const [downloadModalEp, setDownloadModalEp] = useState<Episode | null>(null);
@@ -94,6 +94,8 @@ export function DesktopDetailsPage() {
     openPlayer, setCurrentEpisode, setCurrentAnime, setServers, setResolvedMedia, resetPlayback
   } = usePlayerStore();
   const { activeProfile } = useProfileStore();
+  const { progress: historyMap, action: playbackAction, isLoading: isLoadingHistory,
+    error: historyError, refresh: refreshHistory } = useAnimeHistory(details, activeProfile?.id || 'default');
 
   useEffect(() => {
     let isCancelled = false;
@@ -215,7 +217,7 @@ export function DesktopDetailsPage() {
     };
   }, [decodedUrl, source, activeProfile?.id]);
 
-  // Sincronizar descargas locales e historial cada vez que cambien los detalles del anime
+  // Sincronizar descargas locales cada vez que cambien los detalles del anime
   useEffect(() => {
     if (!details?.title) return;
     let disposed = false;
@@ -223,7 +225,7 @@ export function DesktopDetailsPage() {
     let refreshTimer: ReturnType<typeof setTimeout> | undefined;
     setLocalEpisodesMap(new Map());
 
-    // 1. Sincronizar episodios descargados en disco con validación estricta de temporada
+    // Sincronizar episodios descargados en disco con validación estricta de temporada
     const refreshDownloads = () => {
       const current = ++request;
       scanLocalDownloads().then((folders) => {
@@ -258,22 +260,6 @@ export function DesktopDetailsPage() {
     });
     window.addEventListener('focus', refreshDownloads);
 
-    // 2. Sincronizar progreso de visualización de SQLite priorizando URL única de anime
-    getHistory(500, 0, activeProfile?.id).then((history) => {
-      if (disposed) return;
-      const map = new Map<number, number>();
-      for (const h of history) {
-        const isUrlMatch = Boolean(h.animeUrl && details.url && h.animeUrl === details.url);
-        const isTitleMatch = strictTitlesMatch(h.animeTitle, details.title);
-
-        if (isUrlMatch || isTitleMatch) {
-          if (!map.has(h.episodeNumber)) {
-            map.set(h.episodeNumber, h.watchProgress);
-          }
-        }
-      }
-      setHistoryMap(map);
-    }).catch(console.error);
     return () => {
       disposed = true;
       ++request;
@@ -746,7 +732,9 @@ export function DesktopDetailsPage() {
             <motion.button
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.97 }}
-              onClick={() => handlePlayEpisode(details.episodes[0])}
+              disabled={isLoadingHistory || loadingEpisode !== null}
+              aria-busy={isLoadingHistory}
+              onClick={() => historyError ? refreshHistory() : playbackAction && handlePlayEpisode(playbackAction.episode)}
               style={{
                 background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))',
                 color: 'white', border: 'none', borderRadius: 'var(--radius-lg)',
@@ -755,7 +743,7 @@ export function DesktopDetailsPage() {
                 boxShadow: 'var(--shadow-glow)',
               }}
             >
-              <Play size={18} fill="white" /> Reproducir Ep. {details.episodes[0].number}
+              <Play size={18} fill="white" /> {isLoadingHistory ? 'Cargando historial…' : historyError ? 'Reintentar historial' : playbackAction?.label}
             </motion.button>
           )}
 

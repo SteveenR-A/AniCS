@@ -9,10 +9,13 @@ import type { AnimeResult } from '@/types';
 
 function MobileAnimeCard({ anime, onClick }: { anime: AnimeResult; onClick: () => void }) {
   return (
-    <motion.div
+    <motion.button
       whileTap={{ scale: 0.96 }}
+      type="button"
+      aria-label={`Ver detalles de ${anime.title}`}
       onClick={onClick}
       style={{
+        padding: 0, textAlign: 'left', font: 'inherit', width: '100%', display: 'block',
         background: 'var(--bg-surface)',
         borderRadius: 'var(--radius-lg)',
         overflow: 'hidden',
@@ -21,7 +24,7 @@ function MobileAnimeCard({ anime, onClick }: { anime: AnimeResult; onClick: () =
         position: 'relative',
       }}
     >
-      <div style={{ position: 'relative', paddingBottom: '140%', background: 'var(--bg-elevated)' }}>
+      <span style={{ display: 'block', position: 'relative', paddingBottom: '140%', background: 'var(--bg-elevated)' }}>
         <CachedImage
           src={anime.thumbnailUrl}
           alt={anime.title}
@@ -29,24 +32,24 @@ function MobileAnimeCard({ anime, onClick }: { anime: AnimeResult; onClick: () =
           style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
         />
 
-        <div style={{
+        <span style={{
           position: 'absolute', bottom: 0, left: 0, right: 0, height: '50%',
           background: 'linear-gradient(to top, rgba(10,11,15,0.95), transparent)',
         }} />
 
         {anime.episode && anime.episode.toLowerCase().trim() !== 'donghua' && (
-          <div style={{
+          <span style={{
             position: 'absolute', top: 6, right: 6,
             background: 'var(--accent-primary)',
             color: 'white', fontSize: 10, fontWeight: 700,
             padding: '2px 7px', borderRadius: 'var(--radius-full)',
           }}>
             {anime.episode.toLowerCase().startsWith('ep') ? anime.episode : `Ep ${anime.episode}`}
-          </div>
+          </span>
         )}
 
         {anime.animeType && (
-          <div style={{
+          <span style={{
             position: 'absolute', top: 6, left: 6,
             background: anime.animeType === 'Donghua' ? 'var(--accent-secondary)' : 'rgba(10,11,15,0.75)',
             color: 'white', fontSize: 9, fontWeight: 600,
@@ -54,21 +57,21 @@ function MobileAnimeCard({ anime, onClick }: { anime: AnimeResult; onClick: () =
             backdropFilter: 'blur(6px)',
           }}>
             {anime.animeType}
-          </div>
+          </span>
         )}
-      </div>
+      </span>
 
-      <div style={{ padding: '8px 10px 10px' }}>
-        <p style={{
+      <span style={{ display: 'block', padding: '8px 10px 10px' }}>
+        <span style={{
           fontSize: 12, fontWeight: 600, color: 'var(--text-primary)',
           lineHeight: 1.25, overflow: 'hidden',
           display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
           margin: 0,
         }}>
           {anime.title}
-        </p>
-      </div>
-    </motion.div>
+        </span>
+      </span>
+    </motion.button>
   );
 }
 

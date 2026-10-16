@@ -1,3 +1,5 @@
+import { usePlayerTimeline } from '@/hooks/usePlayerTimeline';
+import { usePlaybackWakeLock } from '@/hooks/usePlaybackWakeLock';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import Hls from 'hls.js';
@@ -200,71 +202,11 @@ export function PlayerPage() {
   const [doubleTapSide, setDoubleTapSide] = useState<'left' | 'right' | 'center' | null>(null);
   const [doubleTapAction, setDoubleTapAction] = useState<'pause' | 'play' | null>(null);
 
-  // Timeline scrubbing (desplazamiento continuo estilo mpv con puntero táctil/ratón)
-  const [isScrubbing, setIsScrubbing] = useState(false);
-  const [scrubTime, setScrubTime] = useState<number | null>(null);
-  const [hoverPosition, setHoverPosition] = useState<{ x: number; time: number; percent: number } | null>(null);
-  const progressBarRef = useRef<HTMLDivElement>(null);
-
-  const calculateSeekTime = useCallback((clientX: number) => {
-    if (!progressBarRef.current || !duration || duration <= 0) return { time: 0, percent: 0, x: 0 };
-    const rect = progressBarRef.current.getBoundingClientRect();
-    const x = Math.max(0, Math.min(rect.width, clientX - rect.left));
-    const percent = rect.width > 0 ? (x / rect.width) * 100 : 0;
-    const time = Math.max(0, Math.min(duration, (percent / 100) * duration));
-    return { time, percent, x };
-  }, [duration]);
-
-  const handleProgressBarPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    e.stopPropagation();
-    try {
-      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    } catch {}
-    const { time, percent, x } = calculateSeekTime(e.clientX);
-    setIsScrubbing(true);
-    setScrubTime(time);
-    setPlaybackTime(time);
-    if (videoRef.current) {
-      videoRef.current.currentTime = time;
-    }
-    setHoverPosition({ x, time, percent });
-  };
-
-  const handleProgressBarPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    const { time, percent, x } = calculateSeekTime(e.clientX);
-    if (isScrubbing) {
-      setScrubTime(time);
-      setPlaybackTime(time);
-      if (videoRef.current) {
-        videoRef.current.currentTime = time;
-      }
-      setHoverPosition({ x, time, percent });
-    } else {
-      setHoverPosition({ x, time, percent });
-    }
-  };
-
-  const handleProgressBarPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
-    try {
-      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-    } catch {}
-    if (isScrubbing) {
-      const { time } = calculateSeekTime(e.clientX);
-      if (videoRef.current) {
-        videoRef.current.currentTime = time;
-      }
-      setPlaybackTime(time);
-      setIsScrubbing(false);
-      setScrubTime(null);
-      saveProgress();
-    }
-  };
-
-  const handleProgressBarPointerLeave = () => {
-    if (!isScrubbing) {
-      setHoverPosition(null);
-    }
-  };
+  const {
+    isScrubbing, scrubTime, hoverPosition, progressBarRef,
+    handleProgressBarPointerDown, handleProgressBarPointerMove,
+    handleProgressBarPointerUp, handleProgressBarPointerLeave,
+  } = usePlayerTimeline({ duration, videoRef, setPlaybackTime, onSeekEnd: () => saveProgress() });
 
   const showToast = (toast: { icon: 'volume' | 'brightness' | 'seek' | 'aspect' | 'vip' | 'external' | 'server'; text: string; value?: number }) => {
     setHudToast(toast);
@@ -359,57 +301,7 @@ export function PlayerPage() {
     };
   }, [enterFullscreen, exitFullscreen]);
 
-  // Screen Wake Lock y mantenimiento de pantalla activa estrictamente reactivo a isPlaying
-  const wakeLockSentinelRef = useRef<any>(null);
-
-  useEffect(() => {
-    let isSubscribed = true;
-
-    const updateScreenLock = async () => {
-      if (isPlaying && document.visibilityState === 'visible') {
-        setKeepScreenOn(true);
-        try {
-          if ('wakeLock' in navigator && !wakeLockSentinelRef.current) {
-            const sentinel = await (navigator as any).wakeLock.request('screen');
-            if (isSubscribed) {
-              wakeLockSentinelRef.current = sentinel;
-              sentinel.addEventListener?.('release', () => {
-                if (wakeLockSentinelRef.current === sentinel) {
-                  wakeLockSentinelRef.current = null;
-                }
-              });
-            } else {
-              sentinel.release().catch(() => {});
-            }
-          }
-        } catch {}
-      } else {
-        setKeepScreenOn(false);
-        if (wakeLockSentinelRef.current && typeof wakeLockSentinelRef.current.release === 'function') {
-          wakeLockSentinelRef.current.release().catch(() => {});
-          wakeLockSentinelRef.current = null;
-        }
-      }
-    };
-
-    updateScreenLock();
-
-    const handleVisibilityChange = () => {
-      updateScreenLock();
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    return () => {
-      isSubscribed = false;
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      setKeepScreenOn(false);
-      if (wakeLockSentinelRef.current && typeof wakeLockSentinelRef.current.release === 'function') {
-        wakeLockSentinelRef.current.release().catch(() => {});
-        wakeLockSentinelRef.current = null;
-      }
-    };
-  }, [isPlaying]);
+  usePlaybackWakeLock(isPlaying);
 
   // Sincronización precisa de Anime y Episodio desde URL (sin mezclar animes previos)
   const failedServersRef = useRef<Set<string>>(new Set());

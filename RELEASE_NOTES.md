@@ -1,18 +1,16 @@
-# AniCS v0.3.14 — Descargas, perfiles y compatibilidad Linux
+# AniCS v0.3.15 — Continuación por historial y mejoras de experiencia
 
-**Fecha de lanzamiento:** 2026-10-11
+**Fecha de lanzamiento:** 2026-10-16
 
 ### Novedades y correcciones
 
-- Descargas de escritorio con progreso visible, avisos y estado actualizado de episodios guardados.
-- Administrador de perfiles de escritorio con fotos, recorte y exportación de avatares.
-- Correcciones de portadas locales, ventanas en Hyprland y diagnóstico de componentes de video en Linux.
-- Recuperación limitada de errores HLS y opción de reintento para videos locales.
-- Carga de géneros por proveedor sin solicitudes duplicadas y mayor consistencia del historial de descargas.
-- Distribución Linux con AppImage y DEB, instalador local y selección de actualizaciones según plataforma.
-- Android nativo: permitir apagar la pantalla al pausar y selector de episodios más compacto.
-- Android nativo: descarga de actualizaciones protegida en segundo plano al apagar la pantalla, con notificación de progreso.
-- Seguridad: actualización de Rustls y source-map-js y parche compatible de GLib para los tres avisos de Dependabot.
+- Continuación inteligente por historial y perfil activo en PC, Android Tauri y Android Kotlin.
+- Ficha técnica en Android Kotlin con episodios, estudio, duración, emisión y audio.
+- Búsquedas con errores diferenciados, reintentos y protección frente a respuestas antiguas.
+- Indicadores de carga y recuperación de errores por pantalla sin reiniciar toda la aplicación.
+- Portadas bajo demanda, caché limitada por tamaño y fuentes locales para uso sin conexión.
+- Mejoras de accesibilidad, navegación por teclado y movimiento reducido.
+- Separación de las pantallas de biblioteca y controles del reproductor para facilitar su mantenimiento.
 
 ---
 *Para ver el historial acumulativo completo de todas las versiones, consulta [CHANGELOG.md](./CHANGELOG.md).*
