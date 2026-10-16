@@ -21,9 +21,11 @@ import { upsertHistory, getEpisodeProgress } from '@/services/storageService';
 import { getLocalMediaUrl, setKeepScreenOn, setNativeFullscreen, setNativeScreenOrientation } from '@/services/downloadService';
 import { useResponsive } from '@/hooks/useResponsive';
 import { rewriteDeadCdnUrl, createRobustHlsLoader } from '@/utils/hlsLoader';
-import { isVipServer, getServerPriority } from '@/utils/serverUtils';
+import { isVipServer, getServerPriority, getServerUnavailableReason } from '@/utils/serverUtils';
 import { usePlaybackServers } from '@/hooks/usePlaybackServers';
 import { ServerSelector } from '@/components/player/ServerSelector';
+import { QualitySelector } from '@/components/player/QualitySelector';
+import { usePlaybackQuality } from '@/hooks/usePlaybackQuality';
 import { CastDialog } from '@/components/player/CastDialog';
 import type { VideoServer } from '@/types';
 
@@ -511,9 +513,8 @@ export function PlayerPage() {
     if (isObsolete()) return false;
 
     const isUserVip = !FEATURE_FLAGS.SHOW_SUBSCRIPTION || isVip;
-    const allowed = isUserVip
-      ? [...candidateServers]
-      : candidateServers.filter(s => !isVipServer(s.name));
+    const playable = candidateServers.filter(server => !getServerUnavailableReason(server));
+    const allowed = isUserVip ? playable : playable.filter(s => !isVipServer(s.name));
 
     if (allowed.length === 0 || isObsolete()) {
       return false;
@@ -717,7 +718,8 @@ export function PlayerPage() {
     let mediaPath = sourceUrl;
     try {
       const url = new URL(sourceUrl);
-      mediaPath = url.pathname === '/video'
+      const proxiedUrl = url.pathname === '/proxy_stream' ? url.searchParams.get('url') : null;
+      mediaPath = proxiedUrl ? new URL(proxiedUrl).pathname : url.pathname === '/video'
         ? url.searchParams.get('path') ?? url.pathname
         : url.pathname;
     } catch { /* Keep the original URL if it cannot be parsed. */ }
@@ -865,6 +867,8 @@ export function PlayerPage() {
       video.load();
     };
   }, [resolvedMedia]);
+
+  const playbackQuality = usePlaybackQuality(videoRef, hlsRef, resolvedMedia, currentEpisode?.url);
 
   // Guardar progreso en el historial de SQLite
   const saveProgress = useCallback((overrideProgress?: number) => {
@@ -1652,11 +1656,11 @@ export function PlayerPage() {
                 alignItems: 'center',
                 justifyContent: 'space-between',
                 gap: isPortrait ? 6 : 12,
-                flexWrap: 'nowrap',
+                flexWrap: 'wrap',
               }}
             >
               {/* Izquierda: Botón Volver + Título del Anime */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: isPortrait ? 8 : 12, minWidth: 0, flex: 1 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: isPortrait ? 8 : 12, minWidth: 0, flex: '1 1 200px' }}>
                 <button
                   onClick={() => {
                     saveProgress();
@@ -1688,7 +1692,7 @@ export function PlayerPage() {
               </div>
 
               {/* Derecha: Estado + Servidor Dropdown + Botón Reload + Episodios + Ajustes */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: isPortrait ? 5 : 8, justifyContent: 'flex-end', flexShrink: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: isPortrait ? 5 : 8, justifyContent: 'flex-end', flexWrap: 'wrap', maxWidth: '100%', flexShrink: 0 }}>
                 {/* Badge de Estado: solo en landscape / pantallas amplias */}
                 {!isPortrait && (
                   <div style={{
@@ -1715,6 +1719,7 @@ export function PlayerPage() {
                   onSelect={handleSelectServer}
                   onAdd={addServer}
                 />
+                <QualitySelector {...playbackQuality} onSelect={playbackQuality.selectLevel} />
                 {isAndroid && <button
                   type="button"
                   data-interactive

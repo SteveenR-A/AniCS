@@ -51,11 +51,12 @@ fn wrap_proxied_stream_if_needed(media: &mut ResolvedMedia) {
     if media.direct_url.starts_with("http://127.0.0.1") || media.direct_url.starts_with("http://localhost") {
         return;
     }
-    let needs_proxy = media.media_type == MediaType::Mp4 && (
+    // Keep Android's remote HLS URLs available to its native casting integrations.
+    let needs_proxy = (cfg!(desktop) && media.media_type == MediaType::Hls) || (media.media_type == MediaType::Mp4 && (
         media.referer.is_some()
         || media.direct_url.contains("mp4upload.com")
         || media.direct_url.contains("cloudwindow-route.com")
-    );
+    ));
     if needs_proxy {
         let referer = media.referer.as_deref();
         media.direct_url = crate::downloader::media_server::get_proxied_stream_url(
@@ -73,10 +74,12 @@ pub async fn resolve_stream(
     _state: State<'_, AppState>,
 ) -> Result<ResolvedMedia, String> {
     let mut media = if let Some(extractor) = create_extractor(&source) {
-        extractor.resolve_stream(&server).await.map_err(|e| e.to_string())?
+        tokio::time::timeout(std::time::Duration::from_secs(25), extractor.resolve_stream(&server))
+            .await.map_err(|_| "El servidor tardó demasiado en responder. Prueba otro servidor.".to_string())?
+            .map_err(|e| e.to_string())?
     } else {
-        anics_core::extractors::resolve_server(&server)
-            .await
+        tokio::time::timeout(std::time::Duration::from_secs(25), anics_core::extractors::resolve_server(&server))
+            .await.map_err(|_| "El servidor tardó demasiado en responder. Prueba otro servidor.".to_string())?
             .map_err(|e| e.to_string())?
     };
     wrap_proxied_stream_if_needed(&mut media);
@@ -88,8 +91,8 @@ pub async fn resolve_stream(
 pub async fn resolve_stream_native(
     server: VideoServer,
 ) -> Result<ResolvedMedia, String> {
-    let mut media = anics_core::extractors::resolve_server(&server)
-        .await
+    let mut media = tokio::time::timeout(std::time::Duration::from_secs(25), anics_core::extractors::resolve_server(&server))
+        .await.map_err(|_| "El servidor tardó demasiado en responder. Prueba otro servidor.".to_string())?
         .map_err(|e| e.to_string())?;
     wrap_proxied_stream_if_needed(&mut media);
     Ok(media)

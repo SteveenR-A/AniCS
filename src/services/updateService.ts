@@ -77,6 +77,11 @@ export async function checkForAppUpdates(
 
     const data: GitHubRelease = await response.json();
     if (data && data.tag_name && isNewVersionAvailable(data.tag_name)) {
+      const platform = getDesktopUpdatePlatform(typeof navigator === 'undefined' ? '' : navigator.userAgent);
+      // Un release de Windows/Android no es una actualización disponible para Linux.
+      if (platform === 'linux' && getDesktopUpdateAssets(data.assets ?? [], platform).length === 0) {
+        return null;
+      }
       if (notifyIfNew && !hasCheckedThisSession) {
         hasCheckedThisSession = true;
 
@@ -93,7 +98,9 @@ export async function checkForAppUpdates(
             if (await isPermissionGranted()) {
               sendNotification({
                 title: 'AniCS · Nueva versión disponible',
-                body: `Versión ${data.tag_name} disponible para actualizar.`,
+                body: platform === 'linux'
+                  ? `Versión ${data.tag_name} disponible. La instalación en Linux es manual desde Ajustes.`
+                  : `Versión ${data.tag_name} disponible para actualizar.`,
               });
             }
           } catch {}

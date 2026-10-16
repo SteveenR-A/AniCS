@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { isNewVersionAvailable, checkForAppUpdates, CURRENT_VERSION, getDesktopUpdateAssets, getDesktopUpdatePlatform } from '../updateService';
+import { showUpdateNotification } from '@/services/downloadService';
 
 vi.mock('@/services/downloadService', () => ({
   showUpdateNotification: vi.fn(),
@@ -47,6 +48,8 @@ describe('updateService', () => {
   describe('checkForAppUpdates', () => {
     beforeEach(() => {
       vi.restoreAllMocks();
+      vi.clearAllMocks();
+      vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Windows NT 10.0');
     });
 
     it('fetches release from GitHub and detects new version', async () => {
@@ -66,6 +69,47 @@ describe('updateService', () => {
 
       const release = await checkForAppUpdates(false);
       expect(release).toEqual(mockRelease);
+    });
+
+    it('does not announce a Windows/Android-only release on Linux', async () => {
+      vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (X11; Linux x86_64)');
+      globalThis.fetch = vi.fn().mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          tag_name: 'v99.0.0',
+          assets: ['AniCS-setup.exe', 'AniCS.apk'].map(name => ({
+            name, browser_download_url: `https://example.com/${name}`, size: 100,
+          })),
+        }),
+      });
+
+      expect(await checkForAppUpdates(true)).toBeNull();
+      expect(showUpdateNotification).not.toHaveBeenCalled();
+    });
+
+    it('still offers a release with Linux packages for manual installation', async () => {
+      vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (X11; Linux x86_64)');
+      const mockRelease = {
+        tag_name: 'v99.0.0',
+        assets: [{ name: 'AniCS_x86_64.AppImage', browser_download_url: 'https://example.com/AniCS.AppImage', size: 100 }],
+      };
+      globalThis.fetch = vi.fn().mockResolvedValueOnce({ ok: true, json: async () => mockRelease });
+
+      expect(await checkForAppUpdates(false)).toEqual(mockRelease);
+    });
+
+    it('does not announce an older published version on Linux', async () => {
+      vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (X11; Linux x86_64)');
+      globalThis.fetch = vi.fn().mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          tag_name: 'v0.0.1',
+          assets: [{ name: 'AniCS_x86_64.AppImage', browser_download_url: 'https://example.com/AniCS.AppImage', size: 100 }],
+        }),
+      });
+
+      expect(await checkForAppUpdates(true)).toBeNull();
+      expect(showUpdateNotification).not.toHaveBeenCalled();
     });
 
     it('returns null if response is not ok', async () => {

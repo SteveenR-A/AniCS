@@ -57,7 +57,7 @@ fn priority(server: &VideoServer) -> u32 {
         83
     } else if name.contains("uqload") || url.contains("uqload") {
         82
-    } else if name.contains("filemoon") || url.contains("filemoon") || url.contains("bysekoze") {
+    } else if name.contains("filemoon") || url.contains("filemoon") || url.contains("bysekoze") || url.contains("bysesukior") {
         81
     } else if name.contains("lulustream") || url.contains("luluvdo") {
         80
@@ -130,6 +130,17 @@ mod tests {
             ordered.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
             vec!["Magi", "CDN"]
         );
+    }
+    #[test]
+    fn web_only_filemoon_mirror_is_excluded_from_download_candidates() {
+        let servers = vec![
+            server("CDN", "https://cdn.test/file.mp4"),
+            server("Filemoon", "https://bysesukior.com/e/123"),
+        ];
+        let ordered = candidates(servers.clone(), None, true).unwrap();
+        assert_eq!(ordered.len(), 1);
+        assert_eq!(ordered[0].name, "CDN");
+        assert!(candidates(servers, Some("Filemoon"), false).is_err());
     }
     #[test]
     fn selected_provider_is_first_even_with_a_different_episode_url() {

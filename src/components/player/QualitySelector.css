@@ -1,0 +1,23 @@
+.player-quality { display: flex; align-items: center; gap: 4px; flex-shrink: 0; max-width: 190px; min-width: 58px; }
+.player-quality select, .player-quality > span {
+  display: block;
+  box-sizing: border-box;
+  height: 34px;
+  padding: 0 8px;
+  border: 1px solid rgba(255, 255, 255, .2);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, .12);
+  color: white;
+  font-size: 11px;
+  line-height: 32px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.player-quality select { cursor: pointer; width: 84px; min-width: 0; }
+.player-quality > span { width: 68px; flex-shrink: 0; text-align: center; }
+.player-quality option { background: #15161c; }
+@media (max-width: 600px) {
+  .player-quality { max-width: 174px; }
+  .player-quality select, .player-quality > span { height: 30px; line-height: 28px; font-size: 10px; }
+}

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getAllSettings, setSetting } from '@/services/storageService';
 import type { VideoServer } from '@/types';
 import { getDirectMediaType } from '@/utils/mediaUrls';
+import { getServerUnavailableReason } from '@/utils/serverUtils';
 
 export interface PlaybackServer extends VideoServer {
   episodeUrl?: string;
@@ -30,7 +31,10 @@ export function mergePlaybackServers(builtIn: VideoServer[], saved: PlaybackServ
     (!entry.episodeUrl || entry.episodeUrl === episodeUrl) && (!entry.source || entry.source === source))]) {
     if (!unique.has(server.url)) unique.set(server.url, server);
   }
-  return [...unique.values()];
+  return [...unique.values()].map(server => ({
+    ...server,
+    unavailableReason: server.unavailableReason ?? getServerUnavailableReason(server),
+  }));
 }
 
 /** Refresh on menu opening/focus, rather than polling during playback. */

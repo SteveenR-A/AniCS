@@ -67,6 +67,15 @@ describe('serverUtils', () => {
       expect(result[3].name).toBe('Vidhide');
     });
 
+    it('keeps supported Filemoon mirrors and prioritizes them above generic servers', () => {
+      const result = maskAndFilterServers([
+        { name: 'Directo', url: 'https://cdn.example.com/video.mp4', isDirect: true },
+        { name: 'Filemoon', url: 'https://bysesukior.com/e/123', isDirect: false },
+      ], false);
+      expect(result.map(server => server.name)).toEqual(['Filemoon', 'Directo']);
+      expect(maskAndFilterServers(result, true)[0].name).toBe('Servidor Respaldo CDN');
+    });
+
     it('masks known server types with clean professional names when forceMask is true', () => {
       const input: VideoServer[] = [
         { name: 'Magi', url: 'https://magi.example.com/hls/1', isDirect: false },
@@ -78,11 +87,11 @@ describe('serverUtils', () => {
       ];
 
       const result = maskAndFilterServers(input, true);
-      expect(result[0].name).toBe('Servidor Dedicado VIP (1080p Ultra HD)');
-      expect(result[1].name).toBe('Servidor Alta Velocidad (1080p)');
+      expect(result[0].name).toBe('Servidor Dedicado VIP');
+      expect(result[1].name).toBe('Servidor Alta Velocidad');
       expect(result[2].name).toBe('Servidor Espejo (MP4 Directo)');
       expect(result[3].name).toBe('Servidor Respaldo CDN');
-      expect(result[4].name).toBe('Servidor Principal HLS (1080p)');
+      expect(result[4].name).toBe('Servidor Principal HLS');
       expect(result[5].name).toBe('Servidor CDN 1');
     });
 

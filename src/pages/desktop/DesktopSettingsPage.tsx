@@ -26,7 +26,7 @@ import { getCacheStats, clearImageCache } from '@/services/downloadService';
 import { getDatabaseStats, optimizeDatabase, resetDatabase, clearHistory, openStorageFolder, type DatabaseStats } from '@/services/storageService';
 import { clearMemoryCache } from '@/components/CachedImage';
 import { DEFAULT_JKANIME, DEFAULT_MUNDODONGHUA, DEFAULT_OTAKUSTV } from '@/services/animeService';
-import { CURRENT_VERSION, getDesktopUpdatePlatform, getDesktopUpdateAssets } from '@/services/updateService';
+import { CURRENT_VERSION, getDesktopUpdatePlatform, getDesktopUpdateAssets, isNewVersionAvailable } from '@/services/updateService';
 import type { ProfileStats } from '@/types';
 
 declare const __APP_COMMIT_HASH__: string;
@@ -304,12 +304,6 @@ export function DesktopSettingsPage() {
     } finally {
       setIsCheckingUpdate(false);
     }
-  };
-
-  const isNewVersionAvailable = (remoteTag: string) => {
-    const cleanRemote = remoteTag.replace(/^v/i, '').trim();
-    const cleanCurrent = CURRENT_VERSION.replace(/^v/i, '').trim();
-    return cleanRemote !== cleanCurrent;
   };
 
   // Perfiles y Sincronización en la Nube
@@ -1290,7 +1284,7 @@ export function DesktopSettingsPage() {
                   <div>
                     <h4 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: '#fff' }}>Catálogo Anime (Respaldo)</h4>
                     <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>
-                      Servidor espejo OtakusTV para alta disponibilidad y contingencia
+                      Catálogo de respaldo
                     </p>
                   </div>
                 </div>
@@ -1934,7 +1928,11 @@ export function DesktopSettingsPage() {
                     background: isNewVersionAvailable(updateInfo.tag_name) ? 'rgba(16, 185, 129, 0.15)' : 'rgba(99, 102, 241, 0.15)',
                     color: isNewVersionAvailable(updateInfo.tag_name) ? 'var(--accent-success)' : 'var(--accent-primary)',
                   }}>
-                    {isNewVersionAvailable(updateInfo.tag_name) ? 'Nueva versión disponible' : 'Misma versión (Reinstalador)'}
+                    {isNewVersionAvailable(updateInfo.tag_name)
+                      ? 'Nueva versión disponible'
+                      : updateInfo.tag_name.replace(/^v/i, '').trim() === CURRENT_VERSION
+                        ? 'Misma versión (Reinstalador)'
+                        : 'Versión publicada anterior a la instalada'}
                   </span>
                 </div>
                 <button
@@ -1985,8 +1983,10 @@ export function DesktopSettingsPage() {
 
               {updatePlatform === 'linux' && (
                 <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 12 }}>
-                  Descarga el paquete para tu distribución e instálalo manualmente. Para AppImage,
-                  dale permiso de ejecución y ábrelo. Si instalaste desde el código fuente, vuelve a ejecutar el instalador de Linux después de actualizar el código.
+                  La actualización en Linux es manual. Si instalaste AniCS con el script de Linux,
+                  actualiza el código del proyecto y ejecuta npm ci y npm run install:linux. Después,
+                  cierra y abre AniCS. Los paquetes de abajo son instalaciones independientes:
+                  abrir un AppImage no reemplaza la app instalada por el script.
                 </p>
               )}
               {getDesktopUpdateAssets(updateInfo.assets, updatePlatform).length === 0 && (

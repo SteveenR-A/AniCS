@@ -42,6 +42,14 @@ pub struct AuthCallbackData {
 }
 
 static PENDING_AUTH: Lazy<Mutex<Option<AuthCallbackData>>> = Lazy::new(|| Mutex::new(None));
+static PROXY_CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
+    reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(45))
+        .build()
+        .expect("Unable to initialize streaming proxy")
+});
 
 /// Compares session credentials without branching on matching bytes.
 pub fn verify_token_constant_time(expected: &[u8], provided: &[u8]) -> bool {
@@ -97,7 +105,10 @@ pub fn get_media_stream_url(file_path: &str) -> String {
 
 /// Genera una URL de proxy de stream remoto compatible con HTML5 <video> y headers personalizados (Referer, User-Agent)
 pub fn get_proxied_stream_url(target_url: &str, referer: Option<&str>) -> String {
-    let port = get_server_port();
+    proxied_stream_url(target_url, referer, get_server_port())
+}
+
+fn proxied_stream_url(target_url: &str, referer: Option<&str>, port: u16) -> String {
     if port > 0 {
         let mut u = format!(
             "http://127.0.0.1:{}/proxy_stream?url={}&token={}",
@@ -113,6 +124,44 @@ pub fn get_proxied_stream_url(target_url: &str, referer: Option<&str>) -> String
     } else {
         target_url.to_string()
     }
+}
+
+fn rewrite_hls_playlist(content: &[u8], base_url: &str, referer: Option<&str>, port: u16) -> Result<Vec<u8>, String> {
+    let base = url::Url::parse(base_url).map_err(|error| error.to_string())?;
+    let mut playlist = m3u8_rs::parse_playlist_res(content).map_err(|error| format!("Invalid HLS playlist: {error:?}"))?;
+    let rewrite = |uri: &mut String| -> Result<(), String> {
+        let target = base.join(uri).map_err(|error| error.to_string())?;
+        if matches!(target.scheme(), "http" | "https") {
+            *uri = proxied_stream_url(target.as_str(), referer, port);
+        }
+        Ok(())
+    };
+    match &mut playlist {
+        m3u8_rs::Playlist::MasterPlaylist(master) => {
+            for variant in &mut master.variants { rewrite(&mut variant.uri)?; }
+            for alternative in &mut master.alternatives {
+                if let Some(uri) = &mut alternative.uri { rewrite(uri)?; }
+            }
+            for key in &mut master.session_key {
+                if let Some(uri) = &mut key.0.uri { rewrite(uri)?; }
+            }
+            for data in &mut master.session_data {
+                if let m3u8_rs::SessionDataField::Uri(uri) = &mut data.field { rewrite(uri)?; }
+            }
+        }
+        m3u8_rs::Playlist::MediaPlaylist(media) => {
+            for segment in &mut media.segments {
+                rewrite(&mut segment.uri)?;
+                if let Some(key) = &mut segment.key {
+                    if let Some(uri) = &mut key.uri { rewrite(uri)?; }
+                }
+                if let Some(map) = &mut segment.map { rewrite(&mut map.uri)?; }
+            }
+        }
+    }
+    let mut output = Vec::new();
+    playlist.write_to(&mut output).map_err(|error| error.to_string())?;
+    Ok(output)
 }
 
 /// Inicia el servidor HTTP de streaming local en segundo plano
@@ -595,6 +644,28 @@ pub fn get_mime_type(path: &PathBuf) -> &'static str {
     }
 }
 
+async fn request_proxy_stream(method: &str, target_url: &str, referer: Option<&str>, range: Option<&str>) -> Result<reqwest::Response, String> {
+    let mut target = target_url.to_string();
+    for _ in 0..=10 {
+        anics_core::url_security::validate_remote_url(&target).await.map_err(|error| error.to_string())?;
+        let mut request = if method == "HEAD" { PROXY_CLIENT.head(&target) } else { PROXY_CLIENT.get(&target) };
+        request = request.header(reqwest::header::USER_AGENT, anics_core::http::USER_AGENTS[0]);
+        if let Some(referer) = referer.filter(|value| !value.trim().is_empty()) {
+            request = request.header(reqwest::header::REFERER, referer);
+        }
+        if let Some(range) = range { request = request.header(reqwest::header::RANGE, range); }
+        let response = request.send().await.map_err(|error| error.to_string())?;
+        if matches!(response.status().as_u16(), 301 | 302 | 303 | 307 | 308) {
+            let location = response.headers().get(reqwest::header::LOCATION)
+                .and_then(|value| value.to_str().ok()).ok_or("Missing redirect location")?;
+            target = response.url().join(location).map_err(|error| error.to_string())?.to_string();
+            continue;
+        }
+        return Ok(response);
+    }
+    Err("Too many streaming redirects".to_string())
+}
+
 async fn handle_proxy_stream(
     stream: &mut TcpStream,
     method: &str,
@@ -639,50 +710,8 @@ async fn handle_proxy_stream(
         return;
     }
 
-    if let Ok(parsed_target) = url::Url::parse(&target_url) {
-        if let Some(host_str) = parsed_target.host_str() {
-            if let Ok(ip) = host_str.parse::<std::net::IpAddr>() {
-                if anics_core::url_security::is_ip_private_or_reserved(&ip) {
-                    let _ = stream.write_all(b"HTTP/1.1 403 Forbidden\r\n\r\nBlocked private target").await;
-                    return;
-                }
-            }
-        }
-    }
-
     let referer = parsed.query_pairs().find(|(k, _)| k == "referer").map(|(_, v)| v.into_owned());
-
-    let client = match reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(45))
-        .build()
-    {
-        Ok(c) => c,
-        Err(_) => {
-            let _ = stream.write_all(b"HTTP/1.1 500 Internal Server Error\r\n\r\n").await;
-            return;
-        }
-    };
-
-    let mut req = if method == "HEAD" {
-        client.head(&target_url)
-    } else {
-        client.get(&target_url)
-    };
-
-    req = req.header(
-        reqwest::header::USER_AGENT,
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    );
-
-    if let Some(ref_str) = referer.as_deref().filter(|s| !s.trim().is_empty()) {
-        req = req.header(reqwest::header::REFERER, ref_str);
-    }
-
-    if let Some(range) = range_header {
-        req = req.header(reqwest::header::RANGE, range);
-    }
-
-    let resp = match req.send().await {
+    let resp = match request_proxy_stream(method, &target_url, referer.as_deref(), range_header).await {
         Ok(r) => r,
         Err(err) => {
             log::warn!("Proxy stream upstream error for {}: {}", target_url, err);
@@ -692,6 +721,39 @@ async fn handle_proxy_stream(
     };
 
     let status = resp.status();
+    let is_playlist = resp.url().path().to_ascii_lowercase().ends_with(".m3u8")
+        || resp.headers().get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.to_ascii_lowercase().contains("mpegurl"));
+    if method == "GET" && status == reqwest::StatusCode::OK && is_playlist {
+        let base_url = resp.url().to_string();
+        let mut chunks = resp.bytes_stream();
+        let mut content = Vec::new();
+        while let Some(chunk) = chunks.next().await {
+            let Ok(chunk) = chunk else {
+                let _ = stream.write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await;
+                return;
+            };
+            if content.len() + chunk.len() > 2 * 1024 * 1024 {
+                let _ = stream.write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await;
+                return;
+            }
+            content.extend_from_slice(&chunk);
+        }
+        match rewrite_hls_playlist(&content, &base_url, referer.as_deref(), get_server_port()) {
+            Ok(body) => {
+                let headers = format!("HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: {origin}\r\nContent-Type: application/vnd.apple.mpegurl\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n", body.len());
+                if stream.write_all(headers.as_bytes()).await.is_ok() {
+                    let _ = stream.write_all(&body).await;
+                }
+            }
+            Err(error) => {
+                log::warn!("Unable to proxy HLS manifest: {error}");
+                let _ = stream.write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await;
+            }
+        }
+        return;
+    }
     let status_code = status.as_u16();
     let status_line = if status_code == 206 {
         "206 Partial Content"
@@ -961,6 +1023,64 @@ mod tests {
         assert_eq!(parse_range("bytes=500-", 1000), Some((500, 999)));
         assert_eq!(parse_range("bytes=-500", 1000), Some((500, 999)));
         assert_eq!(parse_range("bytes=1500-2000", 1000), None);
+    }
+
+    fn assert_proxy_uri(uri: &str, expected_target: &str, referer: &str) {
+        let proxy = url::Url::parse(uri).unwrap();
+        assert_eq!(proxy.host_str(), Some("127.0.0.1"));
+        assert_eq!(proxy.port(), Some(1421));
+        let params: std::collections::HashMap<_, _> = proxy.query_pairs().into_owned().collect();
+        assert_eq!(params.get("url").map(String::as_str), Some(expected_target));
+        assert_eq!(params.get("referer").map(String::as_str), Some(referer));
+        assert_eq!(params.get("token").map(String::as_str), Some(get_media_token()));
+    }
+
+    #[test]
+    fn hls_proxy_preserves_quality_tracks_and_session_keys() {
+        let input = b"#EXTM3U\n#EXT-X-VERSION:6\n#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID=\"audio\",NAME=\"Original\",URI=\"audio/main.m3u8\"\n#EXT-X-SESSION-KEY:METHOD=AES-128,URI=\"../keys/session.key\"\n#EXT-X-STREAM-INF:BANDWIDTH=4000000,RESOLUTION=1920x1080,AUDIO=\"audio\"\n1080/main.m3u8?token=a%2Fb\n#EXT-X-STREAM-INF:BANDWIDTH=2000000,RESOLUTION=1280x720\nhttps://mirror.example.com/720/main.m3u8\n";
+        let referer = "https://player.example.com/e/123";
+        let output = rewrite_hls_playlist(input, "https://cdn.example.com/hls/master.m3u8", Some(referer), 1421).unwrap();
+        let m3u8_rs::Playlist::MasterPlaylist(master) = m3u8_rs::parse_playlist_res(&output).unwrap() else { panic!("Expected master playlist"); };
+        assert_eq!(master.variants.len(), 2);
+        assert_eq!(master.variants[0].bandwidth, 4_000_000);
+        assert_eq!(master.variants[0].resolution.as_ref().unwrap().height, 1080);
+        assert_eq!(master.variants[1].resolution.as_ref().unwrap().height, 720);
+        assert_proxy_uri(&master.variants[0].uri, "https://cdn.example.com/hls/1080/main.m3u8?token=a%2Fb", referer);
+        assert_proxy_uri(&master.variants[1].uri, "https://mirror.example.com/720/main.m3u8", referer);
+        assert_proxy_uri(master.alternatives[0].uri.as_deref().unwrap(), "https://cdn.example.com/hls/audio/main.m3u8", referer);
+        assert_proxy_uri(master.session_key[0].0.uri.as_deref().unwrap(), "https://cdn.example.com/keys/session.key", referer);
+    }
+
+    #[test]
+    fn hls_proxy_preserves_encrypted_segments_maps_and_byte_ranges() {
+        let input = b"#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-TARGETDURATION:6\n#EXT-X-MEDIA-SEQUENCE:42\n#EXT-X-KEY:METHOD=AES-128,URI=\"key.bin?signature=a%2Fb\",IV=0x0000000000000000000000000000002a\n#EXT-X-MAP:URI=\"init.mp4\",BYTERANGE=\"32@0\"\n#EXTINF:5.5,\n#EXT-X-BYTERANGE:1200@32\nsegment.m4s?token=xyz\n#EXT-X-ENDLIST\n";
+        let referer = "https://player.example.com/e/123";
+        let output = rewrite_hls_playlist(input, "https://cdn.example.com/hls/video.m3u8", Some(referer), 1421).unwrap();
+        let m3u8_rs::Playlist::MediaPlaylist(original) = m3u8_rs::parse_playlist_res(input).unwrap() else { panic!("Expected media playlist"); };
+        let m3u8_rs::Playlist::MediaPlaylist(media) = m3u8_rs::parse_playlist_res(&output).unwrap() else { panic!("Expected media playlist"); };
+        assert_eq!(media.media_sequence, original.media_sequence);
+        assert!(media.end_list);
+        assert_eq!(media.segments.len(), 1);
+        let segment = &media.segments[0];
+        assert_eq!(segment.duration, original.segments[0].duration);
+        assert_eq!(segment.byte_range, original.segments[0].byte_range);
+        assert_eq!(segment.key.as_ref().unwrap().iv, original.segments[0].key.as_ref().unwrap().iv);
+        assert_eq!(segment.map.as_ref().unwrap().byte_range, original.segments[0].map.as_ref().unwrap().byte_range);
+        assert_proxy_uri(&segment.uri, "https://cdn.example.com/hls/segment.m4s?token=xyz", referer);
+        assert_proxy_uri(segment.key.as_ref().unwrap().uri.as_deref().unwrap(), "https://cdn.example.com/hls/key.bin?signature=a%2Fb", referer);
+        assert_proxy_uri(&segment.map.as_ref().unwrap().uri, "https://cdn.example.com/hls/init.mp4", referer);
+    }
+
+    #[test]
+    fn hls_proxy_rejects_html_instead_of_returning_it_as_video() {
+        assert!(rewrite_hls_playlist(b"<html>Access denied</html>", "https://cdn.example.com/video.m3u8", None, 1421).is_err());
+    }
+
+    #[tokio::test]
+    async fn stream_proxy_rejects_local_hosts_and_non_http_targets() {
+        for target in ["http://127.0.0.1/video", "http://localhost/video", "http://[::1]/video", "file:///video.mp4"] {
+            assert!(request_proxy_stream("GET", target, None, None).await.is_err());
+        }
     }
 
     #[test]

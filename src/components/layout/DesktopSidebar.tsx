@@ -33,9 +33,9 @@ function sourceLabel(s: import('@/types').Source): string {
 
 /** Letra/emoji para el icono compacto de fuente en sidebar colapsada */
 function sourceGlyph(s: import('@/types').Source): string {
-  if (s.id === 'jkanime') return 'JK';
+  if (s.id === 'jkanime') return 'AN';
   if (s.id === 'mundodonghua') return 'DH';
-  if (s.id === 'otakustv') return 'OT';
+  if (s.id === 'otakustv') return 'AR';
   return (s.name || s.id).slice(0, 2).toUpperCase();
 }
 

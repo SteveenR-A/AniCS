@@ -63,7 +63,9 @@ export const getSources = async (): Promise<Source[]> => {
     ];
   }
 
-  const builtInOnly = baseSources.filter((s) => !s.id.startsWith('custom_'));
+  const labels: Record<string, string> = { jkanime: 'Anime', mundodonghua: 'Donghua', otakustv: 'Anime (Respaldo)' };
+  const builtInOnly = baseSources.filter((s) => !s.id.startsWith('custom_'))
+    .map(source => ({ ...source, name: labels[source.id] ?? source.name }));
 
   try {
     const rawCustom = await invoke<string | null>('get_setting', { key: 'custom_sources' });
@@ -80,7 +82,7 @@ export const getSources = async (): Promise<Source[]> => {
       }
     }
   } catch {
-    return baseSources;
+    return baseSources.map(source => ({ ...source, name: labels[source.id] ?? source.name }));
   }
 
   return builtInOnly;
@@ -95,7 +97,7 @@ export const getServers = async (episodeUrl: string, source: string): Promise<Vi
 /** Resolver un servidor a URL directa */
 export const resolveStream = (server: VideoServer, source: string): Promise<ResolvedMedia> => {
   const mediaType = server.isDirect ? getDirectMediaType(server.url) : null;
-  if (mediaType) {
+  if (mediaType && mediaType !== 'hls' && !server.referer) {
     return Promise.resolve({
       directUrl: server.url,
       mediaType,

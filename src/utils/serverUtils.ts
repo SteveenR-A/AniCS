@@ -1,5 +1,16 @@
 import type { VideoServer } from '@/types';
 import { FEATURE_FLAGS } from '@/config/features';
+import { getDirectMediaType } from '@/utils/mediaUrls';
+
+export function getServerUnavailableReason(server: VideoServer): string | undefined {
+  try {
+    const url = new URL(server.url);
+    if (!getDirectMediaType(server.url) && (url.hostname === 'bysesukior.com' || url.hostname.endsWith('.bysesukior.com'))) {
+      return 'Este espejo requiere su reproductor web. Abre el enlace o elige otro servidor.';
+    }
+  } catch { /* Invalid URLs are handled by the resolver. */ }
+  return undefined;
+}
 
 /**
  * Dominios y protocolos no compatibles con reproducción nativa directa en el reproductor HTML5
@@ -20,7 +31,6 @@ const UNSUPPORTED_DOMAINS = [
   'doodstream',
   'dooodster',
   'd-s.io',
-  'bysesukior',
 ];
 
 /**
@@ -50,7 +60,7 @@ export function getServerPriority(server: VideoServer): number {
   if (name.includes('streamwish') || url.includes('streamwish') || url.includes('embedwish') || url.includes('sfastwish')) return 84;
   if (name.includes('voe') || url.includes('voe')) return 83;
   if (name.includes('uqload') || url.includes('uqload')) return 82;
-  if (name.includes('filemoon') || url.includes('filemoon') || url.includes('bysekoze')) return 81;
+  if (name.includes('filemoon') || url.includes('filemoon') || url.includes('bysekoze') || url.includes('bysesukior')) return 81;
   if (name.includes('lulustream') || url.includes('luluvdo')) return 80;
   if (server.isDirect || url.endsWith('.mp4')) return 70;
 
@@ -106,21 +116,21 @@ export function maskAndFilterServers(servers: VideoServer[], forceMask?: boolean
     let maskedName = srv.name;
 
     if (rawName.includes('magi')) {
-      maskedName = 'Servidor Dedicado VIP (1080p Ultra HD)';
+      maskedName = 'Servidor Dedicado VIP';
     } else if (rawName.includes('desu')) {
-      maskedName = 'Servidor Alta Velocidad (1080p)';
+      maskedName = 'Servidor Alta Velocidad';
     } else if (rawName.includes('asura') || rawUrl.includes('redirector.php') || rawUrl.includes('.m3u8')) {
-      maskedName = 'Servidor Principal HLS (1080p)';
+      maskedName = 'Servidor Principal HLS';
     } else if (rawName.includes('mediafire')) {
       maskedName = 'Servidor Espejo (MP4 Directo)';
     } else if (rawName.includes('voe')) {
-      maskedName = 'Servidor Rápido (720p HD)';
+      maskedName = 'Servidor Alternativo';
     } else if (rawName.includes('streamwish')) {
       maskedName = 'Servidor Alternativo CDN';
     } else if (rawName.includes('vidhide') || rawName.includes('filemoon') || rawName.includes('fmoon')) {
       maskedName = 'Servidor Respaldo CDN';
     } else if (rawName.includes('descarga') || rawName.includes('direct')) {
-      maskedName = 'Servidor Descarga Directa (1080p)';
+      maskedName = 'Servidor Descarga Directa';
     } else {
       maskedName = `Servidor CDN ${cdnCounter++}`;
     }

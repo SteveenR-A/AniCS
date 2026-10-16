@@ -140,7 +140,7 @@ npm run tauri -- build --bundles deb
 
 La configuración Linux incluye el framework multimedia en AppImage; el [empaquetado multimedia de Tauri](https://v2.tauri.app/distribute/appimage/#multimedia-support-via-gstreamer) requiere Ubuntu para soporte completo. CI construye en Ubuntu 22.04 para mantener una base de glibc compatible. Los binarios compilados localmente en CachyOS pueden requerir una glibc más reciente.
 
-Las actualizaciones en Linux ofrecen descargar AppImage/DEB desde Ajustes y requieren instalación manual. Para una instalación desde código fuente, actualiza el repositorio y repite `npm ci` y `npm run install:linux`. Windows conserva su instalador automático.
+Las actualizaciones en Linux ofrecen descargar AppImage/DEB desde Ajustes y requieren instalación manual. El script `install:linux` instala la app en el menú, pero no configura un actualizador automático: para actualizar esa instalación, actualiza el repositorio y repite `npm ci` y `npm run install:linux`; después, cierra y abre AniCS. Abrir un AppImage descargado no reemplaza el binario instalado por el script. El aviso de inicio solo se muestra en Linux si el release incluye paquetes Linux. Windows conserva su instalador automático.
 
 Con Node.js 26, si las pruebas fallan por `localStorage` del runtime, ejecuta:
 

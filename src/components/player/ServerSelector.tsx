@@ -1,5 +1,6 @@
 import { memo } from 'react';
-import { ChevronDown, Server, Check, Crown } from 'lucide-react';
+import { ChevronDown, Server, Check, Crown, ExternalLink } from 'lucide-react';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import type { PlaybackServer } from '@/hooks/usePlaybackServers';
 import { isVipServer } from '@/utils/serverUtils';
 import './ServerSelector.css';
@@ -68,24 +69,36 @@ export const ServerSelector = memo(function ServerSelector({
 
           {servers.length === 0 && <p>No hay servidores disponibles.</p>}
           {servers.map(server => (
-            <button
-              type="button"
-              key={server.url}
-              className="player-server-option"
-              aria-pressed={selectedUrl === server.url}
-              disabled={isResolving || !!server.unavailableReason}
-              title={server.unavailableReason}
-              onClick={() => {
-                onSelect(server);
-                onOpenChange(false);
-              }}
-            >
-              <span>
-                {server.name}
-                {server.unavailableReason && <small>{server.unavailableReason}</small>}
-              </span>
-              {selectedUrl === server.url && <Check size={16} />}
-            </button>
+            <div className="player-server-row" key={server.url}>
+              <button
+                type="button"
+                className="player-server-option"
+                aria-pressed={selectedUrl === server.url}
+                disabled={isResolving || !!server.unavailableReason}
+                title={server.unavailableReason}
+                onClick={() => {
+                  onSelect(server);
+                  onOpenChange(false);
+                }}
+              >
+                <span>
+                  {server.name}
+                  {server.unavailableReason && <small>{server.unavailableReason}</small>}
+                </span>
+                {selectedUrl === server.url && <Check size={16} />}
+              </button>
+              {server.unavailableReason && (
+                <button
+                  type="button"
+                  className="player-server-external"
+                  aria-label={`Abrir ${server.name} en navegador`}
+                  title={`Abrir ${server.name} en navegador`}
+                  onClick={() => { void openUrl(server.url).catch(console.error); }}
+                >
+                  <ExternalLink size={16} />
+                </button>
+              )}
+            </div>
           ))}
         </div>
       )}

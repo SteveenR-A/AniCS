@@ -1,7 +1,7 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { Sparkles, X, ArrowRight, Download, Clock } from 'lucide-react';
 import type { GitHubRelease } from '@/services/updateService';
-import { CURRENT_VERSION } from '@/services/updateService';
+import { CURRENT_VERSION, getDesktopUpdatePlatform } from '@/services/updateService';
 
 interface UpdateAnnouncementModalProps {
   isOpen: boolean;
@@ -17,6 +17,7 @@ export function UpdateAnnouncementModal({
   onUpdate,
 }: UpdateAnnouncementModalProps) {
   if (!isOpen || !release) return null;
+  const isLinux = getDesktopUpdatePlatform(typeof navigator === 'undefined' ? '' : navigator.userAgent) === 'linux';
 
   return (
     <AnimatePresence>
@@ -155,7 +156,9 @@ export function UpdateAnnouncementModal({
             }}
           >
             <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-              Hay una nueva actualización lista para instalar con mejoras de rendimiento, correcciones y nuevas funciones.
+              {isLinux
+                ? 'Hay una nueva versión. En Linux la actualización es manual. Si instalaste AniCS con el script de Linux, actualiza el código y vuelve a ejecutar npm ci y npm run install:linux; después, cierra y abre AniCS.'
+                : 'Hay una nueva actualización lista para instalar con mejoras de rendimiento, correcciones y nuevas funciones.'}
             </div>
 
             {release.body && (
@@ -239,7 +242,7 @@ export function UpdateAnnouncementModal({
                 boxShadow: 'var(--shadow-glow)',
               }}
             >
-              <Download size={14} /> Actualizar ahora
+              <Download size={14} /> {isLinux ? 'Ver opciones de actualización' : 'Actualizar ahora'}
             </button>
           </div>
         </motion.div>

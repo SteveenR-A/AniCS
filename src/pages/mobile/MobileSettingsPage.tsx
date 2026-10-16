@@ -1060,7 +1060,7 @@ export function MobileSettingsPage() {
                   <Layers size={16} color="#f59e0b" />
                   <div>
                     <div style={{ fontSize: 12, fontWeight: 700, color: 'white' }}>Catálogo Anime (Respaldo)</div>
-                    <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>Servidor espejo OtakusTV de contingencia</div>
+                    <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>Catálogo de respaldo</div>
                   </div>
                 </div>
                 <span style={{ fontSize: 9, fontWeight: 700, color: '#34d399', background: 'rgba(16, 185, 129, 0.15)', padding: '2px 6px', borderRadius: '4px' }}>

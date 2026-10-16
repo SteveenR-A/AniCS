@@ -122,7 +122,7 @@ describe('animeService', () => {
       const result = await animeService.getSources();
 
       expect(invoke).toHaveBeenCalledWith('get_sources');
-      expect(result).toEqual(mockResult);
+      expect(result).toEqual([{ ...mockResult[0], name: 'Anime' }]);
     });
 
     it('appends custom sources from SQLite custom_sources setting', async () => {
@@ -176,12 +176,21 @@ describe('animeService', () => {
 
   describe('resolveStream', () => {
     it.each([
-      ['https://example.com/stream.m3u8?token=abc', 'hls'],
       ['https://example.com/video.mp4', 'mp4'],
     ])('plays a custom direct URL %s without requiring a catalog extractor', async (url, mediaType) => {
       const result = await animeService.resolveStream({ name: 'Personalizado', url, isDirect: true }, 'custom');
       expect(result).toMatchObject({ directUrl: url, mediaType, qualities: [] });
       expect(invoke).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      { name: 'HLS', url: 'https://example.com/stream.m3u8?token=abc', isDirect: true },
+      { name: 'MP4', url: 'https://example.com/video.mp4', isDirect: true, referer: 'https://example.com/embed' },
+    ])('uses the native proxy for direct media requiring transport headers: $name', async server => {
+      const media = { directUrl: 'http://127.0.0.1:1421/proxy_stream?url=encoded', mediaType: server.name === 'HLS' ? 'hls' : 'mp4', qualities: [] };
+      vi.mocked(invoke).mockResolvedValueOnce(media);
+      expect(await animeService.resolveStream(server, 'custom')).toEqual(media);
+      expect(invoke).toHaveBeenCalledWith('resolve_stream', { server, source: 'custom' });
     });
 
     it('calls invoke with correct arguments', async () => {

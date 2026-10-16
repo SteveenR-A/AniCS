@@ -12,6 +12,33 @@ pub mod voe;
 use crate::error::CoreResult;
 use crate::models::{MediaType, ResolvedMedia, VideoServer};
 
+fn direct_media_type(raw_url: &str) -> Option<MediaType> {
+    let url = url::Url::parse(raw_url).ok()?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return None;
+    }
+    let path = url.path().to_ascii_lowercase();
+    if path.ends_with(".m3u8") || path.ends_with(".ts") {
+        Some(MediaType::Hls)
+    } else if path.ends_with(".mp4") || path.ends_with(".mkv") {
+        Some(MediaType::Mp4)
+    } else if path.ends_with(".webm") {
+        Some(MediaType::Unknown)
+    } else {
+        None
+    }
+}
+
+fn direct_media(url: &str, referer: Option<&str>) -> Option<ResolvedMedia> {
+    Some(ResolvedMedia {
+        direct_url: url.to_string(),
+        media_type: direct_media_type(url)?,
+        referer: referer.map(str::to_string),
+        user_agent: None,
+        qualities: vec![],
+    })
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VideoHost {
     Direct,
@@ -47,30 +74,35 @@ impl VideoHost {
 
 /// Detecta el alojamiento de video basándose en la URL o dominios asociados.
 pub fn detect_host(url: &str) -> VideoHost {
-    let lower = url.to_lowercase();
+    let parsed = match url::Url::parse(url) {
+        Ok(parsed) if matches!(parsed.scheme(), "http" | "https") => parsed,
+        _ => return VideoHost::Generic,
+    };
+    let lower = parsed.host_str().unwrap_or_default().to_ascii_lowercase();
+    let path = parsed.path().to_ascii_lowercase();
 
     // 1. Enlace directo
-    if lower.ends_with(".mp4") || lower.ends_with(".mkv") || lower.contains(".m3u8") || lower.contains("redirector.php") {
+    if direct_media_type(url).is_some() || path.ends_with("redirector.php") {
         return VideoHost::Direct;
     }
 
     // 2. Mediafire
-    if lower.contains("mediafire.com") {
+    if lower == "mediafire.com" || lower.ends_with(".mediafire.com") {
         return VideoHost::Mediafire;
     }
 
     // 3. Mp4upload
-    if lower.contains("mp4upload.com") {
+    if lower == "mp4upload.com" || lower.ends_with(".mp4upload.com") {
         return VideoHost::Mp4upload;
     }
 
     // 4. JKAnime Embedded Player (Magi / Desu)
-    if lower.contains("/jkplayer")
-        || lower.contains("desu.php")
-        || lower.contains("/um/")
-        || lower.contains("/umv/")
-        || lower.contains("/c1.php")
-        || lower.contains("/c2.php")
+    if path.contains("/jkplayer")
+        || path.contains("desu.php")
+        || path.contains("/um/")
+        || path.contains("/umv/")
+        || path.contains("/c1.php")
+        || path.contains("/c2.php")
     {
         return VideoHost::JkPlayer;
     }
@@ -133,6 +165,10 @@ pub fn detect_host(url: &str) -> VideoHost {
 
 /// Detecta el host utilizando tanto la URL como el nombre del servidor como pista.
 pub fn detect_host_with_hint(url: &str, hint: Option<&str>) -> VideoHost {
+    let host = detect_host(url);
+    if host != VideoHost::Generic {
+        return host;
+    }
     if let Some(h) = hint {
         let lower = h.to_lowercase();
         if lower.contains("voe") {
@@ -163,28 +199,13 @@ pub fn detect_host_with_hint(url: &str, hint: Option<&str>) -> VideoHost {
             return VideoHost::JkPlayer;
         }
     }
-    detect_host(url)
+    host
 }
 
 /// Resuelve un VideoServer empleando el motor de extractores nativo en Rust.
 pub async fn resolve_server(server: &VideoServer) -> CoreResult<ResolvedMedia> {
-    if server.url.ends_with(".mp4") || server.url.ends_with(".mkv") {
-        return Ok(ResolvedMedia {
-            direct_url: server.url.clone(),
-            media_type: MediaType::Mp4,
-            referer: server.referer.clone(),
-            user_agent: None,
-            qualities: vec![],
-        });
-    }
-    if server.url.contains(".m3u8") {
-        return Ok(ResolvedMedia {
-            direct_url: server.url.clone(),
-            media_type: MediaType::Hls,
-            referer: server.referer.clone(),
-            user_agent: None,
-            qualities: vec![],
-        });
+    if let Some(media) = direct_media(&server.url, server.referer.as_deref()) {
+        return Ok(media);
     }
 
     let host = detect_host_with_hint(&server.url, Some(&server.name));
@@ -206,23 +227,8 @@ pub async fn resolve_server(server: &VideoServer) -> CoreResult<ResolvedMedia> {
 /// Resuelve una URL arbitraria delegando en el extractor correspondiente.
 pub async fn resolve_url(url: &str, referer: Option<&str>) -> CoreResult<ResolvedMedia> {
     // Si ya es directo
-    if url.ends_with(".mp4") || url.ends_with(".mkv") {
-        return Ok(ResolvedMedia {
-            direct_url: url.to_string(),
-            media_type: MediaType::Mp4,
-            referer: referer.map(|s| s.to_string()),
-            user_agent: None,
-            qualities: vec![],
-        });
-    }
-    if url.contains(".m3u8") {
-        return Ok(ResolvedMedia {
-            direct_url: url.to_string(),
-            media_type: MediaType::Hls,
-            referer: referer.map(|s| s.to_string()),
-            user_agent: None,
-            qualities: vec![],
-        });
+    if let Some(media) = direct_media(url, referer) {
+        return Ok(media);
     }
 
     let host = detect_host(url);
@@ -260,6 +266,64 @@ pub fn supported_hosts() -> Vec<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn media_detection_uses_the_path_instead_of_query_or_fragment() {
+        for url in [
+            "https://cdn.example.com/video.MP4?signature=abc#play",
+            "https://cdn.example.com/video.mkv?token=abc",
+            "https://cdn.example.com/master.M3U8?token=abc",
+        ] {
+            assert_eq!(detect_host(url), VideoHost::Direct);
+        }
+        for url in [
+            "https://example.com/embed?next=video.m3u8",
+            "https://example.com/embed#video.mp4",
+            "https://example.com/video.m3u8/preview",
+            "file:///video.mp4",
+        ] {
+            assert!(direct_media_type(url).is_none(), "{url}");
+            assert_eq!(detect_host(url), VideoHost::Generic);
+        }
+    }
+
+    #[test]
+    fn known_hosts_take_precedence_over_display_names() {
+        assert_eq!(detect_host_with_hint("https://filemoon.sx/e/123", Some("VOE")), VideoHost::Filemoon);
+        assert_eq!(detect_host_with_hint("https://cdn.example.com/video.mp4?token=abc", Some("Mediafire")), VideoHost::Direct);
+        assert_eq!(detect_host_with_hint("https://mirror.example.com/e/123", Some("Filemoon")), VideoHost::Filemoon);
+        assert_eq!(detect_host("https://example.com/embed?next=https://voe.sx/e/123"), VideoHost::Generic);
+        assert_eq!(detect_host("https://mediafire.com.example.com/embed"), VideoHost::Generic);
+        assert_eq!(detect_host("https://bysesukior.com/e/123"), VideoHost::Filemoon);
+    }
+
+    #[tokio::test]
+    async fn direct_resolvers_preserve_signed_urls_and_referers() {
+        let referer = Some("https://example.com/episode");
+        for (url, expected_type) in [
+            ("https://cdn.example.com/video.MP4?signature=a%2Fb#play", MediaType::Mp4),
+            ("https://cdn.example.com/video.mkv?token=abc", MediaType::Mp4),
+            ("https://cdn.example.com/master.M3U8?token=abc", MediaType::Hls),
+            ("https://cdn.example.com/video.TS?token=abc", MediaType::Hls),
+            ("https://cdn.example.com/video.webm?token=abc", MediaType::Unknown),
+        ] {
+            let server = VideoServer {
+                name: "Mediafire".to_string(),
+                url: url.to_string(),
+                is_direct: false,
+                referer: referer.map(str::to_string),
+            };
+            for media in [
+                resolve_server(&server).await.unwrap(),
+                resolve_url(url, referer).await.unwrap(),
+                generic::resolve(url, referer).await.unwrap(),
+            ] {
+                assert_eq!(media.direct_url, url);
+                assert_eq!(media.referer.as_deref(), referer);
+                assert_eq!(media.media_type, expected_type);
+            }
+        }
+    }
 
     #[test]
     fn test_detect_all_hosts() {

@@ -8,7 +8,12 @@ const mocks = vi.hoisted(() => ({
   settings: {} as Record<string, string>,
   mobile: false,
   hlsSupported: false,
-  hlsInstances: [] as { emit: (event: string, data?: unknown) => void; recoverMediaError: ReturnType<typeof vi.fn> }[],
+  hlsInstances: [] as {
+    emit: (event: string, data?: unknown) => void;
+    recoverMediaError: ReturnType<typeof vi.fn>;
+    levels: { height: number; bitrate: number }[];
+    nextLevel: number;
+  }[],
   resolve: vi.fn(),
   getServers: vi.fn(),
   getDetails: vi.fn(),
@@ -36,12 +41,15 @@ vi.mock('@/utils/hlsLoader', () => ({ rewriteDeadCdnUrl: (url: string) => url, c
 vi.mock('hls.js', () => {
   class FakeHls {
     static isSupported = () => mocks.hlsSupported;
-    static Events = { LEVEL_LOADED: 'level', FRAG_BUFFERED: 'fragment', MANIFEST_PARSED: 'manifest', ERROR: 'error' };
+    static Events = { LEVEL_LOADED: 'level', LEVEL_SWITCHED: 'switched', FRAG_BUFFERED: 'fragment', MANIFEST_PARSED: 'manifest', ERROR: 'error' };
     static ErrorTypes = { MEDIA_ERROR: 'media', NETWORK_ERROR: 'network' };
     recoverMediaError = vi.fn();
+    levels: { height: number; bitrate: number }[] = [];
+    nextLevel = -1;
     listeners = new Map<string, ((event: string, data: unknown) => void)[]>();
     constructor() { mocks.hlsInstances.push(this); }
     on(event: string, handler: (event: string, data: unknown) => void) { this.listeners.set(event, [...(this.listeners.get(event) || []), handler]); }
+    off(event: string, handler: (event: string, data: unknown) => void) { this.listeners.set(event, (this.listeners.get(event) || []).filter(listener => listener !== handler)); }
     once(event: string, handler: (event: string, data: unknown) => void) { this.on(event, handler); }
     emit(event: string, data?: unknown) { this.listeners.get(event)?.forEach(handler => handler(event, data)); }
     loadSource() {}
@@ -99,6 +107,126 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); });
 
 describe('Player interactions', () => {
+  it('measures actual MP4 resolution and clears it while a new server loads', async () => {
+    const { video } = await mountPlayer();
+    expect(screen.getByLabelText('Resolución actual')).toHaveTextContent('Pendiente');
+    Object.defineProperty(video, 'videoWidth', { configurable: true, value: 1920 });
+    Object.defineProperty(video, 'videoHeight', { configurable: true, value: 1080 });
+    fireEvent.loadedMetadata(video);
+    expect(screen.getByLabelText('Resolución actual')).toHaveTextContent('1080p');
+    expect(screen.queryByRole('combobox', { name: 'Calidad del video' })).not.toBeInTheDocument();
+    act(() => usePlayerStore.setState({ resolvedMedia: { directUrl: second.url, mediaType: 'mp4', qualities: [] } }));
+    expect(screen.getByLabelText('Resolución actual')).toHaveTextContent('Pendiente');
+    Object.defineProperty(video, 'readyState', { configurable: true, value: 4 });
+    Object.defineProperty(video, 'videoWidth', { configurable: true, value: 1280 });
+    Object.defineProperty(video, 'videoHeight', { configurable: true, value: 720 });
+    fireEvent(video, new Event('resize'));
+    expect(screen.getByLabelText('Resolución actual')).toHaveTextContent('720p');
+  });
+
+  it('shows the active HLS resolution separately from the requested quality without seeking or playing', async () => {
+    mocks.hlsSupported = true;
+    usePlayerStore.setState({ resolvedMedia: { directUrl: 'https://example.com/master.m3u8', mediaType: 'hls', qualities: [] } });
+    const { video } = await mountPlayer();
+    const hls = mocks.hlsInstances.at(-1)!;
+    hls.levels = [{ height: 1080, bitrate: 4_000_000 }, { height: 720, bitrate: 2_000_000 }];
+    act(() => { hls.emit('manifest'); hls.emit('switched', { level: 1 }); video.pause(); });
+    video.currentTime = 31.625;
+    play.mockClear();
+    fireEvent.change(screen.getByRole('combobox', { name: 'Calidad del video' }), { target: { value: '0' } });
+    expect(hls.nextLevel).toBe(0);
+    expect(screen.getByLabelText('Resolución actual')).toHaveTextContent('720p');
+    expect(video.currentTime).toBe(31.625);
+    expect(video.paused).toBe(true);
+    expect(play).not.toHaveBeenCalled();
+    act(() => hls.emit('switched', { level: 0 }));
+    expect(screen.getByLabelText('Resolución actual')).toHaveTextContent('1080p');
+    fireEvent.change(screen.getByRole('combobox', { name: 'Calidad del video' }), { target: { value: '-1' } });
+    expect(hls.nextLevel).toBe(-1);
+  });
+
+  it('remembers quality by height across servers in one episode and resets it for the next episode', async () => {
+    mocks.hlsSupported = true;
+    usePlayerStore.setState({ resolvedMedia: { directUrl: 'https://example.com/first.m3u8', mediaType: 'hls', qualities: [] } });
+    await mountPlayer();
+    const firstHls = mocks.hlsInstances.at(-1)!;
+    firstHls.levels = [{ height: 1080, bitrate: 4_000_000 }, { height: 720, bitrate: 2_000_000 }];
+    act(() => firstHls.emit('manifest'));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Calidad del video' }), { target: { value: '0' } });
+    act(() => usePlayerStore.setState({ resolvedMedia: { directUrl: 'https://example.com/second.m3u8', mediaType: 'hls', qualities: [] } }));
+    const secondHls = mocks.hlsInstances.at(-1)!;
+    secondHls.levels = [...firstHls.levels].reverse();
+    act(() => secondHls.emit('manifest'));
+    expect(secondHls.nextLevel).toBe(1);
+    expect(screen.getByRole('combobox', { name: 'Calidad del video' })).toHaveValue('1');
+    act(() => usePlayerStore.setState({ currentEpisode: { number: 2, url: 'https://example.com/episode-2', watched: false }, resolvedMedia: { directUrl: 'https://example.com/third.m3u8', mediaType: 'hls', qualities: [] } }));
+    const thirdHls = mocks.hlsInstances.at(-1)!;
+    thirdHls.levels = firstHls.levels;
+    act(() => thirdHls.emit('manifest'));
+    expect(thirdHls.nextLevel).toBe(-1);
+    expect(screen.getByRole('combobox', { name: 'Calidad del video' })).toHaveValue('-1');
+  });
+
+  it('offers automatic mode if another server lacks the requested resolution', async () => {
+    mocks.hlsSupported = true;
+    usePlayerStore.setState({ resolvedMedia: { directUrl: 'https://example.com/first.m3u8', mediaType: 'hls', qualities: [] } });
+    await mountPlayer();
+    const firstHls = mocks.hlsInstances.at(-1)!;
+    firstHls.levels = [{ height: 1080, bitrate: 4_000_000 }, { height: 720, bitrate: 2_000_000 }];
+    act(() => firstHls.emit('manifest'));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Calidad del video' }), { target: { value: '0' } });
+    act(() => usePlayerStore.setState({ resolvedMedia: { directUrl: 'https://example.com/low.m3u8', mediaType: 'hls', qualities: [] } }));
+    const secondHls = mocks.hlsInstances.at(-1)!;
+    secondHls.levels = [{ height: 480, bitrate: 800_000 }, { height: 360, bitrate: 400_000 }];
+    act(() => secondHls.emit('manifest'));
+    expect(secondHls.nextLevel).toBe(-1);
+    expect(screen.getByRole('combobox', { name: 'Calidad del video' })).toHaveValue('-1');
+  });
+
+  it('forgets the episode quality preference when playback finishes', async () => {
+    mocks.hlsSupported = true;
+    usePlayerStore.setState({ resolvedMedia: { directUrl: 'https://example.com/first.m3u8', mediaType: 'hls', qualities: [] } });
+    const { video } = await mountPlayer();
+    const firstHls = mocks.hlsInstances.at(-1)!;
+    firstHls.levels = [{ height: 1080, bitrate: 4_000_000 }, { height: 720, bitrate: 2_000_000 }];
+    act(() => firstHls.emit('manifest'));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Calidad del video' }), { target: { value: '0' } });
+    fireEvent.ended(video);
+    expect(firstHls.nextLevel).toBe(-1);
+    act(() => usePlayerStore.setState({ resolvedMedia: { directUrl: 'https://example.com/again.m3u8', mediaType: 'hls', qualities: [] } }));
+    const secondHls = mocks.hlsInstances.at(-1)!;
+    secondHls.levels = firstHls.levels;
+    act(() => secondHls.emit('manifest'));
+    expect(secondHls.nextLevel).toBe(-1);
+  });
+
+  it('keeps a web-only Filemoon mirror out of internal playback and exposes its browser action', async () => {
+    usePlayerStore.setState({ servers: [first, { name: 'Filemoon', url: 'https://bysesukior.com/e/123', isDirect: false }] });
+    await mountPlayer();
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Seleccionar servidor de video' })));
+    expect(screen.getByRole('button', { name: /^Filemoon/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Abrir Filemoon en navegador' })).toBeEnabled();
+    expect(mocks.resolve).not.toHaveBeenCalled();
+  });
+
+  it('wraps a proxied TS file as HLS and releases its temporary playlist', async () => {
+    const createObjectURL = vi.fn().mockReturnValue('blob:ts-playlist');
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal('URL', class extends URL {
+      static createObjectURL = createObjectURL;
+      static revokeObjectURL = revokeObjectURL;
+    });
+    try {
+      mocks.hlsSupported = true;
+      usePlayerStore.setState({ resolvedMedia: { directUrl: 'http://127.0.0.1:1421/proxy_stream?url=https%3A%2F%2Fcdn.example.com%2Fvideo.TS%3Ftoken%3Dabc', mediaType: 'hls', qualities: [] } });
+      const { unmount } = await mountPlayer();
+      expect(createObjectURL).toHaveBeenCalledTimes(1);
+      expect(createObjectURL.mock.calls[0][0].type).toBe('application/vnd.apple.mpegurl');
+      unmount();
+      expect(revokeObjectURL).toHaveBeenCalledWith('blob:ts-playlist');
+    } finally { vi.unstubAllGlobals(); }
+  });
+
   it('shows missing Linux plugins even when changing the stream clears playback errors', async () => {
     vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (X11; Linux x86_64)');
     mocks.invoke.mockResolvedValue('Faltan componentes de video de Linux: qtdemux. Instala gst-plugins-good y reinicia AniCS.');
@@ -299,7 +427,7 @@ describe('Player interactions', () => {
     await mountPlayer();
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Seleccionar servidor de video' })); });
     act(() => { vi.advanceTimersByTime(10000); });
-    expect(screen.getByRole('button', { name: /Mi catálogo/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /^Mi catálogo/ })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Pausar video' })).toHaveStyle({ opacity: 1 });
   });
 

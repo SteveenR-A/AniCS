@@ -427,8 +427,8 @@ export function DesktopSearchPage() {
           gap: 2,
         }}>
           {[
-            { id: 'jkanime', label: 'JKAnime' },
-            { id: 'otakustv', label: 'OtakusTV' },
+            { id: 'jkanime', label: 'Anime' },
+            { id: 'otakustv', label: 'Respaldo' },
             { id: 'mundodonghua', label: 'Donghua' },
           ].map((src) => (
             <button

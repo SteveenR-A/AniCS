@@ -15,25 +15,9 @@ static VIDEO_SOURCE_RE: Lazy<Regex> = Lazy::new(|| {
 });
 
 pub async fn resolve(url: &str, referer: Option<&str>) -> CoreResult<ResolvedMedia> {
-    // 1. Si es enlace directo .mp4 o .m3u8
-    if url.ends_with(".mp4") || url.ends_with(".mkv") {
-        return Ok(ResolvedMedia {
-            direct_url: url.to_string(),
-            media_type: MediaType::Mp4,
-            referer: referer.map(|s| s.to_string()),
-            user_agent: None,
-            qualities: vec![],
-        });
-    }
-
-    if url.contains(".m3u8") {
-        return Ok(ResolvedMedia {
-            direct_url: url.to_string(),
-            media_type: MediaType::Hls,
-            referer: referer.map(|s| s.to_string()),
-            user_agent: None,
-            qualities: vec![],
-        });
+    // Preserve signed URLs without fetching the video as HTML.
+    if let Some(media) = super::direct_media(url, referer) {
+        return Ok(media);
     }
 
     // 2. Descargar página para inspección

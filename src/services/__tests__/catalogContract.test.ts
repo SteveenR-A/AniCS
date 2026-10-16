@@ -37,13 +37,13 @@ describe('catalog wire fixtures used by the current frontend', () => {
     expect(invoke).toHaveBeenCalledWith('resolve_stream', { server, source: 'jkanime' });
   });
 
-  it('preserves the existing direct MP4 shortcut and referer', async () => {
+  it('passes direct MP4 media with a required referer to the native transport', async () => {
     const server: VideoServer = fixtures.servers[0].input;
+    const media = { directUrl: server.url, mediaType: 'mp4', referer: server.referer, qualities: [] };
+    vi.mocked(invoke).mockResolvedValueOnce(media);
     const result = await resolveStream(server, 'custom');
-    expect(result).toEqual({
-      directUrl: server.url, mediaType: 'mp4', referer: server.referer, qualities: [],
-    });
-    expect(invoke).not.toHaveBeenCalled();
+    expect(result).toEqual(media);
+    expect(invoke).toHaveBeenCalledWith('resolve_stream', { server, source: 'custom' });
   });
 
   it('passes pagination and empty results through without replacing null totals', async () => {
